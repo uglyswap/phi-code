@@ -170,6 +170,25 @@ export default function smartRouterExtension(pi: ExtensionAPI) {
 
 	// ─── Input Event ─────────────────────────────────────────────────
 
+	/**
+	 * Resolve a model name to an available model.
+	 * If the preferred model exists in the registry, use it.
+	 * Otherwise, fall back to the current model.
+	 */
+	function resolveModel(preferredModel: string, ctx: any): string {
+		// Check if model exists in registry
+		try {
+			const available = ctx.modelRegistry?.getAvailable?.() || [];
+			if (available.some((m: any) => m.id === preferredModel)) {
+				return preferredModel;
+			}
+			// Model not available — use current model
+			return ctx.model?.id || preferredModel;
+		} catch {
+			return ctx.model?.id || preferredModel;
+		}
+	}
+
 	pi.on("input", async (event, ctx) => {
 		if (!config.enabled || event.source === "extension") {
 			return { action: "continue" };
@@ -179,8 +198,10 @@ export default function smartRouterExtension(pi: ExtensionAPI) {
 
 		if (result.category && result.confidence >= 25 && result.route) {
 			if (config.notifyOnRecommendation) {
+				const resolved = resolveModel(result.route.preferredModel, ctx);
+				const suffix = resolved !== result.route.preferredModel ? ` (→ ${resolved})` : "";
 				ctx.ui.notify(
-					`🔀 ${result.route.description} → \`${result.route.preferredModel}\` (${result.confidence}% | ${result.matches.join(", ")})`,
+					`🔀 ${result.route.description} → \`${result.route.preferredModel}\`${suffix} (${result.confidence}% | ${result.matches.join(", ")})`,
 					"info"
 				);
 			}

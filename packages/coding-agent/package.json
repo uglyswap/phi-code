@@ -1,6 +1,6 @@
 {
 	"name": "@phi-code-admin/phi-code",
-	"version": "0.57.4",
+	"version": "0.57.5",
 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
 	"type": "module",
 	"piConfig": {
@@ -25,6 +25,7 @@
 	"files": [
 		"dist",
 		"skills",
+		"agents",
 		"extensions",
 		"README.md",
 		"LICENSE",
