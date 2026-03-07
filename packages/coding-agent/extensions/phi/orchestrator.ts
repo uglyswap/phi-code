@@ -1,27 +1,48 @@
 /**
- * Orchestrator Extension - Project planning and task management
+ * Orchestrator Extension - Project planning and automatic task execution
  *
- * Provides tools for the LLM to create structured project plans:
- * - /plan: Interactive planning command
+ * Provides tools for the LLM to create structured project plans and execute them:
+ * - /plan: Interactive planning command → creates spec.md + todo.md
  * - /plans: List and manage existing plans
+ * - /run: Execute plan tasks using sub-agents (each with own context + model)
  * - orchestrate tool: Create spec.md + todo.md from structured input
  *
- * Architecture:
- * The LLM analyzes the user's request (using prompt-architect skill patterns
- * if available), then calls the orchestrate tool with structured data.
- * The tool writes files to disk. The LLM does the thinking, the tool does the I/O.
- *
- * Integration with Prompt Architect skill:
- * When the prompt-architect skill is loaded, the LLM uses its patterns
- * (ROLE/CONTEXT/TASK/FORMAT/CONSTRAINTS) to structure the spec.
- * The skill-loader extension handles this automatically.
+ * Sub-agent execution:
+ * Each task spawns a separate `phi` CLI process with:
+ * - Its own system prompt (from the agent .md file)
+ * - Its own model (from routing.json or current model)
+ * - Its own context (isolated, no shared history)
+ * - Its own tool access (read, write, edit, bash, etc.)
+ * Results are collected into progress.md and reported to the user.
  */
 
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "phi-code";
 import { writeFile, mkdir, readdir, readFile, access } from "node:fs/promises";
-import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { homedir } from "node:os";
+
+// ─── Types ───────────────────────────────────────────────────────────────
+
+interface TaskResult {
+	taskIndex: number;
+	title: string;
+	agent: string;
+	status: "success" | "error" | "skipped";
+	output: string;
+	durationMs: number;
+}
+
+interface AgentDef {
+	name: string;
+	description: string;
+	tools: string;
+	systemPrompt: string;
+}
+
+// ─── Extension ───────────────────────────────────────────────────────────
 
 export default function orchestratorExtension(pi: ExtensionAPI) {
 	const plansDir = join(process.cwd(), ".phi", "plans");
@@ -32,6 +53,168 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
 	function timestamp(): string {
 		return new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
+	}
+
+	// ─── Agent Discovery ─────────────────────────────────────────────
+
+	/**
+	 * Load agent definitions from .md files.
+	 * Searches: project .phi/agents/ → global ~/.phi/agent/agents/ → bundled agents/
+	 */
+	function loadAgentDefs(): Map<string, AgentDef> {
+		const agents = new Map<string, AgentDef>();
+		const dirs = [
+			join(process.cwd(), ".phi", "agents"),
+			join(homedir(), ".phi", "agent", "agents"),
+			join(__dirname, "..", "..", "..", "agents"),
+		];
+
+		for (const dir of dirs) {
+			if (!existsSync(dir)) continue;
+			try {
+				const files = require("fs").readdirSync(dir) as string[];
+				for (const file of files) {
+					if (!file.endsWith(".md")) continue;
+					const name = file.replace(".md", "");
+					if (agents.has(name)) continue; // Priority: project > global > bundled
+
+					try {
+						const content = readFileSync(join(dir, file), "utf-8");
+						const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+						if (!fmMatch) continue;
+
+						const frontmatter = fmMatch[1];
+						const body = fmMatch[2].trim();
+
+						const desc = frontmatter.match(/description:\s*(.+)/)?.[1] || "";
+						const tools = frontmatter.match(/tools:\s*(.+)/)?.[1] || "";
+
+						agents.set(name, { name, description: desc, tools, systemPrompt: body });
+					} catch { /* skip unparseable files */ }
+				}
+			} catch { /* skip inaccessible dirs */ }
+		}
+
+		return agents;
+	}
+
+	/**
+	 * Resolve the model for an agent type from routing.json.
+	 */
+	function resolveAgentModel(agentType: string): string | null {
+		const routingPath = join(homedir(), ".phi", "agent", "routing.json");
+		try {
+			const config = JSON.parse(readFileSync(routingPath, "utf-8"));
+			// Find the route that maps to this agent
+			for (const [_category, route] of Object.entries(config.routes || {})) {
+				const r = route as any;
+				if (r.agent === agentType) {
+					return r.preferredModel || null;
+				}
+			}
+			return config.default?.model || null;
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * Find the phi CLI binary path.
+	 */
+	function findPhiBinary(): string {
+		// 1. Try the dist/cli.js from our package
+		const bundledCli = join(__dirname, "..", "..", "..", "dist", "cli.js");
+		if (existsSync(bundledCli)) return bundledCli;
+
+		// 2. Try global phi binary
+		try {
+			const which = require("child_process").execSync("which phi 2>/dev/null", { encoding: "utf-8" }).trim();
+			if (which) return which;
+		} catch { /* not in PATH */ }
+
+		// 3. Fallback to npx
+		return "npx";
+	}
+
+	// ─── Sub-Agent Execution ─────────────────────────────────────────
+
+	/**
+	 * Execute a task using a sub-agent process.
+	 * Each agent gets its own isolated phi process with:
+	 * - Its system prompt (from agent .md)
+	 * - Its model (from routing.json)
+	 * - No saved session (--no-save)
+	 * - JSON output mode (--json)
+	 */
+	function executeTask(
+		task: { title: string; description: string; agent?: string; subtasks?: string[] },
+		agentDefs: Map<string, AgentDef>,
+		cwd: string,
+		timeoutMs: number = 300000, // 5 minutes per task
+	): Promise<TaskResult> {
+		return new Promise((resolve) => {
+			const agentType = task.agent || "code";
+			const agentDef = agentDefs.get(agentType);
+			const model = resolveAgentModel(agentType);
+			const phiBin = findPhiBinary();
+			const startTime = Date.now();
+
+			// Build the task prompt
+			let taskPrompt = `Task: ${task.title}\n\n${task.description}`;
+			if (task.subtasks && task.subtasks.length > 0) {
+				taskPrompt += "\n\nSub-tasks:\n" + task.subtasks.map((st, i) => `${i + 1}. ${st}`).join("\n");
+			}
+			taskPrompt += "\n\nComplete this task. Be thorough and precise. Report what you did.";
+
+			// Build the command
+			const args: string[] = [];
+			if (phiBin === "npx") {
+				args.push("@phi-code-admin/phi-code");
+			}
+
+			// Add flags
+			args.push("--print"); // Non-interactive, output only
+			if (model && model !== "default") {
+				args.push("--model", model);
+			}
+			if (agentDef?.systemPrompt) {
+				args.push("--system-prompt", agentDef.systemPrompt);
+			}
+			args.push("--no-save"); // Don't create a session
+			args.push(taskPrompt);
+
+			const cmd = phiBin === "npx" ? "npx" : "node";
+			const cmdArgs = phiBin === "npx" ? args : [phiBin, ...args];
+
+			const child = execFile(cmd, cmdArgs, {
+				cwd,
+				timeout: timeoutMs,
+				maxBuffer: 10 * 1024 * 1024, // 10MB
+				env: { ...process.env },
+			}, (error, stdout, stderr) => {
+				const durationMs = Date.now() - startTime;
+
+				if (error) {
+					resolve({
+						taskIndex: 0,
+						title: task.title,
+						agent: agentType,
+						status: "error",
+						output: `Error: ${error.message}\n${stderr || ""}`.trim(),
+						durationMs,
+					});
+				} else {
+					resolve({
+						taskIndex: 0,
+						title: task.title,
+						agent: agentType,
+						status: "success",
+						output: stdout.trim(),
+						durationMs,
+					});
+				}
+			});
+		});
 	}
 
 	// ─── Orchestrate Tool ────────────────────────────────────────────
@@ -59,7 +242,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 					description: Type.String({ description: "Detailed task description" }),
 					agent: Type.Optional(Type.String({ description: "Recommended agent: explore, plan, code, test, or review" })),
 					priority: Type.Optional(Type.String({ description: "high, medium, or low" })),
-					dependencies: Type.Optional(Type.Array(Type.Number(), { description: "IDs of tasks this depends on" })),
+					dependencies: Type.Optional(Type.Array(Type.Number(), { description: "IDs of tasks this depends on (1-indexed)" })),
 					subtasks: Type.Optional(Type.Array(Type.String(), { description: "Sub-task descriptions" })),
 				}),
 				{ description: "Ordered list of tasks" }
@@ -138,7 +321,8 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 				// ─── Generate todo.md ─────────────────────────────────
 				let todo = `# TODO: ${p.title}\n\n`;
 				todo += `**Created:** ${new Date().toLocaleString()}\n`;
-				todo += `**Tasks:** ${p.tasks.length}\n\n`;
+				todo += `**Tasks:** ${p.tasks.length}\n`;
+				todo += `**Status:** pending\n\n`;
 
 				p.tasks.forEach((t, i) => {
 					const agentTag = t.agent ? ` [${t.agent}]` : "";
@@ -160,7 +344,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 				todo += `- Total: ${p.tasks.length} tasks\n`;
 				todo += `- High priority: ${p.tasks.filter(t => t.priority === "high").length}\n`;
 				todo += `- Agents needed: ${[...new Set(p.tasks.map(t => t.agent || "code"))].join(", ")}\n\n`;
-				todo += `*Update [ ] to [x] when tasks are completed.*\n`;
+				todo += `*Run \`/run\` to execute tasks automatically with sub-agents.*\n`;
 
 				// Write files
 				await writeFile(join(plansDir, specFile), spec, "utf-8");
@@ -171,22 +355,16 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 📋 **${p.title}**
 
 **Files:**
-- \`${specFile}\` — Full specification (goals, requirements, architecture, constraints)
-- \`${todoFile}\` — Actionable task list with priorities and agent assignments
+- \`${specFile}\` — Full specification
+- \`${todoFile}\` — Task list with agent assignments
 
 **Summary:**
-- ${p.goals.length} goals
-- ${p.requirements.length} requirements
+- ${p.goals.length} goals, ${p.requirements.length} requirements
 - ${p.tasks.length} tasks (${p.tasks.filter(t => t.priority === "high").length} high priority)
 - Agents: ${[...new Set(p.tasks.map(t => t.agent || "code"))].join(", ")}
 
-**Next steps:**
-1. Review the spec and todo files
-2. Start with high-priority tasks
-3. Follow dependency order
-4. Mark tasks [x] when done
-
-Files saved in \`.phi/plans/\``;
+**Execute:** Run \`/run\` to launch sub-agents and execute tasks automatically.
+Each agent gets its own context, model, and system prompt.`;
 
 				return {
 					content: [{ type: "text", text: summary }],
@@ -198,6 +376,144 @@ Files saved in \`.phi/plans/\``;
 					details: { error: String(error) },
 				};
 			}
+		},
+	});
+
+	// ─── /run Command — Execute plan with sub-agents ─────────────────
+
+	pi.registerCommand("run", {
+		description: "Execute the latest plan's tasks using sub-agents (each with own context and model)",
+		handler: async (args, ctx) => {
+			// Find the latest todo file
+			if (!existsSync(plansDir)) {
+				ctx.ui.notify("No plans found. Use `/plan <description>` to create one first.", "warning");
+				return;
+			}
+
+			const files = (await readdir(plansDir)).sort().reverse();
+			const todoFiles = files.filter(f => f.startsWith("todo-") && f.endsWith(".md"));
+
+			if (todoFiles.length === 0) {
+				ctx.ui.notify("No todo files found. Use `/plan <description>` first.", "warning");
+				return;
+			}
+
+			const todoFile = todoFiles[0]; // Most recent
+			const todoPath = join(plansDir, todoFile);
+			const todoContent = await readFile(todoPath, "utf-8");
+
+			// Parse tasks from todo.md
+			const taskRegex = /## Task (\d+): (.+?)(?:\s*🔴|\s*🟡|\s*🟢)?\s*(?:\[(\w+)\])?\s*(?:\(after.*?\))?\n\n- \[ \] (.+?)(?:\n(?:  - \[ \] .+?\n)*)?/g;
+			const tasks: Array<{ index: number; title: string; agent: string; description: string; subtasks: string[] }> = [];
+
+			let match;
+			while ((match = taskRegex.exec(todoContent)) !== null) {
+				const subtaskRegex = /  - \[ \] (.+)/g;
+				const subtasks: string[] = [];
+				const taskBlock = todoContent.slice(match.index, taskRegex.lastIndex + 500);
+				let stMatch;
+				while ((stMatch = subtaskRegex.exec(taskBlock)) !== null) {
+					subtasks.push(stMatch[1]);
+				}
+
+				tasks.push({
+					index: parseInt(match[1]),
+					title: match[2].trim(),
+					agent: match[3] || "code",
+					description: match[4].trim(),
+					subtasks,
+				});
+			}
+
+			if (tasks.length === 0) {
+				ctx.ui.notify("Could not parse tasks from the todo file. Check the format.", "error");
+				return;
+			}
+
+			// Load agent definitions
+			const agentDefs = loadAgentDefs();
+			const availableAgents = [...agentDefs.keys()].join(", ") || "none loaded";
+
+			// Confirm execution
+			const confirmed = await ctx.ui.confirm(
+				"Execute Plan",
+				`Found ${tasks.length} tasks in \`${todoFile}\`.\n` +
+				`Available agents: ${availableAgents}\n` +
+				`Each task will spawn an isolated phi process with its own context.\n\n` +
+				`Proceed?`
+			);
+
+			if (!confirmed) {
+				ctx.ui.notify("Execution cancelled.", "info");
+				return;
+			}
+
+			// Create progress file
+			const progressFile = todoFile.replace("todo-", "progress-");
+			const progressPath = join(plansDir, progressFile);
+			let progress = `# Progress: ${todoFile}\n\n`;
+			progress += `**Started:** ${new Date().toLocaleString()}\n`;
+			progress += `**Tasks:** ${tasks.length}\n\n`;
+			await writeFile(progressPath, progress, "utf-8");
+
+			ctx.ui.notify(`🚀 Starting execution of ${tasks.length} tasks...`, "info");
+
+			// Execute tasks in order (respecting dependencies)
+			const results: TaskResult[] = [];
+			const completed = new Set<number>();
+
+			for (const task of tasks) {
+				ctx.ui.notify(`\n⏳ **Task ${task.index}: ${task.title}** [${task.agent}]`, "info");
+
+				// Execute the task
+				const result = await executeTask(
+					{ title: task.title, description: task.description, agent: task.agent, subtasks: task.subtasks },
+					agentDefs,
+					process.cwd(),
+				);
+				result.taskIndex = task.index;
+
+				results.push(result);
+				completed.add(task.index);
+
+				// Report result
+				const icon = result.status === "success" ? "✅" : "❌";
+				const duration = (result.durationMs / 1000).toFixed(1);
+				ctx.ui.notify(
+					`${icon} **Task ${task.index}: ${task.title}** (${duration}s)\n` +
+					`Agent: ${task.agent} | Output: ${result.output.slice(0, 500)}${result.output.length > 500 ? "..." : ""}`,
+					result.status === "success" ? "info" : "error"
+				);
+
+				// Update progress file
+				progress += `## Task ${task.index}: ${task.title}\n\n`;
+				progress += `- **Status:** ${result.status}\n`;
+				progress += `- **Agent:** ${result.agent}\n`;
+				progress += `- **Duration:** ${duration}s\n`;
+				progress += `- **Output:**\n\n\`\`\`\n${result.output.slice(0, 2000)}\n\`\`\`\n\n`;
+				await writeFile(progressPath, progress, "utf-8");
+			}
+
+			// Final summary
+			const succeeded = results.filter(r => r.status === "success").length;
+			const failed = results.filter(r => r.status === "error").length;
+			const totalTime = results.reduce((sum, r) => sum + r.durationMs, 0);
+
+			progress += `---\n\n## Summary\n\n`;
+			progress += `- **Completed:** ${new Date().toLocaleString()}\n`;
+			progress += `- **Succeeded:** ${succeeded}/${results.length}\n`;
+			progress += `- **Failed:** ${failed}\n`;
+			progress += `- **Total time:** ${(totalTime / 1000).toFixed(1)}s\n`;
+			await writeFile(progressPath, progress, "utf-8");
+
+			ctx.ui.notify(
+				`\n🏁 **Execution complete!**\n\n` +
+				`✅ Succeeded: ${succeeded}/${results.length}\n` +
+				`❌ Failed: ${failed}\n` +
+				`⏱️ Total time: ${(totalTime / 1000).toFixed(1)}s\n\n` +
+				`Progress saved to \`${progressFile}\``,
+				failed === 0 ? "info" : "warning"
+			);
 		},
 	});
 
@@ -217,16 +533,15 @@ Files saved in \`.phi/plans/\``;
   /plan Add comprehensive test coverage to the payment module
 
 The LLM will:
-1. Analyze your description using prompt-architect patterns
-2. Identify goals, requirements, architecture decisions
-3. Break down into tasks with agent assignments and priorities
-4. Create spec.md + todo.md files in .phi/plans/
+1. Analyze your description
+2. Break down into tasks with agent assignments
+3. Create spec.md + todo.md files in .phi/plans/
+4. Run \`/run\` to execute with sub-agents
 
-💡 The more detail you provide, the better the plan.`, "info");
+Each sub-agent gets its own isolated context, model, and system prompt.`, "info");
 				return;
 			}
 
-			// Send as user message to trigger the LLM to analyze and call orchestrate
 			ctx.sendUserMessage(
 				`Please analyze this project request and create a structured plan using the orchestrate tool.
 
@@ -237,8 +552,7 @@ Instructions:
 - Break the work into small, actionable tasks (each doable by one agent)
 - Assign the best agent type to each task: explore (analysis), plan (design), code (implementation), test (validation), review (quality)
 - Set priorities (high/medium/low) and dependencies between tasks
-- Define success criteria for the project
-- If the prompt-architect skill is available, use its ROLE/CONTEXT/TASK/FORMAT patterns to structure the specification`
+- Define success criteria for the project`
 			);
 		},
 	});
@@ -246,7 +560,7 @@ Instructions:
 	// ─── /plans Command ──────────────────────────────────────────────
 
 	pi.registerCommand("plans", {
-		description: "List existing project plans",
+		description: "List existing project plans and their execution status",
 		handler: async (_args, ctx) => {
 			try {
 				if (!existsSync(plansDir)) {
@@ -267,6 +581,7 @@ Instructions:
 				for (const specFile of specs) {
 					const ts = specFile.replace("spec-", "").replace(".md", "");
 					const todoFile = `todo-${ts}.md`;
+					const progressFile = `progress-${ts}.md`;
 
 					try {
 						const content = await readFile(join(plansDir, specFile), "utf-8");
@@ -276,9 +591,14 @@ Instructions:
 						const date = ts.replace(/_/g, " ").substring(0, 10);
 
 						const hasTodo = files.includes(todoFile);
+						const hasProgress = files.includes(progressFile);
+						const status = hasProgress ? "🟢 executed" : hasTodo ? "🟡 planned" : "⚪ spec only";
 
-						output += `📋 **${title}** (${date})\n`;
-						output += `   Spec: \`${specFile}\`${hasTodo ? ` | Todo: \`${todoFile}\`` : ""}\n`;
+						output += `📋 **${title}** (${date}) ${status}\n`;
+						output += `   Spec: \`${specFile}\``;
+						if (hasTodo) output += ` | Todo: \`${todoFile}\``;
+						if (hasProgress) output += ` | Progress: \`${progressFile}\``;
+						output += "\n";
 						if (taskCount > 0) output += `   Tasks: ${taskCount}\n`;
 						output += "\n";
 					} catch {
@@ -286,7 +606,7 @@ Instructions:
 					}
 				}
 
-				output += `_Use \`read .phi/plans/<file>\` to view a plan._`;
+				output += `_Commands: \`/plan\` (create), \`/run\` (execute), \`read .phi/plans/<file>\` (view)_`;
 				ctx.ui.notify(output, "info");
 			} catch (error) {
 				ctx.ui.notify(`Failed to list plans: ${error}`, "error");
