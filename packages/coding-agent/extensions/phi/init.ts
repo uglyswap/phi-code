@@ -149,12 +149,12 @@ function getAllAvailableModels(providers: DetectedProvider[]): string[] {
 // ─── Routing Presets ─────────────────────────────────────────────────────
 
 const TASK_ROLES = [
-	{ key: "code", label: "Code Generation", desc: "Writing and modifying code", agent: "code", defaultModel: "qwen3-coder-plus" },
-	{ key: "debug", label: "Debugging", desc: "Finding and fixing bugs", agent: "code", defaultModel: "qwen3-max-2026-01-23" },
-	{ key: "plan", label: "Planning", desc: "Architecture and design", agent: "plan", defaultModel: "qwen3-max-2026-01-23" },
-	{ key: "explore", label: "Exploration", desc: "Code reading and analysis", agent: "explore", defaultModel: "kimi-k2.5" },
-	{ key: "test", label: "Testing", desc: "Running and writing tests", agent: "test", defaultModel: "kimi-k2.5" },
-	{ key: "review", label: "Code Review", desc: "Quality and security review", agent: "review", defaultModel: "qwen3.5-plus" },
+	{ key: "code", label: "Code Generation", desc: "Writing and modifying code", agent: "code", defaultModel: "default" },
+	{ key: "debug", label: "Debugging", desc: "Finding and fixing bugs", agent: "code", defaultModel: "default" },
+	{ key: "plan", label: "Planning", desc: "Architecture and design", agent: "plan", defaultModel: "default" },
+	{ key: "explore", label: "Exploration", desc: "Code reading and analysis", agent: "explore", defaultModel: "default" },
+	{ key: "test", label: "Testing", desc: "Running and writing tests", agent: "test", defaultModel: "default" },
+	{ key: "review", label: "Code Review", desc: "Quality and security review", agent: "review", defaultModel: "default" },
 ] as const;
 
 const KEYWORDS: Record<string, string[]> = {
@@ -455,16 +455,12 @@ _Edit this file to customize Phi Code's behavior for your project._
 	// ─── MODE: Benchmark ─────────────────────────────────────────────
 
 	async function benchmarkMode(availableModels: string[], ctx: any): Promise<Record<string, { preferred: string; fallback: string }>> {
-		ctx.ui.notify("🧪 Benchmark mode: running tests on available models...", "info");
-		ctx.ui.notify("This will test each model with 6 coding tasks. It may take 10-15 minutes.", "info");
-		ctx.ui.notify("💡 Tip: You can run `/benchmark all` separately and use `/benchmark results` to see rankings.\n", "info");
-
 		// Check if benchmark results already exist
 		const benchmarkPath = join(phiDir, "benchmark", "results.json");
 		let existingResults: any = null;
 		try {
 			await access(benchmarkPath);
-			const content = await (await import("node:fs/promises")).readFile(benchmarkPath, "utf-8");
+			const content = await readFile(benchmarkPath, "utf-8");
 			existingResults = JSON.parse(content);
 		} catch {
 			// No existing results
@@ -473,18 +469,28 @@ _Edit this file to customize Phi Code's behavior for your project._
 		if (existingResults?.results?.length > 0) {
 			const useExisting = await ctx.ui.confirm(
 				"Use existing benchmarks?",
-				`Found ${existingResults.results.length} existing benchmark results. Use them instead of re-running?`
+				`Found ${existingResults.results.length} benchmark results from a previous run. Use them?`
 			);
 			if (useExisting) {
+				ctx.ui.notify("📊 Using existing benchmark results for model assignment.\n", "info");
 				return assignFromBenchmark(existingResults.results, availableModels);
 			}
 		}
 
-		// Run benchmarks via the /benchmark command
-		ctx.ui.notify("Starting benchmarks... (this runs in the background, continue with /phi-init after /benchmark completes)\n", "info");
-		ctx.ui.notify("Run: `/benchmark all` then `/phi-init` again with mode=benchmark to use results.\n", "info");
+		// No existing results or user declined — run benchmarks now
+		ctx.ui.notify("🧪 Benchmark mode: launching model tests...", "info");
+		ctx.ui.notify("This tests each model with 6 coding tasks via real API calls.", "info");
+		ctx.ui.notify("⏱️ Estimated time: 2-3 minutes per model.\n", "info");
 
-		// Fall back to auto for now
+		// Trigger benchmark via sendUserMessage — this runs /benchmark all
+		// which saves results to the same results.json path
+		ctx.sendUserMessage("/benchmark all");
+		ctx.ui.notify("⏳ Benchmarks started. Once complete, run `/phi-init` again and select benchmark mode to use the results.\n", "info");
+		ctx.ui.notify("💡 The benchmark runs in the background. You'll see live results in the terminal.\n", "info");
+
+		// Return auto mode assignments as temporary defaults
+		// (will be overwritten when user re-runs /phi-init with benchmark results)
+		ctx.ui.notify("📋 Setting auto-mode defaults while benchmarks run...\n", "info");
 		return autoMode(availableModels, ctx);
 	}
 
