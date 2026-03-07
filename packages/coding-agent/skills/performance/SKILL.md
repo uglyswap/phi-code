@@ -1,3 +1,6 @@
+---
+description: "Performance profiling, optimization, caching, and benchmarking"
+---
 # Performance Optimization Skill
 
 ## When to use

@@ -1,3 +1,6 @@
+---
+description: "Test strategy, unit tests, integration tests, and test automation"
+---
 # Testing Skill
 
 ## When to use

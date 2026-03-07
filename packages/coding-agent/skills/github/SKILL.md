@@ -1,3 +1,6 @@
+---
+description: "GitHub Actions, PRs, issues, releases, and repository management"
+---
 # GitHub Workflow Skill
 
 ## When to use

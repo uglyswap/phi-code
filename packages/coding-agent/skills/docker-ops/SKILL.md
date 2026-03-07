@@ -1,3 +1,6 @@
+---
+description: "Docker containers, Compose, images, and orchestration"
+---
 # Docker Operations Skill
 
 ## When to use
