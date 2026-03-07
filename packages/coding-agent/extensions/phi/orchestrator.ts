@@ -129,12 +129,38 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	}
 
 	function findPhiBinary(): string {
+		// Try the bundled CLI relative to extensions dir
 		const bundledCli = join(__dirname, "..", "..", "..", "dist", "cli.js");
 		if (existsSync(bundledCli)) return bundledCli;
+
+		// Try npm global install paths
+		const npmGlobalPaths = [
+			join(homedir(), "AppData", "Roaming", "npm", "node_modules", "@phi-code-admin", "phi-code", "dist", "cli.js"), // Windows
+			join(homedir(), ".npm-global", "lib", "node_modules", "@phi-code-admin", "phi-code", "dist", "cli.js"), // Linux custom
+			"/usr/local/lib/node_modules/@phi-code-admin/phi-code/dist/cli.js", // Linux/Mac default
+			"/usr/lib/node_modules/@phi-code-admin/phi-code/dist/cli.js", // Some Linux
+		];
+		for (const p of npmGlobalPaths) {
+			if (existsSync(p)) return p;
+		}
+
+		// Try `which phi` (Linux/Mac) or `where phi` (Windows)
 		try {
-			const which = require("child_process").execSync("which phi 2>/dev/null", { encoding: "utf-8" }).trim();
-			if (which) return which;
+			const isWin = process.platform === "win32";
+			const cmd = isWin ? "where" : "which";
+			const result = require("child_process").execSync(`${cmd} phi 2>${isWin ? "NUL" : "/dev/null"}`, { encoding: "utf-8" }).trim();
+			if (result) {
+				const firstLine = result.split("\n")[0].trim();
+				// On Windows, `where phi` returns the .cmd shim; we need the actual JS
+				if (isWin && firstLine.endsWith(".cmd")) {
+					const npmPrefix = require("child_process").execSync("npm prefix -g", { encoding: "utf-8" }).trim();
+					const jsPath = join(npmPrefix, "node_modules", "@phi-code-admin", "phi-code", "dist", "cli.js");
+					if (existsSync(jsPath)) return jsPath;
+				}
+				return firstLine;
+			}
 		} catch { /* not in PATH */ }
+
 		return "npx";
 	}
 
@@ -292,7 +318,9 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		const totalTasks = tasks.length;
 		let wave = 1;
 
+		const phiBinPath = findPhiBinary();
 		notify(`🚀 Executing ${totalTasks} tasks with sub-agents (parallel mode)...`, "info");
+		notify(`📍 Phi binary: \`${phiBinPath}\``, "info");
 
 		// Execute in waves — each wave runs independent tasks in parallel
 		while (completed.size + failed.size < totalTasks) {
