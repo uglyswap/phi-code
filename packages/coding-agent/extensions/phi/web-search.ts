@@ -30,6 +30,19 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 	const BRAVE_API_KEY = process.env.BRAVE_API_KEY;
 	const BRAVE_API_URL = "https://api.search.brave.com/res/v1/web/search";
 
+	// Rate limiting: max 1 request per second (Brave free tier limit)
+	let lastRequestTime = 0;
+	const MIN_INTERVAL_MS = 1100;
+
+	async function rateLimitWait(): Promise<void> {
+		const now = Date.now();
+		const elapsed = now - lastRequestTime;
+		if (elapsed < MIN_INTERVAL_MS) {
+			await new Promise(resolve => setTimeout(resolve, MIN_INTERVAL_MS - elapsed));
+		}
+		lastRequestTime = Date.now();
+	}
+
 	/**
 	 * Search using Brave Search API
 	 */
@@ -49,6 +62,7 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 			spellcheck: "true"
 		});
 
+		await rateLimitWait();
 		const response = await fetch(`${BRAVE_API_URL}?${params}`, {
 			method: "GET",
 			headers: {
@@ -278,7 +292,14 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 	 * Show search configuration on session start
 	 */
 	pi.on("session_start", async (_event, ctx) => {
-		const method = BRAVE_API_KEY ? "Brave Search API" : "DuckDuckGo (fallback)";
-		ctx.ui.notify(`🌐 Web search enabled (${method})`, "info");
+		if (BRAVE_API_KEY) {
+			if (BRAVE_API_KEY.length < 10) {
+				ctx.ui.notify("⚠️ BRAVE_API_KEY looks invalid (too short). Using DuckDuckGo fallback.", "warning");
+			} else {
+				ctx.ui.notify("🌐 Web search enabled (Brave Search API)", "info");
+			}
+		} else {
+			ctx.ui.notify("🌐 Web search enabled (DuckDuckGo fallback — set BRAVE_API_KEY for better results)", "info");
+		}
 	});
 }

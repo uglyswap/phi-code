@@ -27,7 +27,7 @@ export class SkillLoader {
       const matchedKeywords: string[] = [];
       let score = 0;
 
-      // Vérifier les correspondances avec les keywords du skill
+      // Check keyword matches for this skill
       for (const keyword of skill.keywords) {
         if (promptWords.includes(keyword)) {
           matchedKeywords.push(keyword);
@@ -58,7 +58,7 @@ export class SkillLoader {
       }
     }
 
-    // Trier par score décroissant
+    // Sort by score descending
     return matches.sort((a, b) => b.score - a.score);
   }
 
@@ -85,31 +85,31 @@ export class SkillLoader {
    */
   installSkill(source: string, targetDir?: string): boolean {
     try {
-      // Déterminer le répertoire cible (par défaut: globalDir)
+      // Determine target directory (default: globalDir)
       const targetBase = targetDir || this.scanner['config'].globalDir;
       const skillName = path.basename(source);
       const targetPath = path.join(targetBase, skillName);
 
-      // Vérifier que le source existe
+      // Verify source exists
       if (!fs.existsSync(source)) {
         console.error(`Source skill directory not found: ${source}`);
         return false;
       }
 
-      // Vérifier qu'il y a un SKILL.md dans le source
+      // Verify SKILL.md exists in source
       const sourceSkillMd = path.join(source, 'SKILL.md');
       if (!fs.existsSync(sourceSkillMd)) {
         console.error(`No SKILL.md found in source: ${source}`);
         return false;
       }
 
-      // Créer le répertoire cible si nécessaire
+      // Create target directory if needed
       fs.mkdirSync(targetBase, { recursive: true });
 
-      // Copier récursivement
+      // Copy recursively
       this.copyDirectory(source, targetPath);
 
-      // Rafraîchir la liste des skills
+      // Refresh skills list
       this.forceRefresh();
 
       console.log(`Skill '${skillName}' installed successfully to ${targetPath}`);

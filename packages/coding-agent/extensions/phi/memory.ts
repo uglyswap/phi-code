@@ -28,7 +28,7 @@ import { SigmaMemory } from "sigma-memory";
 export default function memoryExtension(pi: ExtensionAPI) {
 	// Initialize sigma-memory
 	const sigmaMemory = new SigmaMemory({
-		// Configuration par défaut, peut être surchargée
+		// Default configuration, can be overridden
 		qmdEnabled: true,
 		qmdCommand: 'qmd'
 	});
@@ -80,7 +80,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				for (const [source, sourceResults] of Object.entries(groupedResults)) {
 					resultText += `## ${source.toUpperCase()} (${sourceResults.length} results)\n\n`;
 					
-					for (const result of sourceResults.slice(0, 5)) { // Limite à 5 résultats par source
+					for (const result of sourceResults.slice(0, 5)) { // Limit to 5 results per source
 						resultText += `**Score: ${result.score.toFixed(2)}** | Type: ${result.type}\n`;
 						
 						if (result.source === 'notes') {

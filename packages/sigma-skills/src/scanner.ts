@@ -15,7 +15,7 @@ export class SkillScanner {
   scan(): Skill[] {
     const skills: Skill[] = [];
     
-    // Scanner les trois répertoires possibles
+    // Scan all three possible directories
     const dirs = [
       this.config.globalDir,
       this.config.projectDir,
@@ -55,7 +55,7 @@ export class SkillScanner {
       const content = fs.readFileSync(skillMdPath, 'utf-8');
       const name = path.basename(dir);
       
-      // Extraire la description du premier paragraphe après le titre
+      // Extract description from first paragraph after title
       const lines = content.split('\n');
       let description = '';
       let foundHeader = false;
@@ -71,7 +71,7 @@ export class SkillScanner {
         }
       }
       
-      // Extraire les mots-clés
+      // Extract keywords
       const keywords = this.extractKeywords(content);
       
       // Lister les fichiers du dossier
@@ -112,7 +112,7 @@ export class SkillScanner {
         this.addWordsToKeywords(line, keywords);
       }
       
-      // Listes à puces (bullet points)
+      // Bullet point lists
       if (line.trim().startsWith('-') || line.trim().startsWith('*')) {
         const bulletText = line.replace(/^\s*[-*]\s*/, '');
         this.addWordsToKeywords(bulletText, keywords);

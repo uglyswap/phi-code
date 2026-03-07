@@ -19,7 +19,7 @@ export class ModelProfiler {
         }
       }
     } catch (error) {
-      // Si le fichier n'existe pas, on utilise les profiles par défaut
+      // If file doesn't exist, use default profiles
       console.warn(`Could not load profiles from ${path}:`, error);
       this.loadDefaultProfiles();
     }
@@ -50,7 +50,7 @@ export class ModelProfiler {
     const candidates = Array.from(this.profiles.values())
       .filter(profile => profile.strengths.includes(category))
       .sort((a, b) => {
-        // Priorité: quality > speed > cost
+        // Priority: quality > speed
         if (a.quality !== b.quality) {
           const qualityOrder = { high: 3, medium: 2, low: 1 };
           return qualityOrder[b.quality] - qualityOrder[a.quality];

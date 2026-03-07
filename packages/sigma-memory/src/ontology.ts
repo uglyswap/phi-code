@@ -77,10 +77,10 @@ export class OntologyManager {
             break;
 
           case 'delete':
-            // Supprime l'entité ou la relation
+            // Delete entity or relation
             this.entities.delete(entry.targetId);
             this.relations.delete(entry.targetId);
-            // Supprime aussi toutes les relations liées à cette entité
+            // Also delete all relations linked to this entity
             for (const [relationId, relation] of this.relations) {
               if (relation.from === entry.targetId || relation.to === entry.targetId) {
                 this.relations.delete(relationId);
@@ -89,7 +89,7 @@ export class OntologyManager {
             break;
         }
       } catch (error) {
-        console.error(`Error parsing JSONL line: ${line}`, error);
+        // Skip malformed JSONL line
       }
     }
 
@@ -135,7 +135,7 @@ export class OntologyManager {
   addRelation(relation: Omit<OntologyRelation, 'id' | 'createdAt'>): string {
     this.loadGraph();
 
-    // Vérifie que les entités source et destination existent
+    // Verify source and destination entities exist
     if (!this.entities.has(relation.from)) {
       throw new Error(`Source entity not found: ${relation.from}`);
     }
@@ -229,7 +229,7 @@ export class OntologyManager {
       throw new Error(`Entity not found: ${id}`);
     }
 
-    // Marque comme supprimé dans le fichier
+    // Mark as deleted in file
     const deleteEntry: OntologyDeleteEntry = {
       kind: 'delete',
       targetId: id,
@@ -238,10 +238,10 @@ export class OntologyManager {
 
     this.appendToFile(deleteEntry);
 
-    // Supprime de la mémoire
+    // Remove from memory
     this.entities.delete(id);
     
-    // Supprime toutes les relations liées
+    // Remove all linked relations
     for (const [relationId, relation] of this.relations) {
       if (relation.from === id || relation.to === id) {
         this.relations.delete(relationId);
@@ -283,7 +283,7 @@ export class OntologyManager {
           const targetId = relation.to;
           
           if (targetId === toId) {
-            // Trouvé !
+            // Found!
             return [...path, { entity: this.entities.get(targetId)!, relation }];
           }
 
@@ -301,7 +301,7 @@ export class OntologyManager {
           const targetId = relation.from;
           
           if (targetId === toId) {
-            // Trouvé !
+            // Found!
             return [...path, { entity: this.entities.get(targetId)!, relation }];
           }
 
@@ -316,7 +316,7 @@ export class OntologyManager {
       }
     }
 
-    return null; // Aucun chemin trouvé
+    return null; // No path found
   }
 
   /**
