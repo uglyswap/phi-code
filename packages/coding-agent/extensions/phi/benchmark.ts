@@ -351,9 +351,10 @@ function getProviderConfigs(): ProviderConfig[] {
 	];
 }
 
-function getAvailableModels(): Array<{ id: string; provider: string; baseUrl: string; apiKey: string }> {
+async function getAvailableModels(): Promise<Array<{ id: string; provider: string; baseUrl: string; apiKey: string }>> {
 	const models: Array<{ id: string; provider: string; baseUrl: string; apiKey: string }> = [];
 
+	// 1. Cloud providers via env vars
 	for (const provider of getProviderConfigs()) {
 		const apiKey = process.env[provider.envVar];
 		if (!apiKey) continue;
@@ -366,6 +367,60 @@ function getAvailableModels(): Array<{ id: string; provider: string; baseUrl: st
 				apiKey,
 			});
 		}
+	}
+
+	// 2. Local providers (LM Studio, Ollama) — auto-detect via models.json
+	const { join } = await import("node:path");
+	const { homedir } = await import("node:os");
+	const { readFileSync, existsSync } = await import("node:fs");
+
+	const modelsJsonPath = join(homedir(), ".phi", "agent", "models.json");
+	if (existsSync(modelsJsonPath)) {
+		try {
+			const config = JSON.parse(readFileSync(modelsJsonPath, "utf-8"));
+			if (config.providers) {
+				for (const [id, providerConfig] of Object.entries<any>(config.providers)) {
+					const baseUrl = providerConfig.baseUrl || "";
+					const apiKey = providerConfig.apiKey || "local";
+					if (providerConfig.models?.length > 0) {
+						for (const m of providerConfig.models) {
+							const modelId = typeof m === "string" ? m : m.id;
+							// Skip if already added from env vars
+							if (!models.some(existing => existing.id === modelId && existing.baseUrl === baseUrl)) {
+								models.push({ id: modelId, provider: id, baseUrl, apiKey });
+							}
+						}
+					}
+				}
+			}
+		} catch { /* ignore parse errors */ }
+	}
+
+	// 3. Try to detect LM Studio (port 1234) and Ollama (port 11434) directly
+	for (const local of [
+		{ name: "lm-studio", port: 1234, baseUrl: "http://localhost:1234/v1" },
+		{ name: "ollama", port: 11434, baseUrl: "http://localhost:11434/v1" },
+	]) {
+		// Skip if already discovered via models.json
+		if (models.some(m => m.baseUrl === local.baseUrl)) continue;
+
+		try {
+			const controller = new AbortController();
+			const timeout = setTimeout(() => controller.abort(), 2000);
+			const resp = await fetch(`${local.baseUrl}/models`, { signal: controller.signal });
+			clearTimeout(timeout);
+
+			if (resp.ok) {
+				const data = await resp.json() as any;
+				const modelList = data?.data || [];
+				for (const m of modelList) {
+					const modelId = m.id || m.name;
+					if (modelId && !models.some(existing => existing.id === modelId)) {
+						models.push({ id: modelId, provider: local.name, baseUrl: local.baseUrl, apiKey: "local" });
+					}
+				}
+			}
+		} catch { /* not running */ }
 	}
 
 	return models;
@@ -626,7 +681,7 @@ Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`, "info");
 			}
 
 			// Get available models (validates API keys are non-empty and reasonable length)
-			const available = getAvailableModels();
+			const available = await getAvailableModels();
 			if (available.length === 0) {
 				const providers = getProviderConfigs();
 				const hint = providers.map(p => `  ${p.envVar}: ${process.env[p.envVar] ? "set but no models configured" : "not set"}`).join("\n");
