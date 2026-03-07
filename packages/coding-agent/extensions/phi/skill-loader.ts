@@ -10,7 +10,7 @@
  * - Automatic skill discovery at startup
  * - Keyword-based skill detection and loading
  * - /skills command to list available skills
- * - Contextual skill injection via pi.sendHookMessage
+ * - Contextual skill injection via ui notifications
  *
  * Usage:
  * 1. Copy to packages/coding-agent/extensions/phi/skill-loader.ts
@@ -241,10 +241,9 @@ ${skill.content}
 ---
 This skill was automatically loaded based on your request. Use this knowledge to assist with the task.`;
 
-				await pi.sendHookMessage({
-					role: "system",
-					content: skillMessage,
-				}, { source: "extension" });
+				// Notify the model about the relevant skill content
+				// The model can then use the `read` tool to load the full SKILL.md
+				ctx.ui.notify(`📚 Relevant skill loaded: **${skill.name}**\n${skill.description}\nUse \`read ${skill.path}\` for full content.`, "info");
 			}
 
 			// Notify user which skills were loaded
