@@ -1,178 +1,114 @@
 /**
  * Memory Extension - Persistent memory management for Phi Code
  *
- * Provides persistent memory capabilities through markdown files stored in 
- * ~/.phi/memory/ and .phi/memory/ directories. Automatically loads AGENTS.md 
- * on session start if available.
+ * Now powered by sigma-memory package which provides:
+ * - NotesManager: Markdown files management
+ * - OntologyManager: Knowledge graph with entities and relations  
+ * - QMDManager: Vector search (if QMD is available)
  *
  * Features:
- * - memory_search: Semantic (full-text) search in memory files
+ * - memory_search: Unified search across notes, ontology, and QMD
  * - memory_write: Write content to memory files
  * - memory_read: Read specific memory files or list available ones
+ * - memory_status: Get status of all memory subsystems
  * - Auto-load AGENTS.md on session start
  *
  * Usage:
- * 1. Copy to packages/coding-agent/extensions/phi/memory.ts
- * 2. Memory files are automatically created in ~/.phi/memory/
+ * 1. Ensure sigma-memory package is built: cd packages/sigma-memory && npm run build
+ * 2. Memory files are stored in ~/.phi/memory/
  */
 
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI, ExtensionContext } from "phi-code";
-import { readdir, readFile, writeFile, mkdir, access } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { homedir } from "node:os";
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
-
-const execAsync = promisify(exec);
+import { access } from "node:fs/promises";
+import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { SigmaMemory } from "sigma-memory";
 
 export default function memoryExtension(pi: ExtensionAPI) {
-	// Memory directory paths
-	const globalMemoryDir = join(homedir(), ".phi", "memory");
-	const localMemoryDir = join(process.cwd(), ".phi", "memory");
+	// Initialize sigma-memory
+	const sigmaMemory = new SigmaMemory({
+		// Configuration par défaut, peut être surchargée
+		qmdEnabled: true,
+		qmdCommand: 'qmd'
+	});
+
+	// Initialize memory directories
+	sigmaMemory.init().catch(error => {
+		console.warn("Failed to initialize sigma-memory:", error);
+	});
 
 	/**
-	 * Ensure memory directories exist
-	 */
-	async function ensureMemoryDirectories() {
-		try {
-			await mkdir(globalMemoryDir, { recursive: true });
-			await mkdir(localMemoryDir, { recursive: true });
-		} catch (error) {
-			console.warn("Failed to create memory directories:", error);
-		}
-	}
-
-	/**
-	 * Get all memory directories that exist
-	 */
-	async function getMemoryDirectories(): Promise<string[]> {
-		const dirs: string[] = [];
-		
-		try {
-			await access(globalMemoryDir);
-			dirs.push(globalMemoryDir);
-		} catch {}
-
-		try {
-			await access(localMemoryDir);
-			dirs.push(localMemoryDir);
-		} catch {}
-
-		return dirs;
-	}
-
-	/**
-	 * Get all .md files from memory directories
-	 */
-	async function getMemoryFiles(): Promise<string[]> {
-		const dirs = await getMemoryDirectories();
-		const files: string[] = [];
-
-		for (const dir of dirs) {
-			try {
-				const dirFiles = await readdir(dir);
-				const mdFiles = dirFiles
-					.filter(file => file.endsWith(".md"))
-					.map(file => join(dir, file));
-				files.push(...mdFiles);
-			} catch (error) {
-				console.warn(`Failed to read directory ${dir}:`, error);
-			}
-		}
-
-		return files;
-	}
-
-	/**
-	 * Generate today's filename
-	 */
-	function getTodayFilename(): string {
-		const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-		return `${today}.md`;
-	}
-
-	/**
-	 * Memory search tool - Full-text search in memory files
+	 * Memory search tool - Unified search across notes, ontology, and QMD
 	 */
 	pi.registerTool({
 		name: "memory_search",
 		label: "Memory Search",
-		description: "Search for content in memory files using full-text search",
+		description: "Search for content in memory using unified search (notes + ontology + QMD vector search)",
 		parameters: Type.Object({
-			query: Type.String({ description: "Search query to find in memory files" }),
+			query: Type.String({ description: "Search query to find in memory" }),
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			const { query } = params as { query: string };
 			
 			try {
-				const memoryFiles = await getMemoryFiles();
+				const results = await sigmaMemory.search(query);
 				
-				if (memoryFiles.length === 0) {
-					return {
-						content: [{ type: "text", text: "No memory files found. Use memory_write to create some!" }],
-						details: { found: false, filesSearched: 0 }
-					};
-				}
-
-				const results: Array<{ file: string; matches: string[] }> = [];
-
-				// Simple grep-like search in each file
-				for (const filePath of memoryFiles) {
-					try {
-						const content = await readFile(filePath, 'utf-8');
-						const lines = content.split('\n');
-						const matches: string[] = [];
-
-						lines.forEach((line, index) => {
-							if (line.toLowerCase().includes(query.toLowerCase())) {
-								// Include context (line before and after if available)
-								const contextLines: string[] = [];
-								if (index > 0) contextLines.push(`${index}: ${lines[index - 1]}`);
-								contextLines.push(`${index + 1}: **${line}**`);
-								if (index < lines.length - 1) contextLines.push(`${index + 2}: ${lines[index + 1]}`);
-								
-								matches.push(contextLines.join('\n'));
-							}
-						});
-
-						if (matches.length > 0) {
-							results.push({ file: filePath, matches });
-						}
-					} catch (error) {
-						console.warn(`Failed to search in file ${filePath}:`, error);
-					}
-				}
-
 				if (results.length === 0) {
 					return {
-						content: [{ type: "text", text: `No matches found for "${query}" in ${memoryFiles.length} memory files.` }],
-						details: { found: false, filesSearched: memoryFiles.length, query }
+						content: [{ type: "text", text: `No results found for "${query}". Use memory_write to create some memory files!` }],
+						details: { found: false, query, resultCount: 0 }
 					};
 				}
 
-				// Format results
-				let resultText = `Found ${results.length} files with matches for "${query}":\n\n`;
+				// Format results by source
+				let resultText = `Found ${results.length} results for "${query}":\n\n`;
 				
-				for (const result of results) {
-					const fileName = result.file.split('/').pop() || result.file;
-					resultText += `**${fileName}:**\n`;
-					result.matches.forEach((match, index) => {
-						resultText += `\nMatch ${index + 1}:\n${match}\n`;
-					});
-					resultText += '\n---\n\n';
+				const groupedResults = results.reduce((groups, result) => {
+					if (!groups[result.source]) groups[result.source] = [];
+					groups[result.source].push(result);
+					return groups;
+				}, {} as Record<string, typeof results>);
+
+				for (const [source, sourceResults] of Object.entries(groupedResults)) {
+					resultText += `## ${source.toUpperCase()} (${sourceResults.length} results)\n\n`;
+					
+					for (const result of sourceResults.slice(0, 5)) { // Limite à 5 résultats par source
+						resultText += `**Score: ${result.score.toFixed(2)}** | Type: ${result.type}\n`;
+						
+						if (result.source === 'notes') {
+							const data = result.data;
+							resultText += `File: ${data.file} (line ${data.line})\n`;
+							resultText += `> ${data.content}\n\n`;
+						} else if (result.source === 'ontology') {
+							const data = result.data;
+							if (result.type === 'entity') {
+								resultText += `Entity: ${data.name} (${data.type})\n`;
+								resultText += `Properties: ${JSON.stringify(data.properties)}\n\n`;
+							} else if (result.type === 'relation') {
+								resultText += `Relation: ${data.type} (${data.from} → ${data.to})\n`;
+								resultText += `Properties: ${JSON.stringify(data.properties)}\n\n`;
+							}
+						} else if (result.source === 'qmd') {
+							const data = result.data;
+							resultText += `File: ${data.file} (line ${data.line})\n`;
+							resultText += `> ${data.content}\n\n`;
+						}
+					}
+					
+					resultText += '---\n\n';
 				}
 
 				return {
 					content: [{ type: "text", text: resultText }],
-					details: { found: true, matchCount: results.length, filesSearched: memoryFiles.length, query }
+					details: { found: true, query, resultCount: results.length, sources: Object.keys(groupedResults) }
 				};
 
 			} catch (error) {
 				return {
 					content: [{ type: "text", text: `Memory search failed: ${error}` }],
-					details: { error: String(error), found: false }
+					details: { error: String(error), found: false, query }
 				};
 			}
 		},
@@ -194,30 +130,14 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			const { content, file } = params as { content: string; file?: string };
 
 			try {
-				await ensureMemoryDirectories();
+				// Use notes manager to write
+				sigmaMemory.notes.write(content, file);
 
-				// Use provided filename or default to today's date
-				const filename = file || getTodayFilename();
-				const filePath = join(globalMemoryDir, filename);
-
-				// Add timestamp to content
-				const timestamp = new Date().toISOString();
-				const timestampedContent = `<!-- Written at ${timestamp} -->\n\n${content}\n`;
-
-				// Check if file exists and append, otherwise create new
-				let finalContent = timestampedContent;
-				try {
-					const existingContent = await readFile(filePath, 'utf-8');
-					finalContent = existingContent + '\n\n' + timestampedContent;
-				} catch {
-					// File doesn't exist, use timestamped content as-is
-				}
-
-				await writeFile(filePath, finalContent, 'utf-8');
-
+				const filename = file || new Date().toISOString().split('T')[0] + '.md';
+				
 				return {
 					content: [{ type: "text", text: `Content written to ${filename}` }],
-					details: { filePath, filename, contentLength: content.length }
+					details: { filename, contentLength: content.length }
 				};
 
 			} catch (error) {
@@ -246,51 +166,27 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			try {
 				if (!file) {
 					// List all available memory files
-					const memoryFiles = await getMemoryFiles();
+					const files = sigmaMemory.notes.list();
 					
-					if (memoryFiles.length === 0) {
+					if (files.length === 0) {
 						return {
 							content: [{ type: "text", text: "No memory files found." }],
 							details: { action: "list", fileCount: 0 }
 						};
 					}
 
-					const fileList = memoryFiles
-						.map(filePath => {
-							const fileName = filePath.split('/').pop() || filePath;
-							const dir = filePath.includes('.phi/memory') ? 'local' : 'global';
-							return `- ${fileName} (${dir})`;
-						})
+					const fileList = files
+						.map(f => `- ${f.name} (${(f.size / 1024).toFixed(1)} KB, ${new Date(f.date).toLocaleDateString()})`)
 						.join('\n');
 
 					return {
-						content: [{ type: "text", text: `Available memory files (${memoryFiles.length}):\n\n${fileList}` }],
-						details: { action: "list", fileCount: memoryFiles.length }
+						content: [{ type: "text", text: `Available memory files (${files.length}):\n\n${fileList}` }],
+						details: { action: "list", fileCount: files.length }
 					};
 				}
 
 				// Read specific file
-				const dirs = await getMemoryDirectories();
-				let filePath: string | null = null;
-
-				// Try to find file in any memory directory
-				for (const dir of dirs) {
-					const candidatePath = join(dir, file);
-					try {
-						await access(candidatePath);
-						filePath = candidatePath;
-						break;
-					} catch {}
-				}
-
-				if (!filePath) {
-					return {
-						content: [{ type: "text", text: `Memory file "${file}" not found in any memory directory.` }],
-						details: { action: "read", found: false, filename: file }
-					};
-				}
-
-				const content = await readFile(filePath, 'utf-8');
+				const content = sigmaMemory.notes.read(file);
 
 				return {
 					content: [{ type: "text", text: `**${file}:**\n\n${content}` }],
@@ -300,7 +196,58 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			} catch (error) {
 				return {
 					content: [{ type: "text", text: `Failed to read memory: ${error}` }],
-					details: { error: String(error), action: "read" }
+					details: { error: String(error), action: "read", filename: file }
+				};
+			}
+		},
+	});
+
+	/**
+	 * Memory status tool - Get status of all memory subsystems
+	 */
+	pi.registerTool({
+		name: "memory_status",
+		label: "Memory Status",
+		description: "Get status of all memory subsystems (notes, ontology, QMD)",
+		parameters: Type.Object({}),
+
+		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
+			try {
+				const status = await sigmaMemory.status();
+				
+				let statusText = "# Memory Status\n\n";
+				
+				// Notes status
+				statusText += `## Notes\n`;
+				statusText += `- Files: ${status.notes.count}\n`;
+				statusText += `- Total size: ${(status.notes.totalSize / 1024).toFixed(1)} KB\n`;
+				statusText += `- Last modified: ${status.notes.lastModified ? new Date(status.notes.lastModified).toLocaleString() : 'Never'}\n\n`;
+				
+				// Ontology status
+				statusText += `## Ontology\n`;
+				statusText += `- Entities: ${status.ontology.entities}\n`;
+				statusText += `- Relations: ${status.ontology.relations}\n`;
+				statusText += `- Entities by type: ${JSON.stringify(status.ontology.entitiesByType)}\n`;
+				statusText += `- Relations by type: ${JSON.stringify(status.ontology.relationsByType)}\n\n`;
+				
+				// QMD status
+				statusText += `## QMD Vector Search\n`;
+				statusText += `- Available: ${status.qmd.available ? 'Yes' : 'No'}\n`;
+				if (status.qmd.available && status.qmd.status) {
+					statusText += `- Files indexed: ${status.qmd.status.files}\n`;
+					statusText += `- Chunks: ${status.qmd.status.chunks}\n`;
+					statusText += `- Last update: ${status.qmd.status.lastUpdate || 'Never'}\n`;
+				}
+
+				return {
+					content: [{ type: "text", text: statusText }],
+					details: { status }
+				};
+
+			} catch (error) {
+				return {
+					content: [{ type: "text", text: `Failed to get memory status: ${error}` }],
+					details: { error: String(error) }
 				};
 			}
 		},
@@ -311,14 +258,12 @@ export default function memoryExtension(pi: ExtensionAPI) {
 	 */
 	pi.on("session_start", async (_event, ctx) => {
 		try {
-			await ensureMemoryDirectories();
-
 			// Try to find AGENTS.md in current directory
 			const agentsPath = join(process.cwd(), "AGENTS.md");
 			
 			try {
 				await access(agentsPath);
-				const agentsContent = await readFile(agentsPath, 'utf-8');
+				const agentsContent = readFileSync(agentsPath, 'utf-8');
 				
 				// Send the content as a system message to provide context
 				ctx.ui.notify("Loaded AGENTS.md context for this session", "info");

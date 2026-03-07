@@ -43,6 +43,7 @@
 		"phi-code-agent": "^0.56.3",
 		"phi-code-ai": "^0.56.3",
 		"phi-code-tui": "^0.56.3",
+		"sigma-memory": "file:../sigma-memory",
 		"@silvia-odwyer/photon-node": "^0.3.4",
 		"chalk": "^5.5.0",
 		"cli-highlight": "^2.1.11",
