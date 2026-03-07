@@ -91,8 +91,8 @@ export class SmartRouter {
           keywords: ['code', 'implement', 'write', 'create', 'build', 'développer', 'coder', 'programmer', 'function', 'class', 'method']
         },
         debug: {
-          preferredModel: 'qwen3.5-plus',
-          fallback: 'qwen3-max-2026-01-23',
+          preferredModel: 'qwen3-max-2026-01-23',
+          fallback: 'qwen3.5-plus',
           agent: null,
           keywords: ['debug', 'fix', 'error', 'bug', 'broken', 'issue', 'problem', 'repair', 'correct', 'erreur', 'problème', 'réparer']
         },
