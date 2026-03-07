@@ -61,7 +61,7 @@
 
 ### Install Globally
 ```bash
-npm install -g phi-code
+npm install -g @phi-code-admin/phi-code
 ```
 
 ### Initialize Your Project
@@ -295,10 +295,10 @@ Original copyright: © 2025 Mario Zechner
 
 ```bash
 # Install globally
-npm install -g phi-code
+npm install -g @phi-code-admin/phi-code
 
 # Or run directly
-npx phi-code
+npx @phi-code-admin/phi-code
 
 # Initialize your first project
 phi init
