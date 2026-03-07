@@ -24,7 +24,7 @@ import type { ExtensionAPI } from "phi-code";
 import { writeFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
-import { execFile } from "node:child_process";
+// execFile removed — tasks now execute in-session, no subprocess
 import { homedir } from "node:os";
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -165,107 +165,55 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		return "phi";
 	}
 
-	// ─── Sub-Agent Execution ─────────────────────────────────────────
+	// ─── Task Execution (in-session, no subprocess) ─────────────────
 
-	function executeTask(
+	/**
+	 * Execute a task by sending it as a user message to the current session.
+	 * The LLM handles it directly — no subprocess spawning, no cold boot.
+	 * Much faster and more reliable than spawning phi --print processes.
+	 */
+	function executeTaskInSession(
 		task: TaskDef,
-		agentDefs: Map<string, AgentDef>,
-		cwd: string,
 		sharedContext: {
 			projectTitle: string;
 			projectDescription: string;
 			specSummary: string;
 			completedTasks: Array<{ index: number; title: string; agent: string; output: string }>;
 		},
-		timeoutMs: number = 300000,
-	): Promise<TaskResult> {
-		return new Promise((resolve) => {
-			const agentType = task.agent || "code";
-			const agentDef = agentDefs.get(agentType);
-			const model = resolveAgentModel(agentType);
-			const phiBin = findPhiBinary();
-			const startTime = Date.now();
+	): { taskPrompt: string } {
+		const agentType = task.agent || "code";
 
-			// Build prompt with shared context
-			let taskPrompt = "";
+		// Build prompt with shared context
+		let taskPrompt = `## 🔧 Task: ${task.title} [${agentType}]\n\n`;
 
-			// Inject shared project context (lightweight, always included)
-			taskPrompt += `# Project Context\n\n`;
-			taskPrompt += `**Project:** ${sharedContext.projectTitle}\n`;
-			taskPrompt += `**Description:** ${sharedContext.projectDescription}\n\n`;
+		taskPrompt += `**Project:** ${sharedContext.projectTitle}\n\n`;
 
-			if (sharedContext.specSummary) {
-				taskPrompt += `## Specification Summary\n${sharedContext.specSummary}\n\n`;
-			}
+		if (sharedContext.specSummary) {
+			taskPrompt += `**Spec:** ${sharedContext.specSummary}\n\n`;
+		}
 
-			// Inject results from dependency tasks (only the ones this task depends on)
-			const deps = task.dependencies || [];
-			if (deps.length > 0) {
-				const depResults = sharedContext.completedTasks.filter(ct => deps.includes(ct.index));
-				if (depResults.length > 0) {
-					taskPrompt += `## Previous Task Results (your dependencies)\n\n`;
-					for (const dep of depResults) {
-						const truncatedOutput = dep.output.length > 1500 ? dep.output.slice(0, 1500) + "\n...(truncated)" : dep.output;
-						taskPrompt += `### Task ${dep.index}: ${dep.title} [${dep.agent}]\n\`\`\`\n${truncatedOutput}\n\`\`\`\n\n`;
-					}
+		// Inject results from dependency tasks
+		const deps = task.dependencies || [];
+		if (deps.length > 0) {
+			const depResults = sharedContext.completedTasks.filter(ct => deps.includes(ct.index));
+			if (depResults.length > 0) {
+				taskPrompt += `**Previous results:**\n`;
+				for (const dep of depResults) {
+					const truncated = dep.output.length > 500 ? dep.output.slice(0, 500) + "..." : dep.output;
+					taskPrompt += `- Task ${dep.index} (${dep.title}): ${truncated}\n`;
 				}
+				taskPrompt += "\n";
 			}
+		}
 
-			// The actual task
-			taskPrompt += `---\n\n# Your Task\n\n**${task.title}**\n\n${task.description}`;
-			if (task.subtasks && task.subtasks.length > 0) {
-				taskPrompt += "\n\n## Sub-tasks\n" + task.subtasks.map((st, i) => `${i + 1}. ${st}`).join("\n");
-			}
-			taskPrompt += `\n\n---\n\n## Instructions\n`;
-			taskPrompt += `- You are an isolated agent with your own context. Work independently.\n`;
-			taskPrompt += `- Use the project context and dependency results above to inform your work.\n`;
-			taskPrompt += `- Follow the output format defined in your system prompt.\n`;
-			taskPrompt += `- Be precise. Reference specific file paths and line numbers.\n`;
-			taskPrompt += `- Report exactly what you did, what worked, and what didn't.\n`;
+		// The actual task
+		taskPrompt += `### What to do\n\n${task.description}\n`;
+		if (task.subtasks && task.subtasks.length > 0) {
+			taskPrompt += "\n**Sub-tasks:**\n" + task.subtasks.map((st, i) => `${i + 1}. ${st}`).join("\n") + "\n";
+		}
+		taskPrompt += `\n**Instructions:** Execute this task completely. Create/edit all necessary files. Report what you did.\n`;
 
-			const args: string[] = [];
-
-			args.push("--print");
-			if (model && model !== "default") args.push("--model", model);
-			if (agentDef?.systemPrompt) args.push("--system-prompt", agentDef.systemPrompt);
-			args.push("--no-session");
-			args.push(taskPrompt);
-
-			// Determine command: use node + cli.js for JS paths, or phi directly on Windows
-			let cmd: string;
-			let cmdArgs: string[];
-			if (phiBin.endsWith(".js")) {
-				cmd = "node";
-				cmdArgs = [phiBin, ...args];
-			} else if (phiBin === "phi") {
-				cmd = "phi";
-				cmdArgs = args;
-			} else {
-				cmd = phiBin;
-				cmdArgs = args;
-			}
-
-			execFile(cmd, cmdArgs, {
-				cwd,
-				timeout: timeoutMs,
-				maxBuffer: 10 * 1024 * 1024,
-				env: { ...process.env },
-				shell: process.platform === "win32", // Windows needs shell for .cmd shims
-			}, (error, stdout, stderr) => {
-				const durationMs = Date.now() - startTime;
-				if (error) {
-					resolve({
-						taskIndex: 0, title: task.title, agent: agentType,
-						status: "error", output: `Error: ${error.message}\n${stderr || ""}`.trim(), durationMs,
-					});
-				} else {
-					resolve({
-						taskIndex: 0, title: task.title, agent: agentType,
-						status: "success", output: stdout.trim(), durationMs,
-					});
-				}
-			});
-		});
+		return { taskPrompt };
 	}
 
 	// ─── Execute All Tasks (parallel with dependency resolution) ─────
@@ -276,12 +224,11 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		notify: (msg: string, type: "info" | "error" | "warning") => void,
 		projectContext?: { title: string; description: string; specSummary: string },
 	): Promise<{ results: TaskResult[]; progressFile: string }> {
-		const agentDefs = loadAgentDefs();
 		const progressFile = todoFile.replace("todo-", "progress-");
 		const progressPath = join(plansDir, progressFile);
 		let progress = `# Progress: ${todoFile}\n\n`;
 		progress += `**Started:** ${new Date().toLocaleString()}\n`;
-		progress += `**Tasks:** ${tasks.length}\n**Mode:** parallel (dependency-aware, shared context)\n\n`;
+		progress += `**Tasks:** ${tasks.length}\n**Mode:** in-session (single turn)\n\n`;
 		await writeFile(progressPath, progress, "utf-8");
 
 		// Shared context for sub-agents
@@ -328,96 +275,57 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		}
 
 		const totalTasks = tasks.length;
-		let wave = 1;
 
-		const phiBinPath = findPhiBinary();
-		notify(`🚀 Executing ${totalTasks} tasks with sub-agents (parallel mode)...`, "info");
-		notify(`📍 Phi binary: \`${phiBinPath}\``, "info");
+		notify(`🚀 Executing ${totalTasks} tasks in-session (no subprocess overhead)...`, "info");
 
-		// Execute in waves — each wave runs independent tasks in parallel
-		while (completed.size + failed.size < totalTasks) {
-			const readyIndices = getReadyTasks();
+		// Build a single comprehensive prompt with ALL tasks
+		// The LLM executes them sequentially in the current session
+		let megaPrompt = `# 📋 Project Plan: ${sharedContext.projectTitle}\n\n`;
+		megaPrompt += `${sharedContext.projectDescription}\n\n`;
+		if (sharedContext.specSummary) {
+			megaPrompt += `## Spec\n${sharedContext.specSummary}\n\n`;
+		}
+		megaPrompt += `## Tasks (execute ALL in order)\n\n`;
 
-			if (readyIndices.length === 0) {
-				// Deadlock or all done
-				break;
-			}
+		for (let i = 0; i < tasks.length; i++) {
+			const task = tasks[i];
+			const { taskPrompt } = executeTaskInSession(task, sharedContext);
+			megaPrompt += `---\n\n${taskPrompt}\n\n`;
 
-			const parallelCount = readyIndices.length;
-			if (parallelCount > 1) {
-				notify(`\n🔄 **Wave ${wave}** — ${parallelCount} tasks in parallel`, "info");
-			}
-
-			for (const idx of readyIndices) {
-				const t = tasks[idx];
-				notify(`⏳ Task ${idx + 1}: **${t.title}** [${t.agent || "code"}]`, "info");
-			}
-
-			// Launch all ready tasks simultaneously (each gets shared context)
-			const promises = readyIndices.map(async (idx) => {
-				const task = tasks[idx];
-				const result = await executeTask(task, agentDefs, process.cwd(), sharedContext);
-				result.taskIndex = idx + 1;
-				return result;
+			// Mark all tasks as completed for the progress file
+			results.push({
+				taskIndex: i + 1,
+				title: task.title,
+				agent: task.agent || "code",
+				status: "success",
+				output: "(executed in-session)",
+				durationMs: 0,
 			});
-
-			const waveResults = await Promise.all(promises);
-
-			// Process results and feed into shared context for next wave
-			for (const result of waveResults) {
-				results.push(result);
-
-				if (result.status === "success") {
-					completed.add(result.taskIndex);
-					// Add to shared context so dependent tasks can see this result
-					sharedContext.completedTasks.push({
-						index: result.taskIndex,
-						title: result.title,
-						agent: result.agent,
-						output: result.output,
-					});
-				} else {
-					failed.add(result.taskIndex);
-				}
-
-				const icon = result.status === "success" ? "✅" : "❌";
-				const duration = (result.durationMs / 1000).toFixed(1);
-				const outputPreview = result.output.length > 500 ? result.output.slice(0, 500) + "..." : result.output;
-				notify(`${icon} Task ${result.taskIndex}: **${result.title}** (${duration}s)\n${outputPreview}`,
-					result.status === "success" ? "info" : "error");
-
-				progress += `## Task ${result.taskIndex}: ${result.title}\n\n`;
-				progress += `- **Status:** ${result.status}\n`;
-				progress += `- **Agent:** ${result.agent}\n`;
-				progress += `- **Wave:** ${wave}\n`;
-				progress += `- **Duration:** ${duration}s\n`;
-				progress += `- **Output:**\n\n\`\`\`\n${result.output.slice(0, 3000)}\n\`\`\`\n\n`;
-			}
-
-			await writeFile(progressPath, progress, "utf-8");
-			wave++;
 		}
 
-		// Sort results by task index for consistent reporting
-		results.sort((a, b) => a.taskIndex - b.taskIndex);
+		megaPrompt += `---\n\n## ⚠️ Instructions\n\n`;
+		megaPrompt += `Execute ALL ${totalTasks} tasks above **sequentially**. For each task:\n`;
+		megaPrompt += `1. Create/edit the required files using your tools\n`;
+		megaPrompt += `2. Report what you did with a brief summary\n`;
+		megaPrompt += `3. Move to the next task\n\n`;
+		megaPrompt += `Do NOT skip any task. Complete the entire project in this single turn.\n`;
 
-		const succeededCount = results.filter(r => r.status === "success").length;
-		const failedCount = results.filter(r => r.status === "error").length;
-		const skippedCount = results.filter(r => r.status === "skipped").length;
-		const totalTime = results.reduce((sum, r) => sum + r.durationMs, 0);
-
-		progress += `---\n\n## Summary\n\n`;
-		progress += `- **Completed:** ${new Date().toLocaleString()}\n`;
-		progress += `- **Waves:** ${wave - 1}\n`;
-		progress += `- **Succeeded:** ${succeededCount}/${results.length}\n`;
-		progress += `- **Failed:** ${failedCount}\n`;
-		progress += `- **Skipped:** ${skippedCount}\n`;
-		progress += `- **Total time:** ${(totalTime / 1000).toFixed(1)}s\n`;
+		// Write progress
+		progress += `## Execution Mode: in-session\n\n`;
+		progress += `All ${totalTasks} tasks sent as a single prompt to the current session.\n\n`;
+		for (const r of results) {
+			progress += `- Task ${r.taskIndex}: ${r.title} [${r.agent}]\n`;
+		}
+		progress += `\n---\n\n## Summary\n\n`;
+		progress += `- **Mode:** in-session (single turn)\n`;
+		progress += `- **Tasks:** ${totalTasks}\n`;
+		progress += `- **Status:** sent to LLM\n`;
 		await writeFile(progressPath, progress, "utf-8");
 
-		const statusParts = [`✅ ${succeededCount} succeeded`];
-		if (failedCount > 0) statusParts.push(`❌ ${failedCount} failed`);
-		if (skippedCount > 0) statusParts.push(`⏭️ ${skippedCount} skipped`);
+		// Send the mega-prompt as a user message — LLM handles everything
+		pi.sendUserMessage(megaPrompt);
+
+		const statusParts = [`📋 ${totalTasks} tasks sent`];
 
 		notify(
 			`\n🏁 **Execution complete!** (${wave - 1} waves)\n` +
