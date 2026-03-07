@@ -187,9 +187,14 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			// The actual task
 			taskPrompt += `---\n\n# Your Task\n\n**${task.title}**\n\n${task.description}`;
 			if (task.subtasks && task.subtasks.length > 0) {
-				taskPrompt += "\n\nSub-tasks:\n" + task.subtasks.map((st, i) => `${i + 1}. ${st}`).join("\n");
+				taskPrompt += "\n\n## Sub-tasks\n" + task.subtasks.map((st, i) => `${i + 1}. ${st}`).join("\n");
 			}
-			taskPrompt += "\n\nComplete this task. Be thorough and precise. Report what you did.";
+			taskPrompt += `\n\n---\n\n## Instructions\n`;
+			taskPrompt += `- You are an isolated agent with your own context. Work independently.\n`;
+			taskPrompt += `- Use the project context and dependency results above to inform your work.\n`;
+			taskPrompt += `- Follow the output format defined in your system prompt.\n`;
+			taskPrompt += `- Be precise. Reference specific file paths and line numbers.\n`;
+			taskPrompt += `- Report exactly what you did, what worked, and what didn't.\n`;
 
 			const args: string[] = [];
 			if (phiBin === "npx") args.push("@phi-code-admin/phi-code");
@@ -449,7 +454,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		promptSnippet: "Plan + execute projects in parallel waves. Each sub-agent gets isolated context + model. Use prompt-architect patterns for structured task descriptions.",
 		promptGuidelines: [
 			"When asked to plan or build a project: analyze the request thoroughly, then call the orchestrate tool. It plans AND executes automatically.",
-			"CRITICAL: Each task description must be SELF-CONTAINED. The sub-agent has NO shared history, NO access to the conversation, NO memory of previous tasks. Include ALL context it needs: file paths, expected behavior, relevant code patterns, and success criteria.",
+			"CRITICAL: Each task description must be SELF-CONTAINED. The sub-agent has NO access to this conversation. It receives: (1) project context (title, description, spec summary) automatically, (2) outputs from its dependency tasks automatically, (3) your task description. So include specific details: file paths, expected behavior, code patterns, success criteria. Don't repeat the project description — that's injected automatically.",
 			"Structure each task description using the prompt-architect pattern: [CONTEXT] what exists and why → [TASK] what to do specifically → [FORMAT] expected output → [CONSTRAINTS] rules and limitations.",
 			"Assign agent types strategically: 'explore' (read-only analysis, codebase understanding), 'plan' (architecture, design decisions), 'code' (implementation, file creation/modification), 'test' (write + run tests, validate behavior), 'review' (security audit, quality check, read-only).",
 			"Set dependencies to maximize parallelism: tasks without dependencies run simultaneously in the same wave. Only add dependencies when a task truly needs another task's output.",
