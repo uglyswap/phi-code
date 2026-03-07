@@ -399,33 +399,35 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		name: "orchestrate",
 		label: "Project Orchestrator",
 		description: "Create a project plan AND automatically execute all tasks with sub-agents in parallel. Each agent gets its own isolated context, model, and system prompt. Tasks without dependencies run simultaneously.",
-		promptSnippet: "Plan + execute projects. Creates spec/todo, then runs tasks in parallel waves with isolated sub-agents.",
+		promptSnippet: "Plan + execute projects in parallel waves. Each sub-agent gets isolated context + model. Use prompt-architect patterns for structured task descriptions.",
 		promptGuidelines: [
-			"When asked to plan or build a project: analyze the request, then call orchestrate. It will plan AND execute automatically.",
-			"Break tasks into small, actionable items. Each task is executed by an isolated sub-agent.",
-			"Assign agent types: 'explore' (analysis), 'plan' (design), 'code' (implementation), 'test' (validation), 'review' (quality).",
-			"Set dependencies carefully: tasks without dependencies run in parallel. Tasks with dependencies wait for their prerequisites.",
-			"Independent tasks run simultaneously (same wave). Dependent tasks wait for their prerequisites to complete.",
+			"When asked to plan or build a project: analyze the request thoroughly, then call the orchestrate tool. It plans AND executes automatically.",
+			"CRITICAL: Each task description must be SELF-CONTAINED. The sub-agent has NO shared history, NO access to the conversation, NO memory of previous tasks. Include ALL context it needs: file paths, expected behavior, relevant code patterns, and success criteria.",
+			"Structure each task description using the prompt-architect pattern: [CONTEXT] what exists and why → [TASK] what to do specifically → [FORMAT] expected output → [CONSTRAINTS] rules and limitations.",
+			"Assign agent types strategically: 'explore' (read-only analysis, codebase understanding), 'plan' (architecture, design decisions), 'code' (implementation, file creation/modification), 'test' (write + run tests, validate behavior), 'review' (security audit, quality check, read-only).",
+			"Set dependencies to maximize parallelism: tasks without dependencies run simultaneously in the same wave. Only add dependencies when a task truly needs another task's output.",
+			"Order tasks logically: explore → plan → code → test → review. But allow independent tasks at each stage to run in parallel.",
+			"Set priority=high for critical-path tasks, medium for standard work, low for nice-to-haves.",
 		],
 		parameters: Type.Object({
-			title: Type.String({ description: "Project title" }),
-			description: Type.String({ description: "Full project description with context" }),
-			goals: Type.Array(Type.String(), { description: "List of project goals" }),
+			title: Type.String({ description: "Concise project title" }),
+			description: Type.String({ description: "Full project description: what to build, why, and any relevant context" }),
+			goals: Type.Array(Type.String(), { description: "Measurable project goals (what success looks like)" }),
 			requirements: Type.Array(Type.String(), { description: "Technical and functional requirements" }),
-			architecture: Type.Optional(Type.Array(Type.String(), { description: "Architecture decisions" })),
+			architecture: Type.Optional(Type.Array(Type.String(), { description: "Architecture decisions, tech stack choices, trade-offs" })),
 			tasks: Type.Array(
 				Type.Object({
-					title: Type.String({ description: "Task title" }),
-					description: Type.String({ description: "Detailed task description with enough context for the agent to work independently" }),
-					agent: Type.Optional(Type.String({ description: "Agent type: explore, plan, code, test, or review" })),
-					priority: Type.Optional(Type.String({ description: "high, medium, or low" })),
-					dependencies: Type.Optional(Type.Array(Type.Number(), { description: "IDs of prerequisite tasks (1-indexed)" })),
-					subtasks: Type.Optional(Type.Array(Type.String(), { description: "Sub-task descriptions" })),
+					title: Type.String({ description: "Clear, action-oriented task title" }),
+					description: Type.String({ description: "SELF-CONTAINED task description. Include ALL context the sub-agent needs: file paths, expected behavior, code patterns, conventions. The agent has NO shared history." }),
+					agent: Type.Optional(Type.String({ description: "Agent type: explore (read-only analysis), plan (architecture), code (implementation), test (write+run tests), review (quality audit)" })),
+					priority: Type.Optional(Type.String({ description: "high (critical path), medium (standard), low (nice-to-have)" })),
+					dependencies: Type.Optional(Type.Array(Type.Number(), { description: "Task numbers this depends on (1-indexed). Only add when truly needed — fewer dependencies = more parallelism" })),
+					subtasks: Type.Optional(Type.Array(Type.String(), { description: "Specific sub-steps within this task" })),
 				}),
-				{ description: "Ordered list of tasks to execute" }
+				{ description: "Ordered list of tasks. Independent tasks run in parallel. Dependent tasks wait for prerequisites." }
 			),
-			constraints: Type.Optional(Type.Array(Type.String(), { description: "Project constraints" })),
-			successCriteria: Type.Optional(Type.Array(Type.String(), { description: "Completion criteria" })),
+			constraints: Type.Optional(Type.Array(Type.String(), { description: "Hard constraints: frameworks, patterns, rules, things to avoid" })),
+			successCriteria: Type.Optional(Type.Array(Type.String(), { description: "How to verify the project is complete and correct" })),
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -527,18 +529,36 @@ All files in \`.phi/plans/\``;
 			}
 
 			ctx.sendUserMessage(
-				`Analyze this project request and execute it using the orchestrate tool.
-The orchestrate tool will create the plan AND execute all tasks automatically with sub-agents.
+				`Analyze this project and call the orchestrate tool. It will create the plan AND execute all tasks automatically with parallel sub-agents.
 
-Project: ${description}
+## Project
+${description}
 
-Instructions:
-- Identify goals, requirements, architecture decisions
-- Break into small tasks (each executable by one sub-agent independently)
-- Each task description must contain FULL context — the sub-agent has NO shared history
-- Assign agent types: explore (analysis), plan (design), code (implementation), test (validation), review (quality)
-- Set priorities and dependencies
-- Call the orchestrate tool — it handles everything from there`
+## Instructions
+
+1. **Analyze** the project: identify goals, requirements, technical constraints, and architecture decisions.
+
+2. **Decompose** into tasks. Each task will be executed by an isolated sub-agent that has:
+   - NO access to this conversation
+   - NO shared memory or context
+   - Its own model and system prompt
+   - Full tool access (read, write, edit, bash, grep, find, ls)
+
+3. **Write self-contained task descriptions** using this pattern:
+   - CONTEXT: What exists, relevant file paths, current state
+   - TASK: Exactly what to implement/analyze/test
+   - FORMAT: Expected output (files created, test results, etc.)
+   - CONSTRAINTS: Rules, conventions, things to avoid
+
+4. **Assign agents**: explore (read-only analysis), plan (design), code (implementation), test (write+run tests), review (quality audit)
+
+5. **Set dependencies** to maximize parallelism:
+   - Tasks without dependencies → same wave → run simultaneously
+   - Only add a dependency when a task truly needs another's output
+   - Typical flow: explore(wave 1) → plan(wave 2) → code(wave 3) → test(wave 4) → review(wave 5)
+   - But independent code tasks can run in parallel within the same wave
+
+6. **Call the orchestrate tool** with all structured data. It handles execution automatically.`
 			);
 		},
 	});
