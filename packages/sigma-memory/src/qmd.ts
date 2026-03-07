@@ -173,7 +173,7 @@ export class QMDManager {
         lastUpdate: result.lastUpdate || null
       };
     } catch (error) {
-      console.error('QMD status error:', error);
+      // QMD status check failed silently
       return { files: 0, chunks: 0, lastUpdate: null };
     }
   }

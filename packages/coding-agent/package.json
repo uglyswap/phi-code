@@ -1,6 +1,6 @@
 {
 	"name": "@phi-code-admin/phi-code",
-	"version": "0.59.1",
+	"version": "0.59.2",
 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
 	"type": "module",
 	"piConfig": {
@@ -59,8 +59,8 @@
 		"phi-code-tui": "^0.56.3",
 		"proper-lockfile": "^4.1.2",
 		"sigma-agents": "^0.1.5",
-		"sigma-memory": "^0.1.1",
-		"sigma-skills": "^0.1.1",
+		"sigma-memory": "^0.1.2",
+		"sigma-skills": "^0.1.2",
 		"strip-ansi": "^7.1.0",
 		"undici": "^7.19.1",
 		"yaml": "^2.8.2"

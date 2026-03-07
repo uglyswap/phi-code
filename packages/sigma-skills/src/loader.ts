@@ -92,14 +92,14 @@ export class SkillLoader {
 
       // Verify source exists
       if (!fs.existsSync(source)) {
-        console.error(`Source skill directory not found: ${source}`);
+        return false; // Source directory not found
         return false;
       }
 
       // Verify SKILL.md exists in source
       const sourceSkillMd = path.join(source, 'SKILL.md');
       if (!fs.existsSync(sourceSkillMd)) {
-        console.error(`No SKILL.md found in source: ${source}`);
+        return false; // No SKILL.md in source
         return false;
       }
 
@@ -115,7 +115,7 @@ export class SkillLoader {
       console.log(`Skill '${skillName}' installed successfully to ${targetPath}`);
       return true;
     } catch (error) {
-      console.error(`Failed to install skill from ${source}:`, error);
+      // Skill installation failed
       return false;
     }
   }
