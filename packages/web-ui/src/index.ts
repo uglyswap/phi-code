@@ -1,7 +1,7 @@
 // Main chat interface
 
-export type { Agent, AgentMessage, AgentState, ThinkingLevel } from "@mariozechner/pi-agent-core";
-export type { Model } from "@mariozechner/pi-ai";
+export type { Agent, AgentMessage, AgentState, ThinkingLevel } from "phi-code-agent";
+export type { Model } from "phi-code-ai";
 export { ChatPanel } from "./ChatPanel.js";
 // Components
 export { AgentInterface } from "./components/AgentInterface.js";

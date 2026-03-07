@@ -5,7 +5,7 @@
  * tool that queues a follow-up command to trigger reload.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "phi-code";
 import { Type } from "@sinclair/typebox";
 
 export default function (pi: ExtensionAPI) {
