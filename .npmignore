@@ -1,0 +1,21 @@
+# Development
+.github/
+.husky/
+scripts/
+biome.json
+*.tsbuildinfo
+
+# Tests
+**/*.test.ts
+**/__tests__/
+
+# Source (already in files)
+packages/*/src/
+
+# Build artifacts
+dist/
+*.log
+
+# IDE
+.vscode/
+.idea/

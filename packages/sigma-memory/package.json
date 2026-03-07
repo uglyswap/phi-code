@@ -12,5 +12,13 @@
   "devDependencies": {
     "typescript": "^5.4.0",
     "@types/node": "^20.0.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/uglyswap/phi-code.git"
+  },
+  "homepage": "https://github.com/uglyswap/phi-code",
+  "keywords": ["memory", "vector-search", "ontology", "phi-code"],
+  "license": "MIT",
+  "files": ["dist", "src", "README.md"]
 }

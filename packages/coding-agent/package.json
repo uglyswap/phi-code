@@ -24,8 +24,9 @@
 	},
 	"files": [
 		"dist",
-		"docs",
-		"examples",
+		"extensions",
+		"README.md",
+		"LICENSE",
 		"CHANGELOG.md"
 	],
 	"scripts": {
@@ -80,20 +81,20 @@
 		"vitest": "^3.2.4"
 	},
 	"keywords": [
-		"coding-agent",
 		"ai",
-		"llm",
+		"coding-agent",
 		"cli",
-		"tui",
-		"agent"
+		"typescript",
+		"sub-agents",
+		"memory"
 	],
 	"author": "Mario Zechner",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/badlogic/pi-mono.git",
-		"directory": "packages/coding-agent"
+		"url": "https://github.com/uglyswap/phi-code.git"
 	},
+	"homepage": "https://github.com/uglyswap/phi-code",
 	"engines": {
 		"node": ">=20.6.0"
 	}
