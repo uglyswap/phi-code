@@ -1,53 +1,53 @@
 {
   "$schema": "./routing.schema.json",
-  "$comment": "Default routing config. Model names are defaults for Alibaba Coding Plan. Run /phi-init to configure for your provider (OpenAI, Anthropic, Ollama, etc.)",
+  "$comment": "Default routing config. All models set to 'default' — run /phi-init to assign real models from your provider.",
   "version": 1,
   "routes": {
     "code": {
       "description": "Code generation, implementation, refactoring",
       "keywords": ["implement", "create", "build", "refactor", "write", "add", "modify", "update", "generate"],
-      "preferredModel": "qwen3-coder-plus",
-      "fallback": "qwen3.5-plus",
+      "preferredModel": "default",
+      "fallback": "default",
       "agent": "code"
     },
     "debug": {
       "description": "Debugging, fixing, error resolution",
       "keywords": ["fix", "bug", "error", "debug", "crash", "broken", "failing", "issue", "troubleshoot"],
-      "preferredModel": "qwen3-max-2026-01-23",
-      "fallback": "qwen3.5-plus",
+      "preferredModel": "default",
+      "fallback": "default",
       "agent": "code"
     },
     "explore": {
       "description": "Code reading, analysis, understanding",
       "keywords": ["read", "analyze", "explain", "understand", "find", "search", "look", "show", "what", "how"],
-      "preferredModel": "kimi-k2.5",
-      "fallback": "glm-4.7",
+      "preferredModel": "default",
+      "fallback": "default",
       "agent": "explore"
     },
     "plan": {
       "description": "Architecture, design, planning",
       "keywords": ["plan", "design", "architect", "spec", "structure", "organize", "strategy", "approach"],
-      "preferredModel": "qwen3-max-2026-01-23",
-      "fallback": "qwen3.5-plus",
+      "preferredModel": "default",
+      "fallback": "default",
       "agent": "plan"
     },
     "test": {
       "description": "Testing, validation, verification",
       "keywords": ["test", "verify", "validate", "check", "assert", "coverage"],
-      "preferredModel": "kimi-k2.5",
-      "fallback": "glm-4.7",
+      "preferredModel": "default",
+      "fallback": "default",
       "agent": "test"
     },
     "review": {
       "description": "Code review, quality assessment",
       "keywords": ["review", "audit", "quality", "security", "improve", "optimize"],
-      "preferredModel": "qwen3.5-plus",
-      "fallback": "qwen3-max-2026-01-23",
+      "preferredModel": "default",
+      "fallback": "default",
       "agent": "review"
     }
   },
   "default": {
-    "model": "qwen3.5-plus",
+    "model": "default",
     "agent": null
   }
 }
