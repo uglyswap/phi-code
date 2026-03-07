@@ -187,9 +187,10 @@ Breaks down complex project descriptions into structured plans.
 
 ### Skill Loader Extension (`skill-loader.ts`)
 
-Dynamically discovers and loads skills from:
+Dynamically discovers and loads skills from three locations (in priority order):
+- `.phi/skills/` (project-local skills — highest priority, override others)
 - `~/.phi/agent/skills/` (global user skills)
-- `.phi/skills/` (project-local skills)
+- Bundled skills (12 shipped with the package — lowest priority)
 - Bundled skills (12 shipped with the package)
 
 **How it works:**
@@ -358,13 +359,15 @@ Project-local skills go in `.phi/skills/` in your project directory.
 
 Phi Code defines 5 specialized sub-agents, each optimized for a specific task type with its own model assignment.
 
-| Agent | Model | Tools | Role |
-|-------|-------|-------|------|
-| **explore** | `kimi-k2.5` | read, grep, find, ls, bash | Fast codebase analysis. Returns structured context for other agents. |
-| **plan** | `qwen3-max-2026-01-23` | read, grep, find, ls | Creates detailed implementation plans. Read-only — never modifies files. |
-| **code** | `qwen3-coder-plus` | read, write, edit, bash, grep, find, ls | Writes and modifies code. Full tool access for implementation. |
-| **test** | `kimi-k2.5` | read, bash, grep, find, ls | Runs tests, validates changes. Read-only except for test execution. |
-| **review** | `qwen3.5-plus` | read, grep, find, ls, bash | Senior code reviewer. Checks quality, security, maintainability. |
+| Agent | Default Model | Tools | Role |
+|-------|---------------|-------|------|
+| **code** | Assigned by `/phi-init` | read, write, edit, bash, grep, find, ls | Writes and modifies code. Full tool access for implementation. |
+| **explore** | Assigned by `/phi-init` | read, grep, find, ls, bash | Fast codebase analysis. Returns structured context for other agents. |
+| **plan** | Assigned by `/phi-init` | read, grep, find, ls | Creates detailed implementation plans. Read-only — never modifies files. |
+| **test** | Assigned by `/phi-init` | read, bash, grep, find, ls | Runs tests, validates changes. Read-only except for test execution. |
+| **review** | Assigned by `/phi-init` | read, grep, find, ls, bash | Senior code reviewer. Checks quality, security, maintainability. |
+
+> **Note**: Agent model assignments are configured by `/phi-init` based on your available models and OpenRouter rankings. All agents use `model: default` — the routing system determines the actual model at runtime.
 
 Each agent has a structured output format defined in its `.md` file (in the `agents/` directory). This ensures consistent, parseable results.
 

@@ -29,13 +29,15 @@ interface Skill {
 	content: string;
 	keywords: string[];
 	description: string;
-	source: "global" | "local";
+	source: "global" | "local" | "bundled";
 }
 
 export default function skillLoaderExtension(pi: ExtensionAPI) {
 	let availableSkills: Skill[] = [];
 	const globalSkillsDir = join(homedir(), ".phi", "agent", "skills");
 	const localSkillsDir = join(process.cwd(), ".phi", "skills");
+	// Bundled skills shipped with the package (packages/coding-agent/skills/)
+	const bundledSkillsDir = join(__dirname, "..", "..", "..", "skills");
 
 	/**
 	 * Extract keywords and description from SKILL.md content
@@ -129,7 +131,7 @@ export default function skillLoaderExtension(pi: ExtensionAPI) {
 	/**
 	 * Load skills from a directory
 	 */
-	async function loadSkillsFromDirectory(directory: string, source: "global" | "local"): Promise<Skill[]> {
+	async function loadSkillsFromDirectory(directory: string, source: "global" | "local" | "bundled"): Promise<Skill[]> {
 		const skills: Skill[] = [];
 
 		try {
@@ -177,12 +179,23 @@ export default function skillLoaderExtension(pi: ExtensionAPI) {
 	 * Load all available skills
 	 */
 	async function loadAllSkills(): Promise<void> {
+		const bundledSkills = await loadSkillsFromDirectory(bundledSkillsDir, "bundled");
 		const globalSkills = await loadSkillsFromDirectory(globalSkillsDir, "global");
 		const localSkills = await loadSkillsFromDirectory(localSkillsDir, "local");
 		
-		availableSkills = [...globalSkills, ...localSkills];
+		// Merge: local > global > bundled (local overrides global overrides bundled)
+		const seen = new Set<string>();
+		availableSkills = [];
+		for (const skills of [localSkills, globalSkills, bundledSkills]) {
+			for (const skill of skills) {
+				if (!seen.has(skill.name)) {
+					seen.add(skill.name);
+					availableSkills.push(skill);
+				}
+			}
+		}
 		
-		console.log(`Loaded ${availableSkills.length} skills (${globalSkills.length} global, ${localSkills.length} local)`);
+		console.log(`Loaded ${availableSkills.length} skills (${bundledSkills.length} bundled, ${globalSkills.length} global, ${localSkills.length} local)`);
 	}
 
 	/**
