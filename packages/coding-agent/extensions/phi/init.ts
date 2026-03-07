@@ -174,13 +174,13 @@ function createRouting(assignments: Record<string, { preferred: string; fallback
 			description: role.desc,
 			keywords: KEYWORDS[role.key] || [],
 			preferredModel: assignment?.preferred || role.defaultModel,
-			fallback: assignment?.fallback || "qwen3.5-plus",
+			fallback: assignment?.fallback || role.defaultModel,
 			agent: role.agent,
 		};
 	}
 	return {
 		routes,
-		default: { model: assignments["default"]?.preferred || "qwen3.5-plus", agent: null },
+		default: { model: assignments["default"]?.preferred || "default", agent: null },
 	};
 }
 
@@ -381,7 +381,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 		const assignments: Record<string, { preferred: string; fallback: string }> = {};
 
 		if (availableModels.length === 0) {
-			const fb = { preferred: "qwen3.5-plus", fallback: "qwen3.5-plus" };
+			const fb = { preferred: "default", fallback: "default" };
 			for (const role of TASK_ROLES) assignments[role.key] = fb;
 			assignments["default"] = fb;
 			return assignments;

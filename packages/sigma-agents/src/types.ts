@@ -3,7 +3,6 @@ export type TaskCategory = 'code' | 'debug' | 'explore' | 'plan' | 'test' | 'rev
 export interface ModelProfile {
   id: string;
   provider: string;
-  cost: number;         // 0 = free
   speed: 'fast' | 'medium' | 'slow';
   quality: 'high' | 'medium' | 'low';
   strengths: TaskCategory[];
