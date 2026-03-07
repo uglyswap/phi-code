@@ -1,6 +1,6 @@
 {
 	"name": "@phi-code-admin/phi-code",
-	"version": "0.57.8",
+	"version": "0.57.9",
 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
 	"type": "module",
 	"piConfig": {
@@ -43,10 +43,6 @@
 	},
 	"dependencies": {
 		"@mariozechner/jiti": "^2.6.2",
-		"phi-code-agent": "^0.56.3",
-		"phi-code-ai": "^0.56.3",
-		"phi-code-tui": "^0.56.3",
-		"sigma-memory": "^0.1.0",
 		"@silvia-odwyer/photon-node": "^0.3.4",
 		"chalk": "^5.5.0",
 		"cli-highlight": "^2.1.11",
@@ -58,7 +54,13 @@
 		"ignore": "^7.0.5",
 		"marked": "^15.0.12",
 		"minimatch": "^10.2.3",
+		"phi-code-agent": "^0.56.3",
+		"phi-code-ai": "^0.56.3",
+		"phi-code-tui": "^0.56.3",
 		"proper-lockfile": "^4.1.2",
+		"sigma-agents": "^0.1.1",
+		"sigma-memory": "^0.1.0",
+		"sigma-skills": "^0.1.0",
 		"strip-ansi": "^7.1.0",
 		"undici": "^7.19.1",
 		"yaml": "^2.8.2"
