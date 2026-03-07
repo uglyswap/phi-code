@@ -274,12 +274,8 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		}
 		await writeFile(progressPath, progress, "utf-8");
 
-		// Send the mega-prompt — LLM handles everything in current session
-		pi.sendUserMessage(megaPrompt);
-
-		notify(`📋 ${totalTasks} tasks sent to LLM. Progress: \`${progressFile}\``, "info");
-
-		return { results, progressFile };
+		// Return the mega-prompt as tool result — LLM sees it and executes
+		return { results, progressFile, megaPrompt };
 	}
 
 	// ─── Generate Plan Files ─────────────────────────────────────────
@@ -412,23 +408,19 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 					p.constraints?.length ? `Constraints: ${p.constraints.join("; ")}` : "",
 				].filter(Boolean).join("\n");
 
-				const { results, progressFile } = await executePlan(
+				const { results, progressFile, megaPrompt } = await executePlan(
 					p.tasks, todoFile, notify,
 					{ title: p.title, description: p.description, specSummary },
 				);
 
-				const summary = `**🏁 Project "${p.title}" — ${p.tasks.length} tasks sent!**
+				const header = `**📋 Project "${p.title}" — ${p.tasks.length} tasks planned!**\n` +
+					`Plan: \`${specFile}\`, \`${todoFile}\` | Progress: \`${progressFile}\`\n\n` +
+					`---\n\n`;
 
-**Plan:** \`${specFile}\`, \`${todoFile}\`
-**Progress:** \`${progressFile}\`
-
-**Tasks queued:**
-${results.map(r => `📋 Task ${r.taskIndex}: ${r.title} [${r.agent}]`).join("\n")}
-
-The LLM is now executing all tasks in-session.`;
-
+				// Return the mega-prompt as tool result
+				// The LLM sees this and executes all tasks in its current turn
 				return {
-					content: [{ type: "text", text: summary }],
+					content: [{ type: "text", text: header + megaPrompt }],
 					details: {
 						specFile, todoFile, progressFile,
 						taskCount: p.tasks.length,
