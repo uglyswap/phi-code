@@ -1,5 +1,5 @@
 {
-	"name": "phi-code",
+	"name": "@phi-code-admin/phi-code",
 	"version": "0.56.3",
 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
 	"type": "module",
