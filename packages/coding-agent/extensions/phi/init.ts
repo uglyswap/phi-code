@@ -714,4 +714,104 @@ _Edit this file to customize Phi Code's behavior for your project._
 			}
 		},
 	});
+
+	// ─── API Key Management Command ─────────────────────────────────
+
+	pi.registerCommand("api-key", {
+		description: "Set or view API keys (usage: /api-key set <provider> <key> | /api-key list)",
+		handler: async (args, ctx) => {
+			const parts = args.trim().split(/\s+/);
+			const action = parts[0]?.toLowerCase();
+
+			const PROVIDERS: Record<string, { envVar: string; name: string }> = {
+				alibaba: { envVar: "ALIBABA_CODING_PLAN_KEY", name: "Alibaba Coding Plan" },
+				dashscope: { envVar: "DASHSCOPE_API_KEY", name: "DashScope (Alibaba)" },
+				openai: { envVar: "OPENAI_API_KEY", name: "OpenAI" },
+				anthropic: { envVar: "ANTHROPIC_API_KEY", name: "Anthropic" },
+				google: { envVar: "GOOGLE_API_KEY", name: "Google" },
+				openrouter: { envVar: "OPENROUTER_API_KEY", name: "OpenRouter" },
+				groq: { envVar: "GROQ_API_KEY", name: "Groq" },
+				brave: { envVar: "BRAVE_API_KEY", name: "Brave Search" },
+			};
+
+			if (!action || action === "help") {
+				ctx.ui.notify(`**🔑 API Key Management**
+
+Usage:
+  /api-key set <provider> <key>   — Set an API key for this session
+  /api-key list                   — Show configured providers
+  /api-key providers              — List all supported providers
+
+Supported providers: ${Object.keys(PROVIDERS).join(", ")}
+
+Example:
+  /api-key set alibaba sk-sp-xxx
+  /api-key set openai sk-xxx
+
+Keys set with /api-key are active for the current session.
+For persistence, set environment variables:
+  • Windows: setx ALIBABA_CODING_PLAN_KEY "your-key"
+  • Linux/Mac: export ALIBABA_CODING_PLAN_KEY="your-key"`, "info");
+				return;
+			}
+
+			if (action === "list") {
+				let found = 0;
+				let msg = "**🔑 Configured API Keys:**\n";
+				for (const [id, info] of Object.entries(PROVIDERS)) {
+					const key = process.env[info.envVar];
+					if (key) {
+						const masked = key.substring(0, 6) + "..." + key.substring(key.length - 4);
+						msg += `  ✅ ${info.name} (${id}): ${masked}\n`;
+						found++;
+					}
+				}
+				if (found === 0) {
+					msg += "  ❌ No API keys configured\n";
+					msg += "\nUse `/api-key set <provider> <key>` to add one.";
+				}
+				ctx.ui.notify(msg, "info");
+				return;
+			}
+
+			if (action === "providers") {
+				let msg = "**Supported Providers:**\n";
+				for (const [id, info] of Object.entries(PROVIDERS)) {
+					const status = process.env[info.envVar] ? "✅" : "⬜";
+					msg += `  ${status} **${id}** — ${info.name} (${info.envVar})\n`;
+				}
+				ctx.ui.notify(msg, "info");
+				return;
+			}
+
+			if (action === "set") {
+				const provider = parts[1]?.toLowerCase();
+				const key = parts[2];
+
+				if (!provider || !key) {
+					ctx.ui.notify("Usage: /api-key set <provider> <key>\nExample: /api-key set alibaba sk-sp-xxx", "warning");
+					return;
+				}
+
+				const info = PROVIDERS[provider];
+				if (!info) {
+					ctx.ui.notify(`Unknown provider "${provider}". Supported: ${Object.keys(PROVIDERS).join(", ")}`, "error");
+					return;
+				}
+
+				// Set in current process environment
+				process.env[info.envVar] = key;
+				// Also set common aliases
+				if (provider === "alibaba") {
+					process.env.DASHSCOPE_API_KEY = key;
+				}
+
+				const masked = key.substring(0, 6) + "..." + key.substring(key.length - 4);
+				ctx.ui.notify(`✅ **${info.name}** API key set: ${masked}\n\n⚠️ Active for this session only. For persistence:\n  • Windows: \`setx ${info.envVar} "${key.substring(0, 6)}..."\`\n  • Linux/Mac: Add \`export ${info.envVar}="..."\` to ~/.bashrc`, "info");
+				return;
+			}
+
+			ctx.ui.notify("Unknown action. Use: /api-key set|list|providers|help", "warning");
+		},
+	});
 }
