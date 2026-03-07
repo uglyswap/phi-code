@@ -193,7 +193,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		});
 	}
 
-	// ─── Execute All Tasks ───────────────────────────────────────────
+	// ─── Execute All Tasks (parallel with dependency resolution) ─────
 
 	async function executePlan(
 		tasks: TaskDef[],
@@ -205,52 +205,133 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		const progressPath = join(plansDir, progressFile);
 		let progress = `# Progress: ${todoFile}\n\n`;
 		progress += `**Started:** ${new Date().toLocaleString()}\n`;
-		progress += `**Tasks:** ${tasks.length}\n\n`;
+		progress += `**Tasks:** ${tasks.length}\n**Mode:** parallel (dependency-aware)\n\n`;
 		await writeFile(progressPath, progress, "utf-8");
 
-		notify(`🚀 Executing ${tasks.length} tasks with sub-agents...`, "info");
-
+		// Build dependency graph
+		// Task indices are 1-based in the plan files
+		const completed = new Set<number>();
+		const failed = new Set<number>();
 		const results: TaskResult[] = [];
 
-		for (let i = 0; i < tasks.length; i++) {
-			const task = tasks[i];
-			const agentType = task.agent || "code";
-			notify(`⏳ Task ${i + 1}/${tasks.length}: **${task.title}** [${agentType}]`, "info");
+		// Check which tasks can run (all dependencies completed successfully)
+		function getReadyTasks(): number[] {
+			const ready: number[] = [];
+			for (let i = 0; i < tasks.length; i++) {
+				const taskNum = i + 1;
+				if (completed.has(taskNum) || failed.has(taskNum)) continue;
 
-			const result = await executeTask(task, agentDefs, process.cwd());
-			result.taskIndex = i + 1;
-			results.push(result);
+				const deps = tasks[i].dependencies || [];
+				const allDepsMet = deps.every(d => completed.has(d));
+				const anyDepFailed = deps.some(d => failed.has(d));
 
-			const icon = result.status === "success" ? "✅" : "❌";
-			const duration = (result.durationMs / 1000).toFixed(1);
-			const outputPreview = result.output.length > 500 ? result.output.slice(0, 500) + "..." : result.output;
-			notify(`${icon} Task ${i + 1}: **${task.title}** (${duration}s)\n${outputPreview}`,
-				result.status === "success" ? "info" : "error");
-
-			progress += `## Task ${i + 1}: ${task.title}\n\n`;
-			progress += `- **Status:** ${result.status}\n`;
-			progress += `- **Agent:** ${result.agent}\n`;
-			progress += `- **Duration:** ${duration}s\n`;
-			progress += `- **Output:**\n\n\`\`\`\n${result.output.slice(0, 3000)}\n\`\`\`\n\n`;
-			await writeFile(progressPath, progress, "utf-8");
+				if (anyDepFailed) {
+					// Skip tasks whose dependencies failed
+					failed.add(taskNum);
+					results.push({
+						taskIndex: taskNum,
+						title: tasks[i].title,
+						agent: tasks[i].agent || "code",
+						status: "skipped",
+						output: `Skipped: dependency #${deps.find(d => failed.has(d))} failed`,
+						durationMs: 0,
+					});
+					notify(`⏭️ Task ${taskNum}: **${tasks[i].title}** — skipped (dependency failed)`, "warning");
+				} else if (allDepsMet) {
+					ready.push(i);
+				}
+			}
+			return ready;
 		}
 
-		const succeeded = results.filter(r => r.status === "success").length;
-		const failed = results.filter(r => r.status === "error").length;
+		const totalTasks = tasks.length;
+		let wave = 1;
+
+		notify(`🚀 Executing ${totalTasks} tasks with sub-agents (parallel mode)...`, "info");
+
+		// Execute in waves — each wave runs independent tasks in parallel
+		while (completed.size + failed.size < totalTasks) {
+			const readyIndices = getReadyTasks();
+
+			if (readyIndices.length === 0) {
+				// Deadlock or all done
+				break;
+			}
+
+			const parallelCount = readyIndices.length;
+			if (parallelCount > 1) {
+				notify(`\n🔄 **Wave ${wave}** — ${parallelCount} tasks in parallel`, "info");
+			}
+
+			for (const idx of readyIndices) {
+				const t = tasks[idx];
+				notify(`⏳ Task ${idx + 1}: **${t.title}** [${t.agent || "code"}]`, "info");
+			}
+
+			// Launch all ready tasks simultaneously
+			const promises = readyIndices.map(async (idx) => {
+				const task = tasks[idx];
+				const result = await executeTask(task, agentDefs, process.cwd());
+				result.taskIndex = idx + 1;
+				return result;
+			});
+
+			const waveResults = await Promise.all(promises);
+
+			// Process results
+			for (const result of waveResults) {
+				results.push(result);
+
+				if (result.status === "success") {
+					completed.add(result.taskIndex);
+				} else {
+					failed.add(result.taskIndex);
+				}
+
+				const icon = result.status === "success" ? "✅" : "❌";
+				const duration = (result.durationMs / 1000).toFixed(1);
+				const outputPreview = result.output.length > 500 ? result.output.slice(0, 500) + "..." : result.output;
+				notify(`${icon} Task ${result.taskIndex}: **${result.title}** (${duration}s)\n${outputPreview}`,
+					result.status === "success" ? "info" : "error");
+
+				progress += `## Task ${result.taskIndex}: ${result.title}\n\n`;
+				progress += `- **Status:** ${result.status}\n`;
+				progress += `- **Agent:** ${result.agent}\n`;
+				progress += `- **Wave:** ${wave}\n`;
+				progress += `- **Duration:** ${duration}s\n`;
+				progress += `- **Output:**\n\n\`\`\`\n${result.output.slice(0, 3000)}\n\`\`\`\n\n`;
+			}
+
+			await writeFile(progressPath, progress, "utf-8");
+			wave++;
+		}
+
+		// Sort results by task index for consistent reporting
+		results.sort((a, b) => a.taskIndex - b.taskIndex);
+
+		const succeededCount = results.filter(r => r.status === "success").length;
+		const failedCount = results.filter(r => r.status === "error").length;
+		const skippedCount = results.filter(r => r.status === "skipped").length;
 		const totalTime = results.reduce((sum, r) => sum + r.durationMs, 0);
 
 		progress += `---\n\n## Summary\n\n`;
 		progress += `- **Completed:** ${new Date().toLocaleString()}\n`;
-		progress += `- **Succeeded:** ${succeeded}/${results.length}\n`;
-		progress += `- **Failed:** ${failed}\n`;
+		progress += `- **Waves:** ${wave - 1}\n`;
+		progress += `- **Succeeded:** ${succeededCount}/${results.length}\n`;
+		progress += `- **Failed:** ${failedCount}\n`;
+		progress += `- **Skipped:** ${skippedCount}\n`;
 		progress += `- **Total time:** ${(totalTime / 1000).toFixed(1)}s\n`;
 		await writeFile(progressPath, progress, "utf-8");
 
+		const statusParts = [`✅ ${succeededCount} succeeded`];
+		if (failedCount > 0) statusParts.push(`❌ ${failedCount} failed`);
+		if (skippedCount > 0) statusParts.push(`⏭️ ${skippedCount} skipped`);
+
 		notify(
-			`\n🏁 **Execution complete!**\n` +
-			`✅ ${succeeded}/${results.length} succeeded | ❌ ${failed} failed | ⏱️ ${(totalTime / 1000).toFixed(1)}s\n` +
+			`\n🏁 **Execution complete!** (${wave - 1} waves)\n` +
+			statusParts.join(" | ") + ` | ⏱️ ${(totalTime / 1000).toFixed(1)}s\n` +
 			`Progress: \`${progressFile}\``,
-			failed === 0 ? "info" : "warning"
+			failedCount === 0 ? "info" : "warning"
 		);
 
 		return { results, progressFile };
@@ -317,13 +398,14 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "orchestrate",
 		label: "Project Orchestrator",
-		description: "Create a project plan AND automatically execute all tasks with sub-agents. Each agent gets its own isolated context, model, and system prompt. Call this after analyzing the user's project request.",
-		promptSnippet: "Plan + execute projects. Creates spec/todo, then runs each task with an isolated sub-agent.",
+		description: "Create a project plan AND automatically execute all tasks with sub-agents in parallel. Each agent gets its own isolated context, model, and system prompt. Tasks without dependencies run simultaneously.",
+		promptSnippet: "Plan + execute projects. Creates spec/todo, then runs tasks in parallel waves with isolated sub-agents.",
 		promptGuidelines: [
 			"When asked to plan or build a project: analyze the request, then call orchestrate. It will plan AND execute automatically.",
 			"Break tasks into small, actionable items. Each task is executed by an isolated sub-agent.",
 			"Assign agent types: 'explore' (analysis), 'plan' (design), 'code' (implementation), 'test' (validation), 'review' (quality).",
-			"Order tasks by dependency. Sub-agents execute sequentially, respecting the order.",
+			"Set dependencies carefully: tasks without dependencies run in parallel. Tasks with dependencies wait for their prerequisites.",
+			"Independent tasks run simultaneously (same wave). Dependent tasks wait for their prerequisites to complete.",
 		],
 		parameters: Type.Object({
 			title: Type.String({ description: "Project title" }),
