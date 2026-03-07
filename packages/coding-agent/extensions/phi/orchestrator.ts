@@ -161,7 +161,8 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			}
 		} catch { /* not in PATH */ }
 
-		return "npx";
+		// Last resort: assume phi is in PATH (works with shell:true on Windows)
+		return "phi";
 	}
 
 	// ─── Sub-Agent Execution ─────────────────────────────────────────
@@ -223,7 +224,6 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			taskPrompt += `- Report exactly what you did, what worked, and what didn't.\n`;
 
 			const args: string[] = [];
-			if (phiBin === "npx") args.push("@phi-code-admin/phi-code");
 
 			args.push("--print");
 			if (model && model !== "default") args.push("--model", model);
@@ -231,14 +231,26 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			args.push("--no-session");
 			args.push(taskPrompt);
 
-			const cmd = phiBin === "npx" ? "npx" : "node";
-			const cmdArgs = phiBin === "npx" ? args : [phiBin, ...args];
+			// Determine command: use node + cli.js for JS paths, or phi directly on Windows
+			let cmd: string;
+			let cmdArgs: string[];
+			if (phiBin.endsWith(".js")) {
+				cmd = "node";
+				cmdArgs = [phiBin, ...args];
+			} else if (phiBin === "phi") {
+				cmd = "phi";
+				cmdArgs = args;
+			} else {
+				cmd = phiBin;
+				cmdArgs = args;
+			}
 
 			execFile(cmd, cmdArgs, {
 				cwd,
 				timeout: timeoutMs,
 				maxBuffer: 10 * 1024 * 1024,
 				env: { ...process.env },
+				shell: process.platform === "win32", // Windows needs shell for .cmd shims
 			}, (error, stdout, stderr) => {
 				const durationMs = Date.now() - startTime;
 				if (error) {
