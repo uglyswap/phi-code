@@ -1,4 +1,4 @@
-import { ModelProfile, TaskCategory } from './types';
+import { ModelProfile, TaskCategory } from './types.js';
 import { readFile, writeFile } from 'node:fs/promises';
 
 export class ModelProfiler {

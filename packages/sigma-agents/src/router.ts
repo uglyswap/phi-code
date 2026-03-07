@@ -1,4 +1,4 @@
-import { RoutingConfig, TaskCategory } from './types';
+import { RoutingConfig, TaskCategory } from './types.js';
 import { readFile } from 'node:fs/promises';
 
 export class SmartRouter {
