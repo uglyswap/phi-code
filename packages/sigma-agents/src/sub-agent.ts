@@ -127,7 +127,7 @@ export class SubAgentManager {
       frontmatter[key] = value;
     }
 
-    // Extraire le system prompt (contenu après le frontmatter)
+    // Extract system prompt (content after frontmatter)
     const systemPromptLines = lines.slice(frontmatterEnd + 1);
     const systemPrompt = systemPromptLines.join('\n').trim();
 

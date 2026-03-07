@@ -66,7 +66,7 @@ export interface MemoryStatus {
   };
 }
 
-// Types pour les entrées JSONL de l'ontologie
+// Types for ontology JSONL entries
 export interface OntologyEntityEntry {
   kind: 'entity';
   id: string;

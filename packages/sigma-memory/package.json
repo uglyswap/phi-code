@@ -1,24 +1,33 @@
 {
-  "name": "sigma-memory",
-  "version": "0.1.0",
-  "description": "Persistent memory for Phi Code — QMD vector search + Ontology graph + Markdown notes",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "scripts": {
-    "build": "tsc",
-    "clean": "rm -rf dist"
-  },
-  "dependencies": {},
-  "devDependencies": {
-    "typescript": "^5.4.0",
-    "@types/node": "^20.0.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/uglyswap/phi-code.git"
-  },
-  "homepage": "https://github.com/uglyswap/phi-code",
-  "keywords": ["memory", "vector-search", "ontology", "phi-code"],
-  "license": "MIT",
-  "files": ["dist", "src", "README.md"]
+	"name": "sigma-memory",
+	"version": "0.1.1",
+	"description": "Persistent memory for Phi Code \u2014 QMD vector search + Ontology graph + Markdown notes",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "tsc",
+		"clean": "rm -rf dist"
+	},
+	"dependencies": {},
+	"devDependencies": {
+		"typescript": "^5.4.0",
+		"@types/node": "^20.0.0"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/uglyswap/phi-code.git"
+	},
+	"homepage": "https://github.com/uglyswap/phi-code",
+	"keywords": [
+		"memory",
+		"vector-search",
+		"ontology",
+		"phi-code"
+	],
+	"license": "MIT",
+	"files": [
+		"dist",
+		"src",
+		"README.md"
+	]
 }

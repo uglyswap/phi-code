@@ -13,7 +13,7 @@ export class SigmaMemory {
   private readonly config: MemoryConfig;
 
   constructor(config?: Partial<MemoryConfig>) {
-    // Configuration par défaut
+    // Default configuration
     const defaultConfig: MemoryConfig = {
       memoryDir: join(homedir(), '.phi', 'memory'),
       projectMemoryDir: join(process.cwd(), '.phi', 'memory'),
@@ -24,45 +24,45 @@ export class SigmaMemory {
 
     this.config = { ...defaultConfig, ...config };
 
-    // Initialise les managers
+    // Initialize managers
     this.notes = new NotesManager(this.config);
     this.ontology = new OntologyManager(this.config);
     this.qmd = new QMDManager(this.config);
   }
 
   /**
-   * Recherche unifiée : cherche dans notes + ontology + QMD, combine les résultats
+   * Unified search: searches notes + ontology + QMD, combines results
    */
   async search(query: string): Promise<UnifiedSearchResult[]> {
     const results: UnifiedSearchResult[] = [];
 
-    // Recherche dans les notes
+    // Search in notes
     try {
       const notesResults = this.notes.search(query);
       for (const result of notesResults) {
         results.push({
           source: 'notes',
           type: 'note',
-          score: 0.8, // Score par défaut pour les notes
+          score: 0.8, // Default score for notes
           data: result
         });
       }
     } catch (error) {
-      console.error('Notes search error:', error);
+      // Notes search failed silently
     }
 
-    // Recherche dans l'ontologie
+    // Search in ontology
     try {
       const entityResults = this.ontology.findEntity({ name: query });
       for (const entity of entityResults) {
         results.push({
           source: 'ontology',
           type: 'entity',
-          score: 0.9, // Score élevé pour les entités
+          score: 0.9,
           data: entity
         });
 
-        // Inclut aussi les relations de cette entité
+        // Include relations for this entity
         const relations = this.ontology.findRelations(entity.id);
         for (const relation of relations) {
           results.push({
@@ -74,10 +74,10 @@ export class SigmaMemory {
         }
       }
     } catch (error) {
-      console.error('Ontology search error:', error);
+      // Ontology search failed silently
     }
 
-    // Recherche QMD (vectorielle)
+    // QMD vector search
     try {
       const qmdResults = await this.qmd.search(query, 5);
       for (const result of qmdResults) {
@@ -89,20 +89,20 @@ export class SigmaMemory {
         });
       }
     } catch (error) {
-      console.error('QMD search error:', error);
+      // QMD search failed silently
     }
 
-    // Trie par score décroissant
+    // Sort by score descending
     results.sort((a, b) => b.score - a.score);
 
     return results;
   }
 
   /**
-   * Initialise tous les dossiers nécessaires
+   * Initialize all required directories
    */
   async init(): Promise<void> {
-    // Crée les dossiers de base
+    // Create base directories
     if (!existsSync(this.config.memoryDir)) {
       mkdirSync(this.config.memoryDir, { recursive: true });
     }
@@ -111,21 +111,21 @@ export class SigmaMemory {
       mkdirSync(this.config.projectMemoryDir, { recursive: true });
     }
 
-    // Initialise QMD si activé
+    // Initialize QMD if enabled
     if (this.config.qmdEnabled && this.qmd.isAvailable()) {
       try {
         await this.qmd.update();
       } catch (error) {
-        console.error('QMD initialization error:', error);
+        // QMD initialization failed silently
       }
     }
   }
 
   /**
-   * Status de tous les sous-systèmes
+   * Status of all subsystems
    */
   async status(): Promise<MemoryStatus> {
-    // Status des notes
+    // Notes status
     const notesList = this.notes.list();
     const notesStatus = {
       count: notesList.length,
@@ -133,7 +133,7 @@ export class SigmaMemory {
       lastModified: notesList.length > 0 ? notesList[0].date : null
     };
 
-    // Status de l'ontologie
+    // Ontology status
     const ontologyStats = this.ontology.stats();
     const ontologyGraph = this.ontology.getGraph();
     const ontologyStatus = {
@@ -143,7 +143,7 @@ export class SigmaMemory {
       relationsByType: ontologyStats.relationsByType
     };
 
-    // Status QMD
+    // QMD status
     let qmdStatus: MemoryStatus['qmd'] = { available: false };
     if (this.config.qmdEnabled && this.qmd.isAvailable()) {
       const status = await this.qmd.status();
@@ -161,18 +161,18 @@ export class SigmaMemory {
   }
 
   /**
-   * Configuration actuelle
+   * Current configuration
    */
   getConfig(): MemoryConfig {
     return { ...this.config };
   }
 }
 
-// Exports pour une utilisation facile
+// Convenient exports
 export { NotesManager } from './notes.js';
 export { OntologyManager } from './ontology.js';
 export { QMDManager } from './qmd.js';
 export * from './types.js';
 
-// Export par défaut
+// Default export
 export default SigmaMemory;

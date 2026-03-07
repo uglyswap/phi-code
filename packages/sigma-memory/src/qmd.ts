@@ -66,7 +66,7 @@ export class QMDManager {
 
       return [];
     } catch (error) {
-      console.error('QMD search error:', error);
+      // QMD search failed silently
       return [];
     }
   }
@@ -87,7 +87,7 @@ export class QMDManager {
       });
       return true;
     } catch (error) {
-      console.error('QMD update error:', error);
+      // QMD update failed silently
       return false;
     }
   }
@@ -108,7 +108,7 @@ export class QMDManager {
       });
       return true;
     } catch (error) {
-      console.error('QMD embed error:', error);
+      // QMD embed failed silently
       return false;
     }
   }
@@ -141,7 +141,7 @@ export class QMDManager {
 
       return [];
     } catch (error) {
-      console.error('QMD collections error:', error);
+      // QMD collections failed silently
       return [];
     }
   }

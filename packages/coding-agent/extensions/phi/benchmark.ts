@@ -456,7 +456,10 @@ export default function benchmarkExtension(pi: ExtensionAPI) {
 		const categories: ModelBenchmark["categories"] = {};
 		let totalTime = 0;
 
-		for (const test of tests) {
+		for (let testIdx = 0; testIdx < tests.length; testIdx++) {
+			const test = tests[testIdx];
+			// Rate limiting: 1.5s between API calls to avoid throttling
+			if (testIdx > 0) await new Promise(r => setTimeout(r, 1500));
 			ctx.ui.notify(`  ⏳ ${test.category}: ${test.name}...`, "info");
 
 			try {
@@ -622,10 +625,12 @@ Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`, "info");
 				return;
 			}
 
-			// Get available models
+			// Get available models (validates API keys are non-empty and reasonable length)
 			const available = getAvailableModels();
 			if (available.length === 0) {
-				ctx.ui.notify("❌ No API keys detected. Set ALIBABA_CODING_PLAN_KEY, OPENAI_API_KEY, or another provider key.", "warning");
+				const providers = getProviderConfigs();
+				const hint = providers.map(p => `  ${p.envVar}: ${process.env[p.envVar] ? "set but no models configured" : "not set"}`).join("\n");
+				ctx.ui.notify(`❌ No benchmarkable models found.\n\nProvider status:\n${hint}\n\nSet at least one API key with known models.`, "warning");
 				return;
 			}
 

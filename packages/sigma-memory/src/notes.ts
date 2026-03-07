@@ -99,7 +99,7 @@ export class NotesManager {
         }
       }
     } catch (error) {
-      // Fallback à une recherche en JavaScript si grep échoue
+      // Fallback to JavaScript search if grep fails
       const files = readdirSync(this.notesDir).filter(f => f.endsWith('.md'));
       for (const file of files) {
         const filePath = join(this.notesDir, file);
@@ -151,7 +151,7 @@ export class NotesManager {
     const file = filename || `${today}.md`;
     const filePath = join(this.notesDir, file);
     
-    // Ajoute une ligne vide si le fichier existe déjà et ne se termine pas par une ligne vide
+    // Add blank line if file exists and doesn't end with one
     if (existsSync(filePath)) {
       const existingContent = readFileSync(filePath, 'utf8');
       const separator = existingContent.endsWith('\n') ? '' : '\n';

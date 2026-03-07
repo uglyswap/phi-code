@@ -16,7 +16,7 @@ export class SmartRouter {
     const lowerPrompt = prompt.toLowerCase();
     const categories: TaskCategory[] = [];
 
-    // Vérifier chaque catégorie
+    // Check each category
     for (const [category, route] of Object.entries(this.config.routes)) {
       const hasKeyword = route.keywords.some(keyword => 
         lowerPrompt.includes(keyword.toLowerCase())
@@ -31,7 +31,7 @@ export class SmartRouter {
       return 'general';
     }
 
-    // Appliquer les priorités
+    // Apply priorities
     const priorityOrder: TaskCategory[] = ['debug', 'code', 'plan', 'review', 'test', 'explore', 'general'];
     
     for (const priority of priorityOrder) {
