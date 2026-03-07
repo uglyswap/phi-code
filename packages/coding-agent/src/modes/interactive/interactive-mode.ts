@@ -374,7 +374,15 @@ export class InteractiveMode {
 
 		// Add header with keybindings from config (unless silenced)
 		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
-			const logo = theme.bold(theme.fg("accent", APP_NAME)) + theme.fg("dim", ` v${this.version}`);
+			const asciiLogo = [
+				"  ██████╗ ██╗  ██╗██╗",
+				"  ██╔══██╗██║  ██║██║",
+				"  ██████╔╝███████║██║",
+				"  ██╔═══╝ ██╔══██║██║",
+				"  ██║     ██║  ██║██║",
+				"  ╚═╝     ╚═╝  ╚═╝╚═╝",
+			].map(line => theme.fg("accent", line)).join("\n");
+			const logo = asciiLogo + "\n  " + theme.bold(theme.fg("accent", "Φ " + APP_NAME.toUpperCase())) + theme.fg("dim", ` v${this.version}`) + theme.fg("dim", " — The Ultimate Coding Agent");
 
 			// Build startup instructions using keybinding hint helpers
 			const kb = this.keybindings;
@@ -492,9 +500,9 @@ export class InteractiveMode {
 		const cwdBasename = path.basename(process.cwd());
 		const sessionName = this.sessionManager.getSessionName();
 		if (sessionName) {
-			this.ui.terminal.setTitle(`π - ${sessionName} - ${cwdBasename}`);
+			this.ui.terminal.setTitle(`Φ - ${sessionName} - ${cwdBasename}`);
 		} else {
-			this.ui.terminal.setTitle(`π - ${cwdBasename}`);
+			this.ui.terminal.setTitle(`Φ - ${cwdBasename}`);
 		}
 	}
 
