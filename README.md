@@ -2,7 +2,7 @@
 
 **The open-source coding agent with persistent memory, sub-agents, and intelligent routing.**
 
-A fork of [Pi](https://github.com/badlogic/pi-mono) by [Mario Zechner](https://github.com/badlogic) — enhanced with memory, orchestration, and 8 free AI models.
+A fork of [Pi](https://github.com/badlogic/pi-mono) by [Mario Zechner](https://github.com/badlogic) — enhanced with persistent memory, sub-agents, orchestration, and intelligent routing.
 
 ```
 npm install -g @phi-code-admin/phi-code
@@ -42,7 +42,7 @@ Phi Code takes Pi's brilliant minimal architecture and adds what's missing for s
 | **Model routing** | Manual selection | Automatic task→model matching |
 | **Orchestration** | Manual | `/plan` command generates spec.md + todo.md |
 | **Skills** | Community | 12 bundled coding skills loaded on demand |
-| **Free models** | BYO key | 8 Alibaba Coding Plan models at $0 |
+| **Pre-configured models** | BYO key | 8 Alibaba Coding Plan models included (requires API key) |
 | **Web search** | None | Brave API + DuckDuckGo fallback |
 
 Pi's core is untouched — only 2 lines modified out of 500+ files. Everything is additive: extensions, skills, and new packages. Upstream Pi updates merge in minutes.
@@ -78,7 +78,7 @@ The setup wizard detects your API keys, configures routing, and creates sub-agen
 
 - **Node.js** 18+ (tested on 22.x)
 - **Operating systems**: Linux, macOS, Windows (via Git Bash, WSL, or native)
-- **API key** (optional): Alibaba Coding Plan key for free models, or any OpenAI-compatible key
+- **API key**: Any supported provider key (Alibaba, OpenAI, Anthropic, Google, OpenRouter, Groq, or local models)
 
 ---
 
@@ -496,9 +496,9 @@ memory_search("authentication flow")
 
 ## Models & Providers
 
-### Built-in: Alibaba Coding Plan (Free)
+### Built-in: Alibaba Coding Plan
 
-Phi Code ships with 8 pre-configured models from [Alibaba Cloud Coding Plan](https://help.aliyun.com/zh/model-studio/developer-reference/tongyi-qianwen-coding-plan) — all at **$0 cost**:
+Phi Code ships with 8 pre-configured models from [Alibaba Cloud Coding Plan](https://help.aliyun.com/zh/model-studio/developer-reference/tongyi-qianwen-coding-plan):
 
 | Model | Reasoning | Best for |
 |-------|-----------|----------|
@@ -511,9 +511,8 @@ Phi Code ships with 8 pre-configured models from [Alibaba Cloud Coding Plan](htt
 | **GLM 4.7** | — | Fast general tasks |
 | **MiniMax M2.5** | — | Efficient task execution |
 
-All models have 131K context window and 16K max output tokens.
+All models have 131K context window and 16K max output tokens. Requires a [Coding Plan API key](https://help.aliyun.com/zh/model-studio/).
 
-**Setup:** Get a free Coding Plan API key from [Alibaba Cloud](https://help.aliyun.com/zh/model-studio/) and set:
 ```bash
 export ALIBABA_CODING_PLAN_KEY="sk-..."
 ```
@@ -713,7 +712,7 @@ The `apiKey` field accepts either a literal key or an environment variable name 
 
 | Variable | Purpose |
 |----------|---------|
-| `ALIBABA_CODING_PLAN_KEY` | Alibaba Coding Plan API key (free models) |
+| `ALIBABA_CODING_PLAN_KEY` | Alibaba Coding Plan API key |
 | `BRAVE_API_KEY` | Brave Search API key (for web search) |
 | `OPENAI_API_KEY` | OpenAI models |
 | `ANTHROPIC_API_KEY` | Anthropic/Claude models |
@@ -765,7 +764,7 @@ Pi is exceptional. Its minimalist philosophy — a 200-token system prompt, 4 ba
 - 5 typed sub-agents with intelligent model routing
 - Orchestration for complex multi-step projects
 - 12 bundled coding skills loaded on demand
-- 8 free Alibaba Coding Plan models pre-configured
+- 8 Alibaba Coding Plan models pre-configured (works with any provider)
 - Web search integration
 
 **What we didn't touch:**
@@ -780,7 +779,7 @@ Only 2 lines modified in Pi's source — the config directory name (`.pi` → `.
 ### Thank You
 
 - **[Mario Zechner](https://github.com/badlogic)** — For creating Pi and releasing it under MIT. If you like Phi Code, go star [Pi](https://github.com/badlogic/pi-mono). ⭐
-- **[Alibaba Cloud](https://www.alibabacloud.com/)** — For the Coding Plan providing free access to powerful models
+- **[Alibaba Cloud](https://www.alibabacloud.com/)** — For the Coding Plan and pre-configured model support
 - **The Pi community** — For the extension ecosystem and provider integrations
 
 ---

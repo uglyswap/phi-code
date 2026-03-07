@@ -620,7 +620,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 						"\n\n**Local providers** (start the server):\n" +
 						"  • Ollama: `ollama serve` (default port 11434)\n" +
 						"  • LM Studio: Start server in app (default port 1234)\n" +
-						"\n💡 Free options: Alibaba Coding Plan (cloud, $0) or Ollama (local, free)", "error");
+						"\n💡 Options: Alibaba Coding Plan (cloud), OpenAI, Anthropic, or Ollama/LM Studio (local)", "error");
 					return;
 				}
 

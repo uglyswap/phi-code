@@ -11,13 +11,7 @@
           "reasoning": true,
           "input": ["text"],
           "contextWindow": 131072,
-          "maxTokens": 16384,
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
+          "maxTokens": 16384
         },
         {
           "id": "qwen3-max-2026-01-23",
@@ -25,13 +19,7 @@
           "reasoning": true,
           "input": ["text"],
           "contextWindow": 131072,
-          "maxTokens": 16384,
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
+          "maxTokens": 16384
         },
         {
           "id": "qwen3-coder-plus",
@@ -39,13 +27,7 @@
           "reasoning": false,
           "input": ["text"],
           "contextWindow": 131072,
-          "maxTokens": 16384,
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
+          "maxTokens": 16384
         },
         {
           "id": "qwen3-coder-next",
@@ -53,13 +35,7 @@
           "reasoning": false,
           "input": ["text"],
           "contextWindow": 131072,
-          "maxTokens": 16384,
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
+          "maxTokens": 16384
         },
         {
           "id": "kimi-k2.5",
@@ -67,13 +43,7 @@
           "reasoning": true,
           "input": ["text"],
           "contextWindow": 131072,
-          "maxTokens": 16384,
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
+          "maxTokens": 16384
         },
         {
           "id": "glm-5",
@@ -81,13 +51,7 @@
           "reasoning": false,
           "input": ["text"],
           "contextWindow": 131072,
-          "maxTokens": 16384,
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
+          "maxTokens": 16384
         },
         {
           "id": "glm-4.7",
@@ -95,13 +59,7 @@
           "reasoning": false,
           "input": ["text"],
           "contextWindow": 131072,
-          "maxTokens": 16384,
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
+          "maxTokens": 16384
         },
         {
           "id": "MiniMax-M2.5",
@@ -109,13 +67,7 @@
           "reasoning": false,
           "input": ["text"],
           "contextWindow": 131072,
-          "maxTokens": 16384,
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
+          "maxTokens": 16384
         }
       ]
     }
