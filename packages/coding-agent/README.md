@@ -1,567 +1,554 @@
 <p align="center">
-  <a href="https://shittycodingagent.ai">
-    <img src="https://shittycodingagent.ai/logo.svg" alt="pi logo" width="128">
-  </a>
+  <h1 align="center">Φ Phi Code</h1>
+  <p align="center"><strong>The Ultimate Open-Source Coding Agent</strong></p>
+  <p align="center">Built on <a href="https://github.com/badlogic/pi-mono">Pi</a> — supercharged with memory, sub-agents, orchestration, and smart routing.</p>
 </p>
+
 <p align="center">
-  <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
-  <a href="https://www.npmjs.com/package/@mariozechner/pi-coding-agent"><img alt="npm" src="https://img.shields.io/npm/v/@mariozechner/pi-coding-agent?style=flat-square" /></a>
-  <a href="https://github.com/badlogic/pi-mono/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/badlogic/pi-mono/ci.yml?style=flat-square&branch=main" /></a>
-</p>
-<p align="center">
-  <a href="https://pi.dev">pi.dev</a> domain graciously donated by
-  <br /><br />
-  <a href="https://exe.dev"><img src="docs/images/exy.png" alt="Exy mascot" width="48" /><br />exe.dev</a>
+  <a href="https://www.npmjs.com/package/@phi-code-admin/phi-code"><img alt="npm" src="https://img.shields.io/npm/v/@phi-code-admin/phi-code?style=flat-square&label=npm" /></a>
+  <a href="https://github.com/uglyswap/phi-code"><img alt="GitHub" src="https://img.shields.io/badge/github-phi--code-181717?style=flat-square&logo=github" /></a>
+  <a href="https://github.com/uglyswap/phi-code/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-green?style=flat-square" /></a>
 </p>
 
-Pi is a minimal terminal coding harness. Adapt pi to your workflows, not the other way around, without having to fork and modify pi internals. Extend it with TypeScript [Extensions](#extensions), [Skills](#skills), [Prompt Templates](#prompt-templates), and [Themes](#themes). Put your extensions, skills, prompt templates, and themes in [Pi Packages](#pi-packages) and share them with others via npm or git.
+---
 
-Pi ships with powerful defaults but skips features like sub agents and plan mode. Instead, you can ask pi to build what you want or install a third party pi package that matches your workflow.
+## What is Phi Code?
 
-Pi runs in four modes: interactive, print or JSON, RPC for process integration, and an SDK for embedding in your own apps. See [openclaw/openclaw](https://github.com/openclaw/openclaw) for a real-world SDK integration.
+Phi Code is a **production-grade** coding agent for the terminal. It extends [Pi](https://github.com/badlogic/pi-mono) (the minimal terminal coding harness) with everything you need for serious development work:
+
+- 🧠 **Persistent Memory** — Notes, ontology, and vector search across sessions
+- 🤖 **5 Sub-Agents** — Specialized agents for code, exploration, planning, review, and testing
+- 🎯 **Smart Routing** — Automatically assigns the right model to the right task
+- 📋 **Orchestrator** — Plan complex projects, execute with parallel sub-agents
+- 🔍 **Web Search** — Brave API integration for real-time research
+- ⚡ **Benchmark** — Test your models and find the best ones for each role
+- 🧩 **12 Built-in Skills** — API design, security, testing, DevOps, and more
+- 🔌 **Provider-Neutral** — Works with any OpenAI-compatible API
+
+**Phi Code works with any LLM provider:** Alibaba Cloud, OpenAI, Anthropic, Google, OpenRouter, Groq, Ollama, LM Studio, and more.
+
+---
 
 ## Table of Contents
 
 - [Quick Start](#quick-start)
+- [Setup Wizard](#setup-wizard)
+- [API Key Management](#api-key-management)
 - [Providers & Models](#providers--models)
-- [Interactive Mode](#interactive-mode)
-  - [Editor](#editor)
-  - [Commands](#commands)
-  - [Keyboard Shortcuts](#keyboard-shortcuts)
-  - [Message Queue](#message-queue)
+- [Commands](#commands)
+- [Sub-Agents](#sub-agents)
+- [Orchestrator](#orchestrator)
+- [Memory System](#memory-system)
+- [Smart Routing](#smart-routing)
+- [Benchmark](#benchmark)
+- [Skills](#skills)
+- [Extensions](#extensions)
+- [Configuration Files](#configuration-files)
+- [Keyboard Shortcuts](#keyboard-shortcuts)
 - [Sessions](#sessions)
-  - [Branching](#branching)
-  - [Compaction](#compaction)
-- [Settings](#settings)
-- [Context Files](#context-files)
-- [Customization](#customization)
-  - [Prompt Templates](#prompt-templates)
-  - [Skills](#skills)
-  - [Extensions](#extensions)
-  - [Themes](#themes)
-  - [Pi Packages](#pi-packages)
-- [Programmatic Usage](#programmatic-usage)
-- [Philosophy](#philosophy)
 - [CLI Reference](#cli-reference)
+- [Philosophy](#philosophy)
+- [Credits](#credits)
 
 ---
 
 ## Quick Start
 
-```bash
-npm install -g @mariozechner/pi-coding-agent
-```
-
-Authenticate with an API key:
+### Install
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-pi
+npm install -g @phi-code-admin/phi-code
 ```
 
-Or use your existing subscription:
+The installer automatically sets up:
+- 9 extensions → `~/.phi/agent/extensions/`
+- 5 sub-agent definitions → `~/.phi/agent/agents/`
+- 12 skills → `~/.phi/agent/skills/`
+
+### First Run
 
 ```bash
-pi
-/login  # Then select provider
+phi
 ```
 
-Then just talk to pi. By default, pi gives the model four tools: `read`, `write`, `edit`, and `bash`. The model uses these to fulfill your requests. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [pi packages](#pi-packages).
+Then run the setup wizard:
 
-**Platform notes:** [Windows](docs/windows.md) | [Termux (Android)](docs/termux.md) | [tmux](docs/tmux.md) | [Terminal setup](docs/terminal-setup.md) | [Shell aliases](docs/shell-aliases.md)
+```
+/phi-init
+```
+
+The wizard will:
+1. Ask you to **choose a provider** (numbered list)
+2. Ask you to **paste your API key**
+3. **Save everything** to `~/.phi/agent/models.json` (persistent)
+4. Let you **choose models** for each role
+
+That's it. No environment variables, no JSON editing, no command line flags.
+
+### Example
+
+```bash
+$ phi
+> /phi-init
+⚠️ No API keys detected. Let's set one up!
+
+Available providers:
+  1. Alibaba Coding Plan
+  2. OpenAI
+  3. Anthropic
+  4. Google
+  ...
+
+Choose provider (number): 1
+Enter your Alibaba Coding Plan API key: sk-sp-xxxxx
+
+✅ API key saved to ~/.phi/agent/models.json
+⚠️ Restart phi for models to load.
+```
+
+Restart `phi`, run `/phi-init` again → models are detected → pick a setup mode → done.
+
+---
+
+## Setup Wizard
+
+The `/phi-init` wizard has **3 modes**:
+
+| Mode | What it does | Time |
+|------|-------------|------|
+| **auto** | Assigns optimal defaults based on available models | Instant |
+| **benchmark** | Tests each model with real coding tasks, assigns by score | 10-15 min |
+| **manual** | You choose the model for each role interactively | 2-5 min |
+
+The wizard creates:
+- `~/.phi/agent/routing.json` — Model assignments per task type
+- `~/.phi/agent/agents/` — Sub-agent definitions
+- `~/.phi/memory/AGENTS.md` — Your project instructions template
+
+---
+
+## API Key Management
+
+### Option 1: Interactive Setup (recommended)
+
+Run `/phi-init` — it asks for your provider and key, saves automatically.
+
+### Option 2: In-Session Command
+
+```
+/api-key set alibaba sk-sp-your-key-here
+/api-key set openai sk-your-key-here
+/api-key set anthropic sk-ant-your-key-here
+```
+
+This **saves to `~/.phi/agent/models.json`** (persistent across sessions).
+Restart `phi` for new models to load.
+
+### Option 3: View Configured Keys
+
+```
+/api-key list       # Show configured keys (masked)
+/api-key providers  # List all supported providers
+```
+
+### Option 4: Environment Variables
+
+For CI/CD or scripting, you can still use environment variables:
+
+```bash
+# Linux/Mac
+export ALIBABA_CODING_PLAN_KEY="sk-sp-xxx"
+export OPENAI_API_KEY="sk-xxx"
+export ANTHROPIC_API_KEY="sk-ant-xxx"
+
+# Windows (persistent)
+setx ALIBABA_CODING_PLAN_KEY "sk-sp-xxx"
+setx OPENAI_API_KEY "sk-xxx"
+```
+
+### Option 5: models.json (Direct Edit)
+
+Edit `~/.phi/agent/models.json` directly for advanced configurations:
+
+```json
+{
+  "providers": {
+    "my-provider": {
+      "baseUrl": "https://api.example.com/v1",
+      "api": "openai-completions",
+      "apiKey": "your-key-here",
+      "models": [
+        {
+          "id": "model-name",
+          "name": "Display Name",
+          "reasoning": true,
+          "input": ["text"],
+          "contextWindow": 131072,
+          "maxTokens": 16384
+        }
+      ]
+    }
+  }
+}
+```
+
+The `apiKey` field supports:
+- **Direct value**: `"sk-xxx"` — uses as-is
+- **Environment variable name**: `"OPENAI_API_KEY"` — resolved at runtime
+- **Shell command**: `"!cat ~/.secrets/key"` — executed and output used
 
 ---
 
 ## Providers & Models
 
-For each built-in provider, pi maintains a list of tool-capable models, updated with every release. Authenticate via subscription (`/login`) or API key, then select any model from that provider via `/model` (or Ctrl+L).
+### Supported Providers
 
-**Subscriptions:**
-- Anthropic Claude Pro/Max
-- OpenAI ChatGPT Plus/Pro (Codex)
-- GitHub Copilot
-- Google Gemini CLI
-- Google Antigravity
+| Provider | API Key Env Var | Notes |
+|----------|----------------|-------|
+| Alibaba Cloud | `ALIBABA_CODING_PLAN_KEY` | DashScope (Qwen, Kimi, GLM, MiniMax) |
+| OpenAI | `OPENAI_API_KEY` | GPT-4o, o1, o3, etc. |
+| Anthropic | `ANTHROPIC_API_KEY` | Claude Sonnet, Opus, Haiku |
+| Google | `GOOGLE_API_KEY` | Gemini Pro, Flash, Ultra |
+| OpenRouter | `OPENROUTER_API_KEY` | 200+ models from all providers |
+| Groq | `GROQ_API_KEY` | Ultra-fast inference |
+| Ollama | — | Local, `ollama serve` on port 11434 |
+| LM Studio | — | Local, start server on port 1234 |
 
-**API keys:**
-- Anthropic
-- OpenAI
-- Azure OpenAI
-- Google Gemini
-- Google Vertex
-- Amazon Bedrock
-- Mistral
-- Groq
-- Cerebras
-- xAI
-- OpenRouter
-- Vercel AI Gateway
-- ZAI
-- OpenCode Zen
-- OpenCode Go
-- Hugging Face
-- Kimi For Coding
-- MiniMax
+Plus all Pi built-in providers: Azure OpenAI, Google Vertex, Amazon Bedrock, Mistral, Cerebras, xAI, Hugging Face, and more.
 
-See [docs/providers.md](docs/providers.md) for detailed setup instructions.
+### Switching Models
 
-**Custom providers & models:** Add providers via `~/.pi/agent/models.json` if they speak a supported API (OpenAI, Anthropic, Google). For custom APIs or OAuth, use extensions. See [docs/models.md](docs/models.md) and [docs/custom-provider.md](docs/custom-provider.md).
+- **Ctrl+L** — Open model selector (pick from list)
+- **Ctrl+P** — Cycle through scoped models
+- `/model <name>` — Switch by name
 
 ---
 
-## Interactive Mode
+## Commands
 
-<p align="center"><img src="docs/images/interactive-mode.png" alt="Interactive Mode" width="600"></p>
+Phi Code adds these commands on top of Pi's built-in commands:
 
-The interface from top to bottom:
+| Command | Description |
+|---------|-------------|
+| `/phi-init` | Interactive setup wizard — configure providers, keys, and models |
+| `/api-key` | Manage API keys (`set`, `list`, `providers`, `help`) |
+| `/plan` | Full orchestration — analyze project, create spec, execute with sub-agents |
+| `/run` | Execute a todo.md plan with parallel sub-agents |
+| `/agents` | List available sub-agents and their capabilities |
+| `/benchmark` | Test model performance (`/benchmark all`, `/benchmark code-gen`) |
+| `/search` | Web search via Brave API |
+| `/crawl` | Fetch and extract content from a URL |
 
-- **Startup header** - Shows shortcuts (`/hotkeys` for all), loaded AGENTS.md files, prompt templates, skills, and extensions
-- **Messages** - Your messages, assistant responses, tool calls and results, notifications, errors, and extension UI
-- **Editor** - Where you type; border color indicates thinking level
-- **Footer** - Working directory, session name, total token/cache usage, cost, context usage, current model
-
-The editor can be temporarily replaced by other UI, like built-in `/settings` or custom UI from extensions (e.g., a Q&A tool that lets the user answer model questions in a structured format). [Extensions](#extensions) can also replace the editor, add widgets above/below it, a status line, custom footer, or overlays.
-
-### Editor
-
-| Feature | How |
-|---------|-----|
-| File reference | Type `@` to fuzzy-search project files |
-| Path completion | Tab to complete paths |
-| Multi-line | Shift+Enter (or Ctrl+Enter on Windows Terminal) |
-| Images | Ctrl+V to paste (Alt+V on Windows), or drag onto terminal |
-| Bash commands | `!command` runs and sends output to LLM, `!!command` runs without sending |
-
-Standard editing keybindings for delete word, undo, etc. See [docs/keybindings.md](docs/keybindings.md).
-
-### Commands
-
-Type `/` in the editor to trigger commands. [Extensions](#extensions) can register custom commands, [skills](#skills) are available as `/skill:name`, and [prompt templates](#prompt-templates) expand via `/templatename`.
+### Pi Built-in Commands
 
 | Command | Description |
 |---------|-------------|
 | `/login`, `/logout` | OAuth authentication |
 | `/model` | Switch models |
-| `/scoped-models` | Enable/disable models for Ctrl+P cycling |
-| `/settings` | Thinking level, theme, message delivery, transport |
+| `/settings` | Thinking level, theme, transport |
 | `/resume` | Pick from previous sessions |
 | `/new` | Start a new session |
-| `/name <name>` | Set session display name |
-| `/session` | Show session info (path, tokens, cost) |
-| `/tree` | Jump to any point in the session and continue from there |
-| `/fork` | Create a new session from the current branch |
-| `/compact [prompt]` | Manually compact context, optional custom instructions |
-| `/copy` | Copy last assistant message to clipboard |
-| `/export [file]` | Export session to HTML file |
-| `/share` | Upload as private GitHub gist with shareable HTML link |
-| `/reload` | Reload extensions, skills, prompts, context files (themes hot-reload automatically) |
-| `/hotkeys` | Show all keyboard shortcuts |
-| `/changelog` | Display version history |
-| `/quit`, `/exit` | Quit pi |
+| `/tree` | Navigate session history |
+| `/compact` | Manually compact context |
+| `/copy` | Copy last response to clipboard |
+| `/export` | Export session to HTML |
+| `/reload` | Reload extensions, skills, prompts |
 
-### Keyboard Shortcuts
+---
 
-See `/hotkeys` for the full list. Customize via `~/.pi/agent/keybindings.json`. See [docs/keybindings.md](docs/keybindings.md).
+## Sub-Agents
 
-**Commonly used:**
+Phi Code ships with **5 specialized sub-agents**, each with its own system prompt and tool set:
+
+| Agent | Role | Tools |
+|-------|------|-------|
+| **code** | Write and edit code, run commands | `read`, `write`, `edit`, `bash` |
+| **explore** | Investigate codebases, read-only analysis | `read`, `bash` |
+| **plan** | Architecture, design, technical planning | `read`, `bash` |
+| **review** | Code review, security audit, best practices | `read`, `bash` |
+| **test** | Write tests, fix tests, run test suites | `read`, `write`, `edit`, `bash` |
+
+View agents: `/agents`
+View details: `/agents code`
+
+Agent definitions are Markdown files with YAML frontmatter in `~/.phi/agent/agents/`. You can customize them or add your own.
+
+---
+
+## Orchestrator
+
+The `/plan` command is a **full-cycle project orchestrator**:
+
+```
+/plan Build a REST API with authentication and tests
+```
+
+This single command:
+1. **Analyzes** your project structure
+2. **Creates** a detailed spec (`spec.md`)
+3. **Generates** a task list with dependencies (`todo.md`)
+4. **Executes** all tasks with parallel sub-agents
+5. **Reports** progress in real-time (`progress.md`)
+
+### How It Works
+
+- Tasks are organized into **waves** based on dependencies
+- Independent tasks run **in parallel** via `Promise.all`
+- Each sub-agent receives **shared context**: project description, spec summary, and results from completed dependency tasks
+- Failed tasks are skipped; dependents are also skipped with a clear report
+- All files are written to `.phi/plans/<timestamp>/`
+
+### Step-by-Step Mode
+
+Use `/run` to execute an existing plan:
+
+```
+/run .phi/plans/2026-03-07T21-00-00/todo.md
+```
+
+---
+
+## Memory System
+
+Phi Code remembers across sessions via **sigma-memory**:
+
+### Components
+
+| Component | What it stores | Location |
+|-----------|---------------|----------|
+| **Notes** | Free-form text notes | `~/.phi/memory/notes/` |
+| **Ontology** | Structured knowledge graph (entities + relations) | `~/.phi/memory/ontology/` |
+| **QMD** | Vector embeddings for semantic search | `~/.phi/memory/qmd/` |
+| **AGENTS.md** | Global project instructions | `~/.phi/memory/AGENTS.md` |
+
+### Auto-Recall
+
+Memory is automatically searched before every response. When you ask "how did we implement the auth system?", Phi Code searches its memory and includes relevant context.
+
+### Manual Commands
+
+Memory tools are available to the LLM:
+- `memory_search` — Semantic search across all memory
+- `memory_note` — Save a note for future sessions
+- `memory_entity` / `memory_relation` — Build the knowledge graph
+
+---
+
+## Smart Routing
+
+The smart router automatically assigns the best model to each task based on your `routing.json` configuration:
+
+| Task Type | Best For |
+|-----------|----------|
+| **code-generation** | Writing new code, refactoring |
+| **debugging** | Finding and fixing bugs |
+| **planning** | Architecture, design decisions |
+| **tool-calling** | File operations, bash commands |
+| **orchestration** | Managing sub-agents, complex workflows |
+| **default** | Everything else |
+
+Configuration: `~/.phi/agent/routing.json`
+
+```json
+{
+  "code-generation": { "preferred": "qwen3.5-plus", "fallback": "default" },
+  "debugging": { "preferred": "kimi-k2.5", "fallback": "default" },
+  "default": { "preferred": "default", "fallback": "default" }
+}
+```
+
+Set models to `"default"` to use whatever model is currently active.
+
+---
+
+## Benchmark
+
+Test your models with real coding tasks:
+
+```
+/benchmark all              # Test all available models
+/benchmark code-gen         # Test only code generation
+/benchmark debug            # Test only debugging
+```
+
+### Categories
+
+| Category | Weight | What it tests |
+|----------|--------|---------------|
+| code-gen | ×2 | Write a function from spec |
+| debug | ×2 | Find and fix a bug |
+| planning | ×2 | Design an architecture |
+| tool-calling | ×1 | Structured tool use |
+| speed | ×1 | Response latency |
+| orchestration | ×2 | Multi-step task planning |
+
+### Scoring
+
+Models are scored 0-100 and ranked into tiers:
+
+| Tier | Score | Meaning |
+|------|-------|---------|
+| **S** | 80+ | Elite — best for critical tasks |
+| **A** | 65+ | Strong — reliable for most work |
+| **B** | 50+ | Decent — good for simple tasks |
+| **C** | 35+ | Weak — use as fallback only |
+| **D** | <35 | Avoid — not recommended |
+
+---
+
+## Skills
+
+Phi Code ships with **12 built-in skills**:
+
+| Skill | Description |
+|-------|-------------|
+| api-design | REST API patterns, versioning, error handling |
+| coding-standards | Code quality, naming conventions, best practices |
+| database | Database design, queries, migrations, optimization |
+| devops | CI/CD pipelines, deployment, monitoring |
+| docker-ops | Docker containers, Compose, orchestration |
+| git-workflow | Branching, commits, merges, collaboration |
+| github | GitHub Actions, PRs, issues, releases |
+| performance | Profiling, optimization, caching |
+| prompt-architect | Crafting structured prompts for AI systems |
+| security | Vulnerability scanning, hardening |
+| self-improving | Learning from errors and corrections |
+| testing | Test strategy, unit/integration tests |
+
+Skills are loaded automatically when relevant. Invoke manually with `/skill:name`.
+
+Add your own skills in `~/.phi/agent/skills/` or `.phi/skills/`.
+
+---
+
+## Extensions
+
+Phi Code ships with **9 extensions**:
+
+| Extension | What it adds |
+|-----------|-------------|
+| **init** | `/phi-init` wizard + `/api-key` management |
+| **orchestrator** | `/plan` and `/run` commands with parallel sub-agents |
+| **memory** | Persistent memory (notes, ontology, QMD search) |
+| **smart-router** | Automatic model routing by task type |
+| **skill-loader** | Dynamic skill scanning and loading |
+| **benchmark** | `/benchmark` for model testing |
+| **web-search** | `/search` and `/crawl` commands via Brave API |
+| **agents** | `/agents` command to list sub-agents |
+
+Extensions are TypeScript files loaded at runtime by [jiti](https://github.com/unjs/jiti). Add your own in `~/.phi/agent/extensions/`.
+
+---
+
+## Configuration Files
+
+All configuration lives in `~/.phi/agent/`:
+
+| File | Purpose |
+|------|---------|
+| `models.json` | **API keys & custom providers** (created by `/phi-init` or `/api-key`) |
+| `routing.json` | Model assignments per task type |
+| `settings.json` | Pi settings (thinking level, compaction, etc.) |
+| `agents/*.md` | Sub-agent definitions |
+| `skills/*/SKILL.md` | Skill definitions |
+| `extensions/*.ts` | Extension files |
+| `AGENTS.md` | Global project instructions |
+| `keybindings.json` | Custom keyboard shortcuts |
+
+Memory lives in `~/.phi/memory/`:
+
+| Path | Content |
+|------|---------|
+| `AGENTS.md` | Global memory / instructions |
+| `notes/` | Saved notes |
+| `ontology/` | Knowledge graph |
+| `qmd/` | Vector search index |
+
+---
+
+## Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
-| Ctrl+C | Clear editor |
-| Ctrl+C twice | Quit |
-| Escape | Cancel/abort |
-| Escape twice | Open `/tree` |
-| Ctrl+L | Open model selector |
-| Ctrl+P / Shift+Ctrl+P | Cycle scoped models forward/backward |
-| Shift+Tab | Cycle thinking level |
-| Ctrl+O | Collapse/expand tool output |
-| Ctrl+T | Collapse/expand thinking blocks |
+| **Ctrl+L** | Open model selector |
+| **Ctrl+P** | Cycle models forward |
+| **Shift+Ctrl+P** | Cycle models backward |
+| **Shift+Tab** | Cycle thinking level |
+| **Ctrl+O** | Collapse/expand tool output |
+| **Ctrl+T** | Collapse/expand thinking |
+| **Ctrl+G** | Open external editor |
+| **Escape** | Cancel/abort |
+| **Ctrl+C** | Clear editor |
+| **Ctrl+C twice** | Quit |
+| **Alt+Enter** | Queue follow-up message |
 
-### Message Queue
-
-Submit messages while the agent is working:
-
-- **Enter** queues a *steering* message, delivered after current tool execution (interrupts remaining tools)
-- **Alt+Enter** queues a *follow-up* message, delivered only after the agent finishes all work
-- **Escape** aborts and restores queued messages to editor
-- **Alt+Up** retrieves queued messages back to editor
-
-Configure delivery in [settings](docs/settings.md): `steeringMode` and `followUpMode` can be `"one-at-a-time"` (default, waits for response) or `"all"` (delivers all queued at once). `transport` selects provider transport preference (`"sse"`, `"websocket"`, or `"auto"`) for providers that support multiple transports.
+Full list: `/hotkeys`
 
 ---
 
 ## Sessions
 
-Sessions are stored as JSONL files with a tree structure. Each entry has an `id` and `parentId`, enabling in-place branching without creating new files. See [docs/session.md](docs/session.md) for file format.
-
-### Management
-
-Sessions auto-save to `~/.pi/agent/sessions/` organized by working directory.
+Sessions auto-save to `~/.phi/agent/sessions/` as JSONL files with a tree structure.
 
 ```bash
-pi -c                  # Continue most recent session
-pi -r                  # Browse and select from past sessions
-pi --no-session        # Ephemeral mode (don't save)
-pi --session <path>    # Use specific session file or ID
+phi -c                  # Continue last session
+phi -r                  # Browse past sessions
+phi --no-session        # Ephemeral mode
 ```
 
-### Branching
-
-**`/tree`** - Navigate the session tree in-place. Select any previous point, continue from there, and switch between branches. All history preserved in a single file.
-
-<p align="center"><img src="docs/images/tree-view.png" alt="Tree View" width="600"></p>
-
-- Search by typing, page with ←/→
-- Filter modes (Ctrl+O): default → no-tools → user-only → labeled-only → all
-- Press `l` to label entries as bookmarks
-
-**`/fork`** - Create a new session file from the current branch. Opens a selector, copies history up to the selected point, and places that message in the editor for modification.
-
-### Compaction
-
-Long sessions can exhaust context windows. Compaction summarizes older messages while keeping recent ones.
-
-**Manual:** `/compact` or `/compact <custom instructions>`
-
-**Automatic:** Enabled by default. Triggers on context overflow (recovers and retries) or when approaching the limit (proactive). Configure via `/settings` or `settings.json`.
-
-Compaction is lossy. The full history remains in the JSONL file; use `/tree` to revisit. Customize compaction behavior via [extensions](#extensions). See [docs/compaction.md](docs/compaction.md) for internals.
-
----
-
-## Settings
-
-Use `/settings` to modify common options, or edit JSON files directly:
-
-| Location | Scope |
-|----------|-------|
-| `~/.pi/agent/settings.json` | Global (all projects) |
-| `.pi/settings.json` | Project (overrides global) |
-
-See [docs/settings.md](docs/settings.md) for all options.
-
----
-
-## Context Files
-
-Pi loads `AGENTS.md` (or `CLAUDE.md`) at startup from:
-- `~/.pi/agent/AGENTS.md` (global)
-- Parent directories (walking up from cwd)
-- Current directory
-
-Use for project instructions, conventions, common commands. All matching files are concatenated.
-
-### System Prompt
-
-Replace the default system prompt with `.pi/SYSTEM.md` (project) or `~/.pi/agent/SYSTEM.md` (global). Append without replacing via `APPEND_SYSTEM.md`.
-
----
-
-## Customization
-
-### Prompt Templates
-
-Reusable prompts as Markdown files. Type `/name` to expand.
-
-```markdown
-<!-- ~/.pi/agent/prompts/review.md -->
-Review this code for bugs, security issues, and performance problems.
-Focus on: {{focus}}
-```
-
-Place in `~/.pi/agent/prompts/`, `.pi/prompts/`, or a [pi package](#pi-packages) to share with others. See [docs/prompt-templates.md](docs/prompt-templates.md).
-
-### Skills
-
-On-demand capability packages following the [Agent Skills standard](https://agentskills.io). Invoke via `/skill:name` or let the agent load them automatically.
-
-```markdown
-<!-- ~/.pi/agent/skills/my-skill/SKILL.md -->
-# My Skill
-Use this skill when the user asks about X.
-
-## Steps
-1. Do this
-2. Then that
-```
-
-Place in `~/.pi/agent/skills/`, `~/.agents/skills/`, `.pi/skills/`, or `.agents/skills/` (from `cwd` up through parent directories) or a [pi package](#pi-packages) to share with others. See [docs/skills.md](docs/skills.md).
-
-### Extensions
-
-<p align="center"><img src="docs/images/doom-extension.png" alt="Doom Extension" width="600"></p>
-
-TypeScript modules that extend pi with custom tools, commands, keyboard shortcuts, event handlers, and UI components.
-
-```typescript
-export default function (pi: ExtensionAPI) {
-  pi.registerTool({ name: "deploy", ... });
-  pi.registerCommand("stats", { ... });
-  pi.on("tool_call", async (event, ctx) => { ... });
-}
-```
-
-**What's possible:**
-- Custom tools (or replace built-in tools entirely)
-- Sub-agents and plan mode
-- Custom compaction and summarization
-- Permission gates and path protection
-- Custom editors and UI components
-- Status lines, headers, footers
-- Git checkpointing and auto-commit
-- SSH and sandbox execution
-- MCP server integration
-- Make pi look like Claude Code
-- Games while waiting (yes, Doom runs)
-- ...anything you can dream up
-
-Place in `~/.pi/agent/extensions/`, `.pi/extensions/`, or a [pi package](#pi-packages) to share with others. See [docs/extensions.md](docs/extensions.md) and [examples/extensions/](examples/extensions/).
-
-### Themes
-
-Built-in: `dark`, `light`. Themes hot-reload: modify the active theme file and pi immediately applies changes.
-
-Place in `~/.pi/agent/themes/`, `.pi/themes/`, or a [pi package](#pi-packages) to share with others. See [docs/themes.md](docs/themes.md).
-
-### Pi Packages
-
-Bundle and share extensions, skills, prompts, and themes via npm or git. Find packages on [npmjs.com](https://www.npmjs.com/search?q=keywords%3Api-package) or [Discord](https://discord.com/channels/1456806362351669492/1457744485428629628).
-
-> **Security:** Pi packages run with full system access. Extensions execute arbitrary code, and skills can instruct the model to perform any action including running executables. Review source code before installing third-party packages.
-
-```bash
-pi install npm:@foo/pi-tools
-pi install npm:@foo/pi-tools@1.2.3      # pinned version
-pi install git:github.com/user/repo
-pi install git:github.com/user/repo@v1  # tag or commit
-pi install git:git@github.com:user/repo
-pi install git:git@github.com:user/repo@v1  # tag or commit
-pi install https://github.com/user/repo
-pi install https://github.com/user/repo@v1      # tag or commit
-pi install ssh://git@github.com/user/repo
-pi install ssh://git@github.com/user/repo@v1    # tag or commit
-pi remove npm:@foo/pi-tools
-pi list
-pi update                               # skips pinned packages
-pi config                               # enable/disable extensions, skills, prompts, themes
-```
-
-Packages install to `~/.pi/agent/git/` (git) or global npm. Use `-l` for project-local installs (`.pi/git/`, `.pi/npm/`).
-
-Create a package by adding a `pi` key to `package.json`:
-
-```json
-{
-  "name": "my-pi-package",
-  "keywords": ["pi-package"],
-  "pi": {
-    "extensions": ["./extensions"],
-    "skills": ["./skills"],
-    "prompts": ["./prompts"],
-    "themes": ["./themes"]
-  }
-}
-```
-
-Without a `pi` manifest, pi auto-discovers from conventional directories (`extensions/`, `skills/`, `prompts/`, `themes/`).
-
-See [docs/packages.md](docs/packages.md).
-
----
-
-## Programmatic Usage
-
-### SDK
-
-```typescript
-import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "@mariozechner/pi-coding-agent";
-
-const { session } = await createAgentSession({
-  sessionManager: SessionManager.inMemory(),
-  authStorage: AuthStorage.create(),
-  modelRegistry: new ModelRegistry(authStorage),
-});
-
-await session.prompt("What files are in the current directory?");
-```
-
-See [docs/sdk.md](docs/sdk.md) and [examples/sdk/](examples/sdk/).
-
-### RPC Mode
-
-For non-Node.js integrations, use RPC mode over stdin/stdout:
-
-```bash
-pi --mode rpc
-```
-
-See [docs/rpc.md](docs/rpc.md) for the protocol.
-
----
-
-## Philosophy
-
-Pi is aggressively extensible so it doesn't have to dictate your workflow. Features that other tools bake in can be built with [extensions](#extensions), [skills](#skills), or installed from third-party [pi packages](#pi-packages). This keeps the core minimal while letting you shape pi to fit how you work.
-
-**No MCP.** Build CLI tools with READMEs (see [Skills](#skills)), or build an extension that adds MCP support. [Why?](https://mariozechner.at/posts/2025-11-02-what-if-you-dont-need-mcp/)
-
-**No sub-agents.** There's many ways to do this. Spawn pi instances via tmux, or build your own with [extensions](#extensions), or install a package that does it your way.
-
-**No permission popups.** Run in a container, or build your own confirmation flow with [extensions](#extensions) inline with your environment and security requirements.
-
-**No plan mode.** Write plans to files, or build it with [extensions](#extensions), or install a package.
-
-**No built-in to-dos.** They confuse models. Use a TODO.md file, or build your own with [extensions](#extensions).
-
-**No background bash.** Use tmux. Full observability, direct interaction.
-
-Read the [blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/) for the full rationale.
+**Branching:** Use `/tree` to navigate history and branch from any point.
+**Compaction:** Automatic context management when approaching limits.
+**Export:** `/export file.html` or `--export` flag.
+**Debug log:** `~/.phi/agent/phi-debug.log` (toggle with Ctrl+D).
 
 ---
 
 ## CLI Reference
 
 ```bash
-pi [options] [@files...] [messages...]
+phi [options] [@files...] [messages...]
 ```
 
-### Package Commands
-
-```bash
-pi install <source> [-l]    # Install package, -l for project-local
-pi remove <source> [-l]     # Remove package
-pi update [source]          # Update packages (skips pinned)
-pi list                     # List installed packages
-pi config                   # Enable/disable package resources
-```
-
-### Modes
-
-| Flag | Description |
-|------|-------------|
-| (default) | Interactive mode |
-| `-p`, `--print` | Print response and exit |
-| `--mode json` | Output all events as JSON lines (see [docs/json.md](docs/json.md)) |
-| `--mode rpc` | RPC mode for process integration (see [docs/rpc.md](docs/rpc.md)) |
-| `--export <in> [out]` | Export session to HTML |
-
-### Model Options
-
 | Option | Description |
 |--------|-------------|
-| `--provider <name>` | Provider (anthropic, openai, google, etc.) |
-| `--model <pattern>` | Model pattern or ID (supports `provider/id` and optional `:<thinking>`) |
-| `--api-key <key>` | API key (overrides env vars) |
-| `--thinking <level>` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
-| `--models <patterns>` | Comma-separated patterns for Ctrl+P cycling |
-| `--list-models [search]` | List available models |
-
-### Session Options
-
-| Option | Description |
-|--------|-------------|
-| `-c`, `--continue` | Continue most recent session |
-| `-r`, `--resume` | Browse and select session |
-| `--session <path>` | Use specific session file or partial UUID |
-| `--session-dir <dir>` | Custom session storage directory |
-| `--no-session` | Ephemeral mode (don't save) |
-
-### Tool Options
-
-| Option | Description |
-|--------|-------------|
-| `--tools <list>` | Enable specific built-in tools (default: `read,bash,edit,write`) |
-| `--no-tools` | Disable all built-in tools (extension tools still work) |
-
-Available built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`
-
-### Resource Options
-
-| Option | Description |
-|--------|-------------|
-| `-e`, `--extension <source>` | Load extension from path, npm, or git (repeatable) |
-| `--no-extensions` | Disable extension discovery |
-| `--skill <path>` | Load skill (repeatable) |
-| `--no-skills` | Disable skill discovery |
-| `--prompt-template <path>` | Load prompt template (repeatable) |
-| `--no-prompt-templates` | Disable prompt template discovery |
-| `--theme <path>` | Load theme (repeatable) |
-| `--no-themes` | Disable theme discovery |
-
-Combine `--no-*` with explicit flags to load exactly what you need, ignoring settings.json (e.g., `--no-extensions -e ./my-ext.ts`).
-
-### Other Options
-
-| Option | Description |
-|--------|-------------|
-| `--system-prompt <text>` | Replace default prompt (context files and skills still appended) |
-| `--append-system-prompt <text>` | Append to system prompt |
-| `--verbose` | Force verbose startup |
-| `-h`, `--help` | Show help |
+| `--provider <name>` | Provider name |
+| `--model <pattern>` | Model pattern or ID |
+| `--api-key <key>` | API key (session only) |
+| `--thinking <level>` | off, minimal, low, medium, high, xhigh |
+| `-c`, `--continue` | Continue last session |
+| `-r`, `--resume` | Browse sessions |
+| `-p`, `--print` | Print mode (non-interactive) |
+| `--no-session` | Don't save session |
+| `--verbose` | Verbose startup |
 | `-v`, `--version` | Show version |
 
-### File Arguments
-
-Prefix files with `@` to include in the message:
-
-```bash
-pi @prompt.md "Answer this"
-pi -p @screenshot.png "What's in this image?"
-pi @code.ts @test.ts "Review these files"
-```
-
-### Examples
-
-```bash
-# Interactive with initial prompt
-pi "List all .ts files in src/"
-
-# Non-interactive
-pi -p "Summarize this codebase"
-
-# Different model
-pi --provider openai --model gpt-4o "Help me refactor"
-
-# Model with provider prefix (no --provider needed)
-pi --model openai/gpt-4o "Help me refactor"
-
-# Model with thinking level shorthand
-pi --model sonnet:high "Solve this complex problem"
-
-# Limit model cycling
-pi --models "claude-*,gpt-4o"
-
-# Read-only mode
-pi --tools read,grep,find,ls -p "Review the code"
-
-# High thinking level
-pi --thinking high "Solve this complex problem"
-```
-
-### Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `PI_CODING_AGENT_DIR` | Override config directory (default: `~/.pi/agent`) |
-| `PI_PACKAGE_DIR` | Override package directory (useful for Nix/Guix where store paths tokenize poorly) |
-| `PI_SKIP_VERSION_CHECK` | Skip version check at startup |
-| `PI_CACHE_RETENTION` | Set to `long` for extended prompt cache (Anthropic: 1h, OpenAI: 24h) |
-| `VISUAL`, `EDITOR` | External editor for Ctrl+G |
+Platform notes: [Windows](docs/windows.md) | [Termux](docs/termux.md) | [tmux](docs/tmux.md)
 
 ---
 
-## Contributing & Development
+## Philosophy
 
-See [CONTRIBUTING.md](../../CONTRIBUTING.md) for guidelines and [docs/development.md](docs/development.md) for setup, forking, and debugging.
+Phi Code follows Pi's philosophy of **aggressive extensibility** while adding the features serious developers need out of the box:
+
+- **Memory matters.** Context across sessions shouldn't require manual copy-paste.
+- **Sub-agents work.** The right agent for the right task, running in parallel.
+- **Routing saves money.** Don't use your most expensive model for `ls`.
+- **Setup should be easy.** `/phi-init` → pick provider → paste key → done.
+- **Provider-neutral.** Your choice of LLM. No vendor lock-in.
+
+Built on [Pi](https://github.com/badlogic/pi-mono) by [Mario Zechner](https://github.com/badlogic). Everything Phi adds is through Pi's extension system — 2 lines changed in core.
+
+---
+
+## Credits
+
+- **[Pi](https://github.com/badlogic/pi-mono)** by Mario Zechner — the foundation
+- **[sigma-memory](https://www.npmjs.com/package/sigma-memory)** — persistent memory system
+- **[sigma-agents](https://www.npmjs.com/package/sigma-agents)** — sub-agent routing
+- **[sigma-skills](https://www.npmjs.com/package/sigma-skills)** — skill scanning and loading
 
 ---
 
 ## License
 
 MIT
-
-## See Also
-
-- [@mariozechner/pi-ai](https://www.npmjs.com/package/@mariozechner/pi-ai): Core LLM toolkit
-- [@mariozechner/pi-agent](https://www.npmjs.com/package/@mariozechner/pi-agent): Agent framework
-- [@mariozechner/pi-tui](https://www.npmjs.com/package/@mariozechner/pi-tui): Terminal UI components
