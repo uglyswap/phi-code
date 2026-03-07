@@ -608,104 +608,127 @@ _Edit this file to customize Phi Code's behavior for your project._
 				ctx.ui.notify("║     Φ  Phi Code Setup Wizard        ║", "info");
 				ctx.ui.notify("╚══════════════════════════════════════╝\n", "info");
 
-				// 1. Detect API keys and local providers
-				ctx.ui.notify("🔍 Detecting providers...", "info");
+				// 1. Detect providers
+				ctx.ui.notify("🔍 Detecting providers...\n", "info");
 				const providers = detectProviders();
 
+				// Also check models.json for previously configured providers
+				const modelsJsonPath = join(agentDir, "models.json");
+				try {
+					const mjContent = await readFile(modelsJsonPath, "utf-8");
+					const mjConfig = JSON.parse(mjContent);
+					if (mjConfig.providers) {
+						for (const [id, config] of Object.entries<any>(mjConfig.providers)) {
+							// Mark provider as available if it has an API key in models.json
+							if (config.apiKey) {
+								const match = providers.find(p =>
+									id.includes(p.name.toLowerCase().split(" ")[0]) ||
+									p.name.toLowerCase().replace(/\s+/g, "-") === id
+								);
+								if (match) {
+									match.available = true;
+									if (config.models?.length > 0) {
+										match.models = config.models.map((m: any) => m.id || m);
+									}
+								}
+							}
+						}
+					}
+				} catch { /* no models.json yet */ }
+
 				// Probe local providers (Ollama, LM Studio)
-				ctx.ui.notify("🔍 Probing local model servers...", "info");
 				await detectLocalProviders(providers);
 
 				let available = providers.filter(p => p.available);
+				const cloudConfigured = available.filter(p => !p.local);
 
-				// If no providers found, offer interactive API key setup
-				if (available.length === 0) {
-					ctx.ui.notify("⚠️ No API keys detected. Let's set one up!\n", "info");
-					ctx.ui.notify("**Available providers:**", "info");
-					const cloudProviders = providers.filter(p => !p.local);
-					cloudProviders.forEach((p, i) => {
-						ctx.ui.notify(`  ${i + 1}. ${p.name}`, "info");
-					});
-					ctx.ui.notify(`  ${cloudProviders.length + 1}. Ollama (local)`, "info");
-					ctx.ui.notify(`  ${cloudProviders.length + 2}. LM Studio (local)\n`, "info");
+				// Always show provider status and offer to add/change
+				ctx.ui.notify("**Provider Status:**", "info");
+				for (const p of providers) {
+					const status = p.available ? "✅" : "⬜";
+					const tag = p.local ? " (local)" : "";
+					const modelCount = p.available ? ` — ${p.models.length} model(s)` : "";
+					ctx.ui.notify(`  ${status} ${p.name}${tag}${modelCount}`, "info");
+				}
 
-					const providerChoice = await ctx.ui.input(
-						"Choose provider (number)",
-						`1-${cloudProviders.length + 2}`
-					);
-					const choiceNum = parseInt(providerChoice ?? "0");
+				// If no cloud providers have keys, prompt for setup
+				if (cloudConfigured.length === 0) {
+					ctx.ui.notify("\n⚠️ No cloud API keys configured.\n", "warning");
+				}
 
-					if (choiceNum >= 1 && choiceNum <= cloudProviders.length) {
+				// Always offer to add a provider
+				const addProvider = await ctx.ui.input(
+					"Add/change a provider? (number, or Enter to skip)",
+					providers.map((p, i) => `${i+1}=${p.name}`).join(", ")
+				);
+
+				const choiceNum = parseInt(addProvider ?? "0");
+				if (choiceNum >= 1 && choiceNum <= providers.length) {
+					const chosen = providers[choiceNum - 1];
+
+					if (chosen.local) {
+						const port = chosen.name === "Ollama" ? 11434 : 1234;
+						if (!chosen.available) {
+							ctx.ui.notify(`\n💡 **${chosen.name}** — make sure it's running on port ${port}.`, "info");
+							ctx.ui.notify("Then restart phi and run `/phi-init` again.", "info");
+							return;
+						}
+						ctx.ui.notify(`\n✅ **${chosen.name}** is running with ${chosen.models.length} model(s).`, "info");
+					} else {
 						// Cloud provider — ask for API key
-						const chosen = cloudProviders[choiceNum - 1];
-						ctx.ui.notify(`\n🔑 **${chosen.name}** selected.`, "info");
+						ctx.ui.notify(`\n🔑 **${chosen.name}**`, "info");
 
 						const apiKey = await ctx.ui.input(
 							`Enter your ${chosen.name} API key`,
-							"sk-..."
+							"Paste your key here"
 						);
 
 						if (!apiKey || apiKey.trim().length < 5) {
-							ctx.ui.notify("❌ Invalid API key. Cancelled.", "error");
-							return;
+							ctx.ui.notify("❌ Invalid API key. Skipped.", "error");
+						} else {
+							// Save to models.json
+							let modelsConfig: any = { providers: {} };
+							try {
+								const existing = await readFile(modelsJsonPath, "utf-8");
+								modelsConfig = JSON.parse(existing);
+							} catch { /* new file */ }
+
+							const providerId = chosen.name.toLowerCase().replace(/\s+/g, "-");
+							modelsConfig.providers[providerId] = {
+								baseUrl: chosen.baseUrl,
+								api: "openai-completions",
+								apiKey: apiKey.trim(),
+								models: chosen.models.map((id: string) => ({
+									id,
+									name: id,
+									reasoning: true,
+									input: ["text"],
+									contextWindow: 131072,
+									maxTokens: 16384,
+								})),
+							};
+
+							await writeFile(modelsJsonPath, JSON.stringify(modelsConfig, null, 2), "utf-8");
+							process.env[chosen.envVar] = apiKey.trim();
+							chosen.available = true;
+
+							const masked = apiKey.trim().substring(0, 6) + "..." + apiKey.trim().slice(-4);
+							ctx.ui.notify(`✅ **${chosen.name}** saved (${masked})`, "info");
+							ctx.ui.notify(`   ${chosen.models.length} models configured in \`models.json\``, "info");
 						}
-
-						// Save to models.json for persistence
-						const modelsJsonPath = join(agentDir, "models.json");
-						let modelsConfig: any = { providers: {} };
-						try {
-							const existing = await readFile(modelsJsonPath, "utf-8");
-							modelsConfig = JSON.parse(existing);
-						} catch { /* file doesn't exist yet */ }
-
-						// Build provider config with correct provider ID
-						const providerId = chosen.name.toLowerCase().replace(/\s+/g, "-");
-						modelsConfig.providers[providerId] = {
-							baseUrl: chosen.baseUrl,
-							api: "openai-completions",
-							apiKey: apiKey.trim(),
-							models: chosen.models.map((id: string) => ({
-								id,
-								name: id,
-								reasoning: true,
-								input: ["text"],
-								contextWindow: 131072,
-								maxTokens: 16384,
-							})),
-						};
-
-						await writeFile(modelsJsonPath, JSON.stringify(modelsConfig, null, 2), "utf-8");
-
-						// Also set in current session
-						process.env[chosen.envVar] = apiKey.trim();
-						chosen.available = true;
-
-						ctx.ui.notify(`\n✅ API key saved to \`~/.phi/agent/models.json\``, "info");
-						ctx.ui.notify(`   ${chosen.models.length} models configured.`, "info");
-						ctx.ui.notify(`   ⚠️ **Restart phi** for models to load.\n`, "warning");
-						ctx.ui.notify("Run `phi` again, then `/phi-init` to complete setup.", "info");
-						return;
-
-					} else if (choiceNum === cloudProviders.length + 1 || choiceNum === cloudProviders.length + 2) {
-						const localName = choiceNum === cloudProviders.length + 1 ? "Ollama" : "LM Studio";
-						const port = choiceNum === cloudProviders.length + 1 ? 11434 : 1234;
-						ctx.ui.notify(`\n💡 **${localName}** selected. Make sure it's running on port ${port}.`, "info");
-						ctx.ui.notify(`Then restart phi and run /phi-init again.`, "info");
-						return;
-					} else {
-						ctx.ui.notify("❌ Invalid choice. Cancelled.", "error");
-						return;
 					}
 				}
 
-				ctx.ui.notify(`✅ Found ${available.length} provider(s):`, "info");
-				for (const p of available) {
-					const tag = p.local ? " (local)" : "";
-					ctx.ui.notify(`  • ${p.name}${tag} — ${p.models.length} model(s)${p.local ? ": " + p.models.join(", ") : ""}`, "info");
+				// Re-check available after potential additions
+				available = providers.filter(p => p.available);
+
+				if (available.length === 0) {
+					ctx.ui.notify("\n❌ No providers available. Run `/phi-init` again after setting up a provider.", "error");
+					return;
 				}
 
 				const allModels = getAllAvailableModels(providers);
-				ctx.ui.notify(`  Total: ${allModels.length} models available\n`, "info");
+				ctx.ui.notify(`\n✅ **${allModels.length} models** available from ${available.length} provider(s).\n`, "info");
 
 				// 2. Choose mode
 				ctx.ui.notify("Choose setup mode:\n" +
