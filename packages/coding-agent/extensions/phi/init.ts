@@ -636,70 +636,33 @@ _Edit this file to customize Phi Code's behavior for your project._
 	async function manualMode(availableModels: string[], ctx: any): Promise<Record<string, { preferred: string; fallback: string }>> {
 		ctx.ui.notify("🎛️ Manual mode: assign a model to each task category.\n", "info");
 
-		const modelList = availableModels.map((m, i) => `  ${i + 1}. ${m}`).join("\n");
-		ctx.ui.notify(`Available models:\n${modelList}\n`, "info");
+		const modelOptions = ["default (use current model)", ...availableModels];
 		const assignments: Record<string, { preferred: string; fallback: string }> = {};
 
 		for (const role of TASK_ROLES) {
-			ctx.ui.notify(`\n**${role.label}** — ${role.desc}\nDefault: ${role.defaultModel}`, "info");
-			const input = await ctx.ui.input(
-				`${role.label}`,
-				`Model name or # (default: ${role.defaultModel})`
+			// Primary model selection
+			const chosen = await ctx.ui.select(
+				`${role.label} — ${role.desc}`,
+				modelOptions,
 			);
+			const preferredModel = (chosen && chosen !== modelOptions[0]) ? chosen : "default";
 
-			let chosen = role.defaultModel;
-			const trimmed = (input ?? "").trim();
-
-			if (trimmed) {
-				// Try as number
-				const num = parseInt(trimmed);
-				if (num >= 1 && num <= availableModels.length) {
-					chosen = availableModels[num - 1];
-				} else {
-					// Try as model name (partial match)
-					const match = availableModels.find(m => m.toLowerCase().includes(trimmed.toLowerCase()));
-					if (match) chosen = match;
-				}
-			}
-
-			// Fallback selection
-			const fallbackDefault = availableModels.find(m => m !== chosen) || chosen;
-			const fallbackInput = await ctx.ui.input(
+			// Fallback model selection
+			const fallbackOptions = modelOptions.filter(m => m !== chosen);
+			const fallbackChoice = await ctx.ui.select(
 				`Fallback for ${role.label}`,
-				`Fallback model (default: ${fallbackDefault})`
+				fallbackOptions,
 			);
+			const fallback = (fallbackChoice && fallbackChoice !== modelOptions[0]) ? fallbackChoice : "default";
 
-			let fallback = fallbackDefault;
-			if ((fallbackInput ?? "").trim()) {
-				const num = parseInt((fallbackInput ?? "").trim());
-				if (num >= 1 && num <= availableModels.length) {
-					fallback = availableModels[num - 1];
-				} else {
-					const match = availableModels.find(m => m.toLowerCase().includes((fallbackInput ?? "").trim().toLowerCase()));
-					if (match) fallback = match;
-				}
-			}
-
-			assignments[role.key] = { preferred: chosen, fallback };
-			ctx.ui.notify(`  ✅ ${role.label}: ${chosen} (fallback: ${fallback})`, "info");
+			assignments[role.key] = { preferred: preferredModel, fallback };
+			ctx.ui.notify(`  ✅ ${role.label}: ${preferredModel} (fallback: ${fallback})`, "info");
 		}
 
 		// Default model
-		const defaultInput = await ctx.ui.input(
-			"Default model",
-			`Model for general tasks (default: ${availableModels[0]})`
-		);
-		let defaultModel = availableModels[0];
-		if ((defaultInput ?? "").trim()) {
-			const num = parseInt((defaultInput ?? "").trim());
-			if (num >= 1 && num <= availableModels.length) {
-				defaultModel = availableModels[num - 1];
-			} else {
-				const match = availableModels.find(m => m.toLowerCase().includes((defaultInput ?? "").trim().toLowerCase()));
-				if (match) defaultModel = match;
-			}
-		}
-		assignments["default"] = { preferred: defaultModel, fallback: availableModels[0] };
+		const defaultChoice = await ctx.ui.select("Default model (for general tasks)", modelOptions);
+		let defaultModel = (defaultChoice && defaultChoice !== modelOptions[0]) ? defaultChoice : "default";
+		assignments["default"] = { preferred: defaultModel, fallback: availableModels[0] || "default" };
 
 		return assignments;
 	}
@@ -766,15 +729,20 @@ _Edit this file to customize Phi Code's behavior for your project._
 					ctx.ui.notify("\n⚠️ No cloud API keys configured.\n", "warning");
 				}
 
-				// Always offer to add a provider
-				const addProvider = await ctx.ui.input(
-					"Add/change a provider? (number, or Enter to skip)",
-					providers.map((p, i) => `${i+1}=${p.name}`).join(", ")
-				);
+				// Always offer to add a provider via select menu
+				const providerOptions = [
+					"Skip (continue with current providers)",
+					...providers.map(p => {
+						const status = p.available ? "✅" : "⬜";
+						const tag = p.local ? " (local)" : "";
+						return `${status} ${p.name}${tag}`;
+					}),
+				];
+				const addProvider = await ctx.ui.select("Add or change a provider?", providerOptions);
 
-				const choiceNum = parseInt(addProvider ?? "0");
-				if (choiceNum >= 1 && choiceNum <= providers.length) {
-					const chosen = providers[choiceNum - 1];
+				const choiceIdx = providerOptions.indexOf(addProvider ?? "");
+				if (choiceIdx > 0) { // 0 = Skip
+					const chosen = providers[choiceIdx - 1];
 
 					if (chosen.local) {
 						const port = chosen.name === "Ollama" ? 11434 : 1234;
@@ -844,19 +812,14 @@ _Edit this file to customize Phi Code's behavior for your project._
 				ctx.ui.notify(`\n✅ **${allModels.length} models** available from ${available.length} provider(s).\n`, "info");
 
 				// 2. Choose mode
-				ctx.ui.notify("Choose setup mode:\n" +
-					"  1. auto      — Use optimal defaults (instant)\n" +
-					"  2. benchmark — Test models first, assign by results (10-15 min)\n" +
-					"  3. manual    — Choose each model yourself\n", "info");
-
-				const modeInput = await ctx.ui.input(
-					"Setup mode",
-					"1=auto, 2=benchmark, 3=manual"
-				);
-
-				const modeStr = (modeInput ?? "").trim().toLowerCase();
-				const mode = modeStr.startsWith("2") || modeStr.startsWith("b") ? "benchmark"
-					: modeStr.startsWith("3") || modeStr.startsWith("m") ? "manual"
+				const modeOptions = [
+					"auto — Use optimal defaults (instant)",
+					"benchmark — Test models first, assign by results (10-15 min)",
+					"manual — Choose each model yourself",
+				];
+				const modeChoice = await ctx.ui.select("Setup mode", modeOptions);
+				const mode = (modeChoice ?? "").startsWith("benchmark") ? "benchmark"
+					: (modeChoice ?? "").startsWith("manual") ? "manual"
 					: "auto";
 
 				ctx.ui.notify(`\n📋 Mode: **${mode}**\n`, "info");
