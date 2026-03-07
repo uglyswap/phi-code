@@ -374,15 +374,48 @@ export class InteractiveMode {
 
 		// Add header with keybindings from config (unless silenced)
 		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
-			const asciiLogo = [
+			// Gradient colors: yellow → orange → pink → magenta
+			const gradientColors = [
+				[255, 230, 0],   // yellow
+				[255, 180, 0],   // orange-yellow
+				[255, 140, 0],   // orange
+				[255, 100, 50],  // red-orange
+				[255, 70, 100],  // pink
+				[220, 50, 150],  // hot pink
+				[200, 50, 180],  // magenta-pink
+				[180, 50, 220],  // magenta
+			];
+			const applyGradient = (line: string): string => {
+				const chars = [...line];
+				const visibleChars = chars.filter(c => c !== ' ');
+				const totalVisible = visibleChars.length;
+				let visibleIdx = 0;
+				return chars.map(c => {
+					if (c === ' ') return c;
+					const t = totalVisible > 1 ? visibleIdx / (totalVisible - 1) : 0;
+					visibleIdx++;
+					const segLen = gradientColors.length - 1;
+					const seg = Math.min(Math.floor(t * segLen), segLen - 1);
+					const local = (t * segLen) - seg;
+					const [r1, g1, b1] = gradientColors[seg];
+					const [r2, g2, b2] = gradientColors[seg + 1];
+					const r = Math.round(r1 + (r2 - r1) * local);
+					const g = Math.round(g1 + (g2 - g1) * local);
+					const b = Math.round(b1 + (b2 - b1) * local);
+					return `\x1b[38;2;${r};${g};${b}m${c}\x1b[0m`;
+				}).join('');
+			};
+			const asciiLines = [
 				"  ██████╗ ██╗  ██╗██╗",
 				"  ██╔══██╗██║  ██║██║",
 				"  ██████╔╝███████║██║",
 				"  ██╔═══╝ ██╔══██║██║",
 				"  ██║     ██║  ██║██║",
 				"  ╚═╝     ╚═╝  ╚═╝╚═╝",
-			].map(line => theme.fg("accent", line)).join("\n");
-			const logo = asciiLogo + "\n  " + theme.bold(theme.fg("accent", "Φ " + APP_NAME.toUpperCase())) + theme.fg("dim", ` v${this.version}`) + theme.fg("dim", " — The Ultimate Coding Agent");
+			];
+			const asciiLogo = asciiLines.map(line => applyGradient(line)).join("\n");
+			const phiLabel = applyGradient("Φ " + APP_NAME.toUpperCase());
+			const logo = asciiLogo + "\n  " + phiLabel + theme.fg("dim", ` v${this.version}`) + theme.fg("dim", " — The Ultimate Coding Agent");
 
 			// Build startup instructions using keybinding hint helpers
 			const kb = this.keybindings;
