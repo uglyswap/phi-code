@@ -258,28 +258,52 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
-## 📝 Credits
+## 📝 Credits & Acknowledgments
 
-Phi Code is built on the excellent foundation of **Pi** by [Mario Zechner](https://github.com/badlogic/pi-mono). We extend our gratitude to:
+Phi Code is a fork of **[Pi](https://github.com/badlogic/pi-mono)**, an exceptional open-source coding agent created by **[Mario Zechner](https://github.com/badlogic)** ([@badaboroc](https://x.com/badlogicgames)).
 
-- **Pi Core Team** - For the robust agent framework
-- **Alibaba DAMO Academy** - For the Coding Plan models
-- **OpenClaw Community** - For integration and testing
+**Pi is brilliant.** Its minimalist philosophy — a 200-token system prompt, 4 base tools, zero bloat — proves that a great agent doesn't need complexity. Pi's extension system, multi-provider architecture, and clean TypeScript codebase are a masterclass in software design. Phi Code wouldn't exist without it.
+
+**What Phi Code adds on top of Pi:**
+- Persistent memory across sessions (QMD + Ontology + Notes)
+- Typed sub-agents with intelligent model routing
+- Orchestration for complex multi-step tasks
+- Dynamic skills system
+- 8 free Alibaba Coding Plan models out of the box
+
+We kept Pi's core virtually untouched (only 2 lines modified out of 500+ files) — everything is additive via extensions and new packages. This means you can merge upstream Pi updates in minutes.
+
+### Thank you to:
+- **[Mario Zechner](https://github.com/badlogic)** — For creating Pi and open-sourcing it under MIT. Pi is one of the best coding agents ever made. ⭐
+- **[Alibaba Cloud](https://www.alibabacloud.com/)** — For the Coding Plan providing free access to powerful models
+- **The Pi community** — For building an incredible ecosystem of extensions and providers
+
+> *"Standing on the shoulders of giants."*
+> — Phi Code is Pi, evolved. If you love Phi Code, go star [Pi on GitHub](https://github.com/badlogic/pi-mono) too. 🌟
 
 ---
 
 ## 📄 License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License — same as Pi. See [LICENSE](LICENSE) for details.
+
+Original copyright: © 2025 Mario Zechner
 
 ---
 
 ## 🚀 Get Started Today
 
 ```bash
-npx phi-code init
+# Install globally
+npm install -g phi-code
+
+# Or run directly
+npx phi-code
+
+# Initialize your first project
+phi init
 ```
 
 Transform your coding workflow with the power of AI orchestration.
 
-**[Documentation](docs/)** • **[Examples](examples/)** • **[Community](https://github.com/uglyswap/phi-code/discussions)**
+**[GitHub](https://github.com/uglyswap/phi-code)** • **[Pi (upstream)](https://github.com/badlogic/pi-mono)** • **[Issues](https://github.com/uglyswap/phi-code/issues)**
