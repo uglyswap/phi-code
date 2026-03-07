@@ -1,7 +1,7 @@
 {
-  "name": "sigma-agents",
+  "name": "sigma-skills",
   "version": "0.1.0",
-  "description": "Intelligent sub-agent system with model routing for Phi Code",
+  "description": "Dynamic skill loading system for Phi Code",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -17,7 +17,7 @@
     "url": "https://github.com/uglyswap/phi-code.git"
   },
   "homepage": "https://github.com/uglyswap/phi-code",
-  "keywords": ["agents", "routing", "typescript", "phi-code"],
+  "keywords": ["skills", "dynamic-loading", "typescript", "phi-code"],
   "license": "MIT",
   "files": ["dist", "src", "README.md"]
 }
