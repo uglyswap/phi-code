@@ -1,199 +1,638 @@
-# Phi Code
-## The Ultimate Coding Agent - Powered by Memory, Sub-Agents, and Orchestration
+# Φ Phi Code
 
-🚀 **Phi Code** is a revolutionary fork of [Pi](https://github.com/badlogic/pi-mono), transformed into the ultimate AI coding agent. Built for developers who demand more than basic autocomplete, Phi Code combines cutting-edge AI with sophisticated agent orchestration to handle complex software projects.
+**The open-source coding agent with persistent memory, sub-agents, and intelligent routing.**
 
----
-
-## ✨ What Makes Phi Code Different
-
-| Feature | Claude Code | Phi Code |
-|---------|-------------|----------|
-| **Memory System** | ❌ Session-only | ✅ Persistent project memory |
-| **Sub-Agents** | ❌ Single agent | ✅ Parallel task execution |
-| **Provider Routing** | ❌ Single provider | ✅ Smart model routing |
-| **Orchestration** | ❌ Manual coordination | ✅ Automated workflow management |
-| **Skills System** | ❌ Basic tools | ✅ Extensible capabilities |
-| **Free Powerful Models** | ❌ Paid only | ✅ Alibaba Coding Plan bundled |
-
----
-
-## 🏗️ Architecture: 7 Core Components
+A fork of [Pi](https://github.com/badlogic/pi-mono) by [Mario Zechner](https://github.com/badlogic) — enhanced with memory, orchestration, and 8 free AI models.
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   PROVIDERS     │    │   BENCHMARK     │    │    MEMORY       │
-│                 │    │                 │    │                 │
-│ • OpenAI        │    │ • Model testing │    │ • Project state │
-│ • Anthropic     │    │ • Performance   │    │ • Code context  │
-│ • Alibaba Plan  │    │ • Cost tracking │    │ • Learning data │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         └───────────────────────┼───────────────────────┘
-                                 │
-    ┌────────────────────────────┼────────────────────────────┐
-    │                     PHI CODE CORE                       │
-    └────────────────────────────┼────────────────────────────┘
-                                 │
-         ┌───────────────────────┼───────────────────────┐
-         │                       │                       │
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   SUB-AGENTS    │    │    ROUTING      │    │  ORCHESTRATOR   │
-│                 │    │                 │    │                 │
-│ • Task parallel │    │ • Smart model   │    │ • Workflow mgmt │
-│ • Specialized   │    │ • Load balance  │    │ • Agent coord   │
-│ • Auto-scaling  │    │ • Cost optimize │    │ • Auto-recovery │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                                 │
-                        ┌─────────────────┐
-                        │     SKILLS      │
-                        │                 │
-                        │ • Code gen      │
-                        │ • Refactoring   │
-                        │ • Testing       │
-                        │ • Deployment    │
-                        └─────────────────┘
-```
-
----
-
-## 🚀 Quick Start
-
-### Install Globally
-```bash
 npm install -g @phi-code-admin/phi-code
-```
-
-### Initialize Your Project
-```bash
-phi init
-```
-
-### Start Coding
-```bash
-phi chat
-```
-
-That's it! Phi Code will auto-configure with powerful Alibaba Coding Plan models (free tier included) and create a smart coding environment tailored to your project.
-
----
-
-## 💡 Key Features
-
-### 🧠 **Persistent Memory System**
-- **Project Memory**: Remembers your codebase structure, patterns, and decisions
-- **Learning Engine**: Adapts to your coding style and preferences
-- **Context Awareness**: Maintains state across sessions and conversations
-
-### 🤖 **Advanced Sub-Agent System**
-- **Parallel Execution**: Run multiple coding tasks simultaneously
-- **Specialized Agents**: Different agents for testing, documentation, refactoring
-- **Auto-Scaling**: Dynamically spawn agents based on workload
-
-### 🔀 **Intelligent Provider Routing**
-- **Smart Selection**: Automatically choose the best model for each task
-- **Load Balancing**: Distribute requests across multiple providers
-- **Cost Optimization**: Route to most cost-effective models when possible
-
-### 🎯 **Workflow Orchestration**
-- **Automated Pipelines**: Chain complex coding workflows
-- **Error Recovery**: Automatically retry failed operations
-- **Progress Tracking**: Real-time visibility into multi-step operations
-
-### 🛠️ **Extensible Skills System**
-- **Code Generation**: From simple functions to complete applications
-- **Intelligent Refactoring**: Structure-aware code improvements
-- **Automated Testing**: Generate comprehensive test suites
-- **Deployment Automation**: From code to production
-
-### 🧩 **Phi Extensions** 
-Phi Code includes a comprehensive set of TypeScript extensions that enhance the coding experience:
-
-- **🧠 Memory Extension**: Persistent memory with search, write, and read capabilities
-- **🎯 Smart Router**: Intelligent model routing based on task analysis  
-- **📋 Orchestrator**: High-level project planning and task breakdown
-- **🧩 Skill Loader**: Dynamic loading of specialized coding skills
-- **🌐 Web Search**: Internet search integration with Brave API and DuckDuckGo fallback
-- **🏆 Benchmark**: Integrated AI model performance testing and comparison
-
-*See [packages/coding-agent/extensions/phi/README.md](packages/coding-agent/extensions/phi/README.md) for detailed documentation.*
-
-### 🌏 **Alibaba Coding Plan Integration**
-Built-in access to powerful Chinese AI models:
-- **Qwen 3.5 Plus** - Advanced reasoning and code understanding
-- **Qwen 3 Coder Plus** - Specialized coding model
-- **Kimi K2.5** - Long-context reasoning
-- **GLM 5** - Multi-modal capabilities
-- **MiniMax M2.5** - Efficient task execution
-
----
-
-## 🏗️ Example Workflows
-
-### **Multi-Agent Code Review**
-```bash
-phi review --parallel
-# Spawns multiple agents to review different aspects:
-# - Code quality and patterns
-# - Security vulnerabilities  
-# - Performance optimizations
-# - Documentation completeness
-```
-
-### **Intelligent Refactoring**
-```bash
-phi refactor --smart-routing
-# Routes different refactoring tasks to optimal models:
-# - Structure changes → Qwen 3 Coder Plus
-# - Logic optimization → GPT-4
-# - Documentation → Claude 3.5 Sonnet
-```
-
-### **Automated Testing Pipeline**
-```bash
-phi test --orchestrate
-# Creates comprehensive test pipeline:
-# 1. Analyzes code coverage gaps
-# 2. Generates unit tests (parallel)
-# 3. Creates integration tests
-# 4. Validates test quality
-# 5. Generates performance tests
+phi
 ```
 
 ---
 
-## 🆚 Comparison with Alternatives
+## Table of Contents
 
-| Capability | Phi Code | Cursor | GitHub Copilot | Claude Code |
-|------------|----------|---------|----------------|-------------|
-| **Multi-Agent** | ✅ Advanced | ❌ Single | ❌ Single | ❌ Single |
-| **Memory** | ✅ Persistent | 🔶 Limited | 🔶 Context | ❌ None |
-| **Model Variety** | ✅ 10+ providers | 🔶 Few | ❌ OpenAI only | 🔶 Anthropic |
-| **Free Tier** | ✅ Alibaba Plan | ❌ Paid | 🔶 Limited | ❌ Paid |
-| **Orchestration** | ✅ Full | ❌ Manual | ❌ Manual | ❌ Manual |
-| **Open Source** | ✅ MIT | ❌ Closed | ❌ Closed | ✅ Open |
+- [Why Phi Code](#why-phi-code)
+- [Quick Start](#quick-start)
+- [Architecture](#architecture)
+- [Extensions](#extensions)
+- [Skills](#skills)
+- [Sub-Agents](#sub-agents)
+- [Intelligent Routing](#intelligent-routing)
+- [Memory System](#memory-system)
+- [Models & Providers](#models--providers)
+- [Local Models (Ollama, LM Studio)](#local-models-ollama-lm-studio)
+- [Commands](#commands)
+- [Configuration](#configuration)
+- [Build from Source](#build-from-source)
+- [Credits](#credits)
+- [License](#license)
 
 ---
 
-## 🔧 Configuration
+## Why Phi Code
 
-Phi Code supports extensive customization:
+Phi Code takes Pi's brilliant minimal architecture and adds what's missing for serious projects:
 
-### **Model Configuration**
-Edit `~/.phi/agent/models.json` to add custom providers:
+| | Pi | Phi Code |
+|---|---|---|
+| **Memory** | None (session-only) | Persistent across sessions (notes + ontology + vector search) |
+| **Sub-agents** | Single agent | 5 specialized agents with parallel execution |
+| **Model routing** | Manual selection | Automatic task→model matching |
+| **Orchestration** | Manual | `/plan` command generates spec.md + todo.md |
+| **Skills** | Community | 12 bundled coding skills loaded on demand |
+| **Free models** | BYO key | 8 Alibaba Coding Plan models at $0 |
+| **Web search** | None | Brave API + DuckDuckGo fallback |
+
+Pi's core is untouched — only 2 lines modified out of 500+ files. Everything is additive: extensions, skills, and new packages. Upstream Pi updates merge in minutes.
+
+---
+
+## Quick Start
+
+### Install
+
+```bash
+# Install globally
+npm install -g @phi-code-admin/phi-code
+
+# Or run directly without installing
+npx @phi-code-admin/phi-code
+```
+
+### First Run
+
+```bash
+# Start Phi Code in the current directory
+phi
+
+# Initialize with the setup wizard (optional)
+phi
+# Then type: /phi-init
+```
+
+The setup wizard detects your API keys, configures routing, and creates sub-agent definitions.
+
+### Requirements
+
+- **Node.js** 18+ (tested on 22.x)
+- **Operating systems**: Linux, macOS, Windows (via Git Bash, WSL, or native)
+- **API key** (optional): Alibaba Coding Plan key for free models, or any OpenAI-compatible key
+
+---
+
+## Architecture
+
+Phi Code is a monorepo with 7 packages:
+
+```
+phi-code/
+├── packages/
+│   ├── ai/                  # phi-code-ai — Provider abstraction (20+ providers)
+│   ├── agent-core/          # phi-code-agent — Core agent loop, tools, context
+│   ├── tui/                 # phi-code-tui — Terminal UI (Ink-based)
+│   ├── coding-agent/        # @phi-code-admin/phi-code — Main CLI entry point
+│   │   ├── extensions/phi/  # 8 TypeScript extensions (auto-loaded)
+│   │   └── skills/          # 12 bundled coding skills (loaded on demand)
+│   ├── sigma-memory/        # sigma-memory — Memory subsystem (notes + ontology + QMD)
+│   ├── sigma-agents/        # sigma-agents — Sub-agent routing and profiles
+│   └── sigma-skills/        # sigma-skills — Skill scanner and loader
+├── agents/                  # 5 sub-agent definitions (.md with YAML frontmatter)
+├── skills/                  # Source skills (copied to coding-agent/skills/)
+└── config/                  # Default routing configuration
+```
+
+### How it loads at startup
+
+1. **Extensions**: The loader scans 3 locations in order:
+   - `.phi/extensions/` in the current project directory
+   - `~/.phi/agent/extensions/` (global user extensions)
+   - Bundled extensions shipped with the package (8 extensions)
+   
+2. **Skills**: Listed in the system prompt as name + description only. The model reads the full skill content via the `read` tool only when relevant. Zero context overhead for unused skills.
+
+3. **Memory**: The `memory.ts` extension auto-loads `AGENTS.md` from `~/.phi/memory/` at session start if it exists.
+
+4. **Routing**: The `smart-router.ts` extension loads `~/.phi/agent/routing.json` and analyzes each user input to suggest the optimal model.
+
+---
+
+## Extensions
+
+Phi Code includes 8 TypeScript extensions that are automatically loaded at startup. Each registers tools, commands, or event handlers.
+
+### Memory Extension (`memory.ts`)
+
+Persistent memory powered by the `sigma-memory` package. Three layers:
+
+| Layer | Storage | Use case |
+|-------|---------|----------|
+| **Notes** | Markdown files in `~/.phi/memory/` | Daily notes, learnings, decisions |
+| **Ontology** | JSONL graph in `~/.phi/memory/ontology/graph.jsonl` | Entities, relations, project architecture |
+| **QMD** | SQLite + GGUF vectors (if QMD binary available) | Semantic search across all documents |
+
+**Tools registered:**
+
+| Tool | Description |
+|------|-------------|
+| `memory_search` | Unified search across notes, ontology, and QMD. Returns ranked results from all three layers. |
+| `memory_write` | Write content to a memory file. Defaults to today's date if no filename given. |
+| `memory_read` | Read a specific memory file, or list all available files. |
+| `memory_status` | Show status of all memory subsystems (file counts, QMD availability, ontology stats). |
+
+**Behavior:** At session start, if `~/.phi/memory/AGENTS.md` exists, its content is injected into the system prompt as persistent instructions.
+
+### Smart Router Extension (`smart-router.ts`)
+
+Analyzes user input keywords and suggests the best model for the task.
+
+**Routing categories:**
+
+| Category | Keywords | Preferred Model | Agent |
+|----------|----------|----------------|-------|
+| `code` | implement, create, build, refactor, write, add, modify | `qwen3-coder-plus` | code |
+| `debug` | fix, bug, error, debug, crash, broken, failing | `qwen3-max-2026-01-23` | code |
+| `explore` | read, analyze, explain, understand, find, search | `kimi-k2.5` | explore |
+| `plan` | plan, design, architect, spec, structure, organize | `qwen3-max-2026-01-23` | plan |
+| `test` | test, verify, validate, check, assert, coverage | `kimi-k2.5` | test |
+| `review` | review, audit, quality, security, improve, optimize | `qwen3.5-plus` | review |
+
+**Configuration:** Override defaults in `~/.phi/agent/routing.json`. Full schema in `config/routing.json`.
+
+**Command:** `/routing` — show current routing configuration and model assignments.
+
+### Orchestrator Extension (`orchestrator.ts`)
+
+Breaks down complex project descriptions into structured plans.
+
+**Tool:**
+
+| Tool | Description |
+|------|-------------|
+| `orchestrate` | Takes a project description, generates `spec.md` (requirements) and `todo.md` (actionable tasks). Files saved in `.phi/plans/` |
+
+**Commands:**
+- `/plan` — Interactive: describe your project, get a structured plan with spec + todo
+- `/plans` — List all existing plans in `.phi/plans/`
+
+**Philosophy:** Plans are stored on disk, not in LLM context. This respects Pi's minimalist approach — the system prompt stays at ~200 tokens. The agent reads plan files via the `read` tool when needed.
+
+### Skill Loader Extension (`skill-loader.ts`)
+
+Dynamically discovers and loads skills from:
+- `~/.phi/agent/skills/` (global user skills)
+- `.phi/skills/` (project-local skills)
+- Bundled skills (12 shipped with the package)
+
+**How it works:**
+1. At session start, scans all skill directories
+2. Injects skill name + description into the system prompt (lightweight)
+3. On each user input, matches keywords against skill descriptions
+4. If a skill matches, notifies the model that relevant skills are available
+5. The model uses the `read` tool to load the full skill content only when needed
+
+**Command:** `/skills` — List all discovered skills with their sources and descriptions.
+
+### Web Search Extension (`web-search.ts`)
+
+Adds internet search capabilities with two providers:
+
+| Provider | Activation | Features |
+|----------|-----------|----------|
+| **Brave Search** | Set `BRAVE_API_KEY` environment variable | Rich results with descriptions, URLs |
+| **DuckDuckGo** | Automatic fallback (no key needed) | Basic search results via HTML scraping |
+
+**Tool:**
+
+| Tool | Description |
+|------|-------------|
+| `web_search` | Search the web. Uses Brave if API key available, falls back to DuckDuckGo. Returns titles, URLs, and descriptions. |
+
+**Command:** `/search <query>` — Quick search from the command line.
+
+### Benchmark Extension (`benchmark.ts`)
+
+Tests and compares AI model performance on coding tasks.
+
+**Current test:** Fibonacci function generation (JavaScript) — measures correctness and response time.
+
+**Results saved:** `~/.phi/benchmark/results.json` — persistent across sessions.
+
+**Command:** `/benchmark` — Run benchmark on all available models and display comparison table.
+
+### Init Extension (`init.ts`)
+
+Interactive setup wizard for first-time configuration.
+
+**Command:** `/phi-init`
+
+**Steps:**
+1. Detects available API keys (Alibaba, OpenAI, Anthropic, etc.)
+2. Lists available models for each provider
+3. Asks for configuration mode (auto / benchmark / manual)
+4. Creates `~/.phi/agent/` directory structure
+5. Writes routing configuration
+6. Copies default sub-agent definitions
+7. Activates extensions
+
+---
+
+## Skills
+
+Skills are specialized knowledge files that the model loads on demand. Each skill is a directory containing a `SKILL.md` file with instructions for a specific domain.
+
+### 12 Bundled Skills
+
+| Skill | Description |
+|-------|-------------|
+| **api-design** | REST API conventions, endpoint naming, status codes, pagination, versioning |
+| **coding-standards** | TypeScript/JavaScript best practices, naming conventions, async patterns |
+| **database** | Schema design, SQL optimization, migrations, indexing strategies |
+| **devops** | Docker, CI/CD, deployment, monitoring, infrastructure automation |
+| **docker-ops** | Dockerfiles, docker-compose, multi-stage builds, health checks |
+| **git-workflow** | Branch strategy, conventional commits, merge vs rebase, conflict resolution |
+| **github** | Repository management, PRs, issues, Actions workflows, releases |
+| **performance** | Profiling, caching, lazy loading, memory optimization, Amdahl's Law |
+| **prompt-architect** | Structured LLM prompts, role/context/task patterns, few-shot examples |
+| **security** | OWASP Top 10, input validation, auth patterns, secrets management |
+| **self-improving** | Error documentation, learning protocols, continuous improvement |
+| **testing** | Test pyramid, unit/integration/E2E, TDD, mocking, coverage strategies |
+
+### How Skills Work (Zero Context Overhead)
+
+Skills are **not** loaded into context at startup. Only their names and one-line descriptions appear in the system prompt:
+
+```xml
+<available_skills>
+  <skill>
+    <name>database</name>
+    <description>SQL queries, schema design, migrations, query optimization.</description>
+    <location>/path/to/skills/database/SKILL.md</location>
+  </skill>
+  ...
+</available_skills>
+```
+
+The model uses the `read` tool to load the full SKILL.md content only when the task matches. This means 12 skills cost ~20 lines of prompt, not thousands.
+
+### Adding Your Own Skills
+
+Create a directory with a `SKILL.md` file:
+
+```
+~/.phi/agent/skills/my-skill/
+└── SKILL.md
+```
+
+SKILL.md format:
+```markdown
+---
+name: my-skill
+description: What this skill helps with (one line).
+---
+
+# My Skill
+
+## When to use
+Describe when the model should load this skill.
+
+## Instructions
+Your specialized knowledge and patterns here.
+```
+
+Project-local skills go in `.phi/skills/` in your project directory.
+
+---
+
+## Sub-Agents
+
+Phi Code defines 5 specialized sub-agents, each optimized for a specific task type with its own model assignment.
+
+| Agent | Model | Tools | Role |
+|-------|-------|-------|------|
+| **explore** | `kimi-k2.5` | read, grep, find, ls, bash | Fast codebase analysis. Returns structured context for other agents. |
+| **plan** | `qwen3-max-2026-01-23` | read, grep, find, ls | Creates detailed implementation plans. Read-only — never modifies files. |
+| **code** | `qwen3-coder-plus` | read, write, edit, bash, grep, find, ls | Writes and modifies code. Full tool access for implementation. |
+| **test** | `kimi-k2.5` | read, bash, grep, find, ls | Runs tests, validates changes. Read-only except for test execution. |
+| **review** | `qwen3.5-plus` | read, grep, find, ls, bash | Senior code reviewer. Checks quality, security, maintainability. |
+
+Each agent has a structured output format defined in its `.md` file (in the `agents/` directory). This ensures consistent, parseable results.
+
+### Agent Definitions
+
+Agent definitions are Markdown files with YAML frontmatter:
+
+```markdown
+---
+name: code
+description: Writes and modifies code. Full tool access.
+tools: read, write, edit, bash, grep, find, ls
+model: qwen3-coder-plus
+---
+
+You are a coding specialist. You receive a task and implement it.
+[... detailed instructions ...]
+```
+
+Customize agents by editing files in `~/.phi/agent/agents/` or `.phi/agents/` in your project.
+
+---
+
+## Intelligent Routing
+
+The smart router analyzes each message and suggests the best model based on task type.
+
+### How It Works
+
+1. **Input analysis**: Keywords in your message are matched against routing categories
+2. **Model recommendation**: The router suggests the preferred model for that category
+3. **Fallback**: If the preferred model is unavailable, the fallback model is used
+4. **Notification**: A subtle notification shows which model is recommended (non-blocking)
+
+### Default Routes
+
+```json
+{
+  "code":    { "model": "qwen3-coder-plus",      "fallback": "qwen3.5-plus" },
+  "debug":   { "model": "qwen3-max-2026-01-23",  "fallback": "qwen3.5-plus" },
+  "explore": { "model": "kimi-k2.5",             "fallback": "glm-4.7" },
+  "plan":    { "model": "qwen3-max-2026-01-23",  "fallback": "qwen3.5-plus" },
+  "test":    { "model": "kimi-k2.5",             "fallback": "glm-4.7" },
+  "review":  { "model": "qwen3.5-plus",          "fallback": "qwen3-max-2026-01-23" }
+}
+```
+
+### Custom Routing
+
+Edit `~/.phi/agent/routing.json`:
+
+```json
+{
+  "routes": {
+    "code": {
+      "keywords": ["implement", "create", "build", "refactor"],
+      "preferredModel": "your-preferred-model",
+      "fallback": "your-fallback-model",
+      "agent": "code"
+    }
+  },
+  "default": {
+    "model": "qwen3.5-plus"
+  }
+}
+```
+
+---
+
+## Memory System
+
+The `sigma-memory` package provides three integrated memory layers.
+
+### Notes (Markdown Files)
+
+Simple, human-readable, version-controllable.
+
+```
+~/.phi/memory/
+├── AGENTS.md          # Persistent instructions (auto-loaded at session start)
+├── 2026-03-07.md      # Daily notes
+├── learnings.md       # Error documentation
+└── project-notes.md   # Custom files
+```
+
+**Operations:** write, read, list, search (grep-based), get recent, append.
+
+### Ontology (Knowledge Graph)
+
+JSONL append-only graph for structured relationships.
+
+```
+~/.phi/memory/ontology/graph.jsonl
+```
+
+Each line is a JSON object — either an entity or a relation:
+
+```json
+{"type":"entity","id":"my-api","kind":"Project","name":"My API","properties":{"language":"TypeScript"}}
+{"type":"relation","source":"my-api","target":"postgres-db","kind":"uses","properties":{}}
+```
+
+**Operations:** add entity, add relation, query by kind, BFS pathfinding between entities, stats, export.
+
+### QMD (Vector Search)
+
+Optional integration with [QMD](https://github.com/tobilu/qmd) for semantic search across all documents.
+
+- Requires the `qmd` binary to be installed separately
+- Uses SQLite + GGUF local embeddings (no API needed)
+- Searches notes, ontology, and any indexed documents
+- Falls back gracefully if QMD is not available
+
+### Unified Search
+
+`memory_search` queries all three layers simultaneously and returns results sorted by relevance score:
+
+```
+memory_search("authentication flow")
+→ Notes results (grep match in notes/auth.md)
+→ Ontology results (entities matching "auth")
+→ QMD results (semantic similarity across all documents)
+```
+
+---
+
+## Models & Providers
+
+### Built-in: Alibaba Coding Plan (Free)
+
+Phi Code ships with 8 pre-configured models from [Alibaba Cloud Coding Plan](https://help.aliyun.com/zh/model-studio/developer-reference/tongyi-qianwen-coding-plan) — all at **$0 cost**:
+
+| Model | Reasoning | Best for |
+|-------|-----------|----------|
+| **Qwen 3.5 Plus** | ✅ | General tasks, code review, complex reasoning |
+| **Qwen 3 Max** | ✅ | Planning, architecture, debugging |
+| **Qwen 3 Coder Plus** | — | Code generation, refactoring |
+| **Qwen 3 Coder Next** | — | Code generation (newer version) |
+| **Kimi K2.5** | ✅ | Exploration, testing, long-context analysis |
+| **GLM 5** | — | General tasks |
+| **GLM 4.7** | — | Fast general tasks |
+| **MiniMax M2.5** | — | Efficient task execution |
+
+All models have 131K context window and 16K max output tokens.
+
+**Setup:** Get a free Coding Plan API key from [Alibaba Cloud](https://help.aliyun.com/zh/model-studio/) and set:
+```bash
+export ALIBABA_CODING_PLAN_KEY="sk-..."
+```
+
+### Pi's Built-in Providers (20+)
+
+Phi Code inherits all of Pi's providers:
+
+| Provider | Auth | Models |
+|----------|------|--------|
+| Anthropic | API key | Claude 3.5, 4, Opus |
+| OpenAI | API key or OAuth (Codex) | GPT-4o, o1, o3 |
+| Google | API key or OAuth (Gemini CLI) | Gemini 2.5 Pro, Flash |
+| Groq | API key | Llama, Mixtral |
+| xAI | API key | Grok |
+| OpenRouter | API key | 300+ models |
+| Mistral | API key | Mistral Large, Codestral |
+| GitHub Copilot | OAuth | GPT-4o, Claude |
+| AWS Bedrock | AWS credentials | Claude, Llama |
+| Google Vertex | GCP credentials | Gemini |
+| Kimi | API key | Moonshot models |
+| MiniMax | API key | MiniMax models |
+| ... and more | | |
+
+---
+
+## Local Models (Ollama, LM Studio)
+
+Phi Code supports any OpenAI-compatible API, which includes local model servers.
+
+### Ollama
+
+1. Install [Ollama](https://ollama.ai) and pull a model:
+   ```bash
+   ollama pull qwen2.5-coder:32b
+   ```
+
+2. Add to `~/.phi/agent/models.json`:
+   ```json
+   {
+     "providers": {
+       "ollama": {
+         "baseUrl": "http://localhost:11434/v1",
+         "api": "openai-completions",
+         "apiKey": "ollama",
+         "models": [
+           {
+             "id": "qwen2.5-coder:32b",
+             "name": "Qwen 2.5 Coder 32B (local)",
+             "reasoning": false,
+             "input": ["text"],
+             "contextWindow": 32768,
+             "maxTokens": 4096,
+             "cost": { "input": 0, "output": 0 }
+           }
+         ]
+       }
+     }
+   }
+   ```
+
+3. Start Phi Code and select the model.
+
+### LM Studio
+
+1. Start LM Studio server (default port 1234)
+
+2. Add to `~/.phi/agent/models.json`:
+   ```json
+   {
+     "providers": {
+       "lm-studio": {
+         "baseUrl": "http://localhost:1234/v1",
+         "api": "openai-completions",
+         "apiKey": "lm-studio",
+         "models": [
+           {
+             "id": "your-model-name",
+             "name": "Your Local Model",
+             "contextWindow": 32768,
+             "maxTokens": 4096,
+             "cost": { "input": 0, "output": 0 }
+           }
+         ]
+       }
+     }
+   }
+   ```
+
+### Any OpenAI-Compatible Server
+
+The same approach works for vLLM, text-generation-inference, LocalAI, or any server exposing an OpenAI-compatible `/v1/chat/completions` endpoint.
+
+---
+
+## Commands
+
+Commands are typed in the Phi Code terminal with a `/` prefix.
+
+| Command | Extension | Description |
+|---------|-----------|-------------|
+| `/phi-init` | init | Interactive setup wizard — detect keys, configure routing, create agents |
+| `/benchmark` | benchmark | Test all available models on coding tasks, save results |
+| `/plan` | orchestrator | Describe a project → generates `spec.md` + `todo.md` in `.phi/plans/` |
+| `/plans` | orchestrator | List all existing plans |
+| `/skills` | skill-loader | List all discovered skills with sources and descriptions |
+| `/routing` | smart-router | Show current routing configuration and model assignments |
+| `/search <query>` | web-search | Quick web search from the terminal |
+
+Plus all of Pi's built-in commands: `/help`, `/model`, `/models`, `/tree`, `/fork`, `/compact`, `/changelog`, etc.
+
+---
+
+## Configuration
+
+### Directory Structure
+
+```
+~/.phi/
+├── agent/
+│   ├── settings.json       # Pi settings (provider, model, theme, etc.)
+│   ├── models.json          # Custom models and providers
+│   ├── routing.json         # Task→model routing rules
+│   ├── extensions/          # Global extensions (auto-discovered)
+│   ├── skills/              # Global skills (auto-discovered)
+│   └── agents/              # Sub-agent definitions
+└── memory/
+    ├── AGENTS.md            # Persistent instructions (auto-injected)
+    ├── ontology/
+    │   └── graph.jsonl      # Knowledge graph
+    └── *.md                 # Notes files
+```
+
+### settings.json
+
+Standard Pi settings. Key fields:
+
+```json
+{
+  "defaultProvider": "alibaba-codingplan",
+  "defaultModel": "qwen3.5-plus",
+  "extensions": ["/path/to/custom/extension.ts"],
+  "skills": ["/path/to/custom/skills/"],
+  "hideThinkingBlock": true,
+  "compaction": {
+    "enabled": true,
+    "threshold": 80
+  }
+}
+```
+
+### models.json
+
+Add custom providers (merged with built-in models):
+
 ```json
 {
   "providers": {
-    "custom-provider": {
-      "baseUrl": "https://your-api.com/v1",
+    "my-provider": {
+      "baseUrl": "https://api.example.com/v1",
       "api": "openai-completions",
-      "apiKey": "YOUR_API_KEY",
+      "apiKey": "MY_API_KEY_ENV_VAR",
       "models": [
         {
-          "id": "custom-model",
-          "name": "Your Custom Model",
+          "id": "model-name",
+          "name": "Display Name",
+          "reasoning": true,
+          "input": ["text"],
           "contextWindow": 200000,
-          "maxTokens": 4096
+          "maxTokens": 8192,
+          "cost": { "input": 0.003, "output": 0.015 }
         }
       ]
     }
@@ -201,109 +640,95 @@ Edit `~/.phi/agent/models.json` to add custom providers:
 }
 ```
 
-### **Agent Configuration**
-Customize sub-agent behavior in `~/.phi/agent/settings.json`:
-```json
-{
-  "agents": {
-    "maxConcurrent": 5,
-    "autoScale": true,
-    "specializationEnabled": true
-  },
-  "memory": {
-    "persistenceEnabled": true,
-    "maxContextSize": 1000000
-  },
-  "routing": {
-    "costOptimization": true,
-    "latencyPriority": "balanced"
-  }
-}
-```
+The `apiKey` field accepts either a literal key or an environment variable name (looked up at runtime).
+
+### Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `ALIBABA_CODING_PLAN_KEY` | Alibaba Coding Plan API key (free models) |
+| `BRAVE_API_KEY` | Brave Search API key (for web search) |
+| `OPENAI_API_KEY` | OpenAI models |
+| `ANTHROPIC_API_KEY` | Anthropic/Claude models |
+| `GOOGLE_API_KEY` | Google/Gemini models |
+| `OPENROUTER_API_KEY` | OpenRouter (300+ models) |
+| `GROQ_API_KEY` | Groq (fast inference) |
 
 ---
 
-## 📊 Benchmarks
+## Build from Source
 
-Phi Code consistently outperforms alternatives on complex coding tasks:
-
-| Task Type | Phi Code | Claude Code | Time Saved |
-|-----------|----------|-------------|------------|
-| **Large Refactoring** | 23 min | 2.1 hours | 82% |
-| **Test Suite Generation** | 8 min | 45 min | 82% |
-| **Multi-file Changes** | 12 min | 1.3 hours | 85% |
-| **Documentation** | 5 min | 28 min | 82% |
-
-*Benchmarks based on real-world coding scenarios. Your results may vary.*
-
----
-
-## 🛠️ Development
-
-### **Build from Source**
 ```bash
 git clone https://github.com/uglyswap/phi-code.git
 cd phi-code
 npm install
-npm run build
+
+# Build all packages (order matters)
+cd packages/tui && npx tsc -p tsconfig.build.json && cd ../..
+cd packages/ai && npx tsc -p tsconfig.build.json && cd ../..
+cd packages/agent-core && npx tsc -p tsconfig.build.json && cd ../..
+cd packages/coding-agent && npx tsc -p tsconfig.build.json && cd ../..
+
+# Run locally
+node packages/coding-agent/dist/cli.js
 ```
 
-### **Run Tests**
-```bash
-npm test
-```
+### Monorepo Structure
 
-### **Contributing**
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+| Package | npm Name | Description |
+|---------|----------|-------------|
+| `packages/tui` | `phi-code-tui` | Terminal UI (Ink-based rendering) |
+| `packages/ai` | `phi-code-ai` | Provider abstraction layer (20+ providers) |
+| `packages/agent-core` | `phi-code-agent` | Core agent: tools, context, extension API |
+| `packages/coding-agent` | `@phi-code-admin/phi-code` | CLI entry point, extensions, skills |
+| `packages/sigma-memory` | `sigma-memory` | Memory subsystem (notes + ontology + QMD) |
+| `packages/sigma-agents` | `sigma-agents` | Sub-agent routing and model profiles |
+| `packages/sigma-skills` | `sigma-skills` | Skill scanner and loader |
 
 ---
 
-## 📝 Credits & Acknowledgments
+## Credits & Acknowledgments
 
-Phi Code is a fork of **[Pi](https://github.com/badlogic/pi-mono)**, an exceptional open-source coding agent created by **[Mario Zechner](https://github.com/badlogic)** ([@badaboroc](https://x.com/badlogicgames)).
+Phi Code is a fork of **[Pi](https://github.com/badlogic/pi-mono)**, created by **[Mario Zechner](https://github.com/badlogic)** ([@badlogicgames](https://x.com/badlogicgames)).
 
-**Pi is brilliant.** Its minimalist philosophy — a 200-token system prompt, 4 base tools, zero bloat — proves that a great agent doesn't need complexity. Pi's extension system, multi-provider architecture, and clean TypeScript codebase are a masterclass in software design. Phi Code wouldn't exist without it.
+Pi is exceptional. Its minimalist philosophy — a 200-token system prompt, 4 base tools, zero bloat — is a masterclass in agent design. Pi's extension system, multi-provider architecture, and clean TypeScript codebase make it one of the best coding agents ever built.
 
 **What Phi Code adds on top of Pi:**
-- Persistent memory across sessions (QMD + Ontology + Notes)
-- Typed sub-agents with intelligent model routing
-- Orchestration for complex multi-step tasks
-- Dynamic skills system
-- 8 free Alibaba Coding Plan models out of the box
+- Persistent memory across sessions (notes + ontology + vector search)
+- 5 typed sub-agents with intelligent model routing
+- Orchestration for complex multi-step projects
+- 12 bundled coding skills loaded on demand
+- 8 free Alibaba Coding Plan models pre-configured
+- Web search integration
 
-We kept Pi's core virtually untouched (only 2 lines modified out of 500+ files) — everything is additive via extensions and new packages. This means you can merge upstream Pi updates in minutes.
+**What we didn't touch:**
+- Pi's core agent loop
+- Pi's tool system (read, write, edit, bash)
+- Pi's provider architecture (20+ providers)
+- Pi's TUI and rendering
+- Pi's extension API
 
-### Thank you to:
-- **[Mario Zechner](https://github.com/badlogic)** — For creating Pi and open-sourcing it under MIT. Pi is one of the best coding agents ever made. ⭐
+Only 2 lines modified in Pi's source — the config directory name (`.pi` → `.phi`) and the CLI binary name. Everything else is extensions and new packages.
+
+### Thank You
+
+- **[Mario Zechner](https://github.com/badlogic)** — For creating Pi and releasing it under MIT. If you like Phi Code, go star [Pi](https://github.com/badlogic/pi-mono). ⭐
 - **[Alibaba Cloud](https://www.alibabacloud.com/)** — For the Coding Plan providing free access to powerful models
-- **The Pi community** — For building an incredible ecosystem of extensions and providers
-
-> *"Standing on the shoulders of giants."*
-> — Phi Code is Pi, evolved. If you love Phi Code, go star [Pi on GitHub](https://github.com/badlogic/pi-mono) too. 🌟
+- **The Pi community** — For the extension ecosystem and provider integrations
 
 ---
 
-## 📄 License
+## License
 
-MIT License — same as Pi. See [LICENSE](LICENSE) for details.
+MIT License — same as Pi. See [LICENSE](LICENSE).
 
-Original copyright: © 2025 Mario Zechner
+Original Pi copyright: © 2025 Mario Zechner
 
 ---
-
-## 🚀 Get Started Today
 
 ```bash
-# Install globally
 npm install -g @phi-code-admin/phi-code
-
-# Or run directly
-npx @phi-code-admin/phi-code
-
-# Initialize your first project
-phi init
+phi
 ```
 
-Transform your coding workflow with the power of AI orchestration.
-
-**[GitHub](https://github.com/uglyswap/phi-code)** • **[Pi (upstream)](https://github.com/badlogic/pi-mono)** • **[Issues](https://github.com/uglyswap/phi-code/issues)**
+**[GitHub](https://github.com/uglyswap/phi-code)** · **[Pi (upstream)](https://github.com/badlogic/pi-mono)** · **[Issues](https://github.com/uglyswap/phi-code/issues)** · **[npm](https://www.npmjs.com/package/@phi-code-admin/phi-code)**
