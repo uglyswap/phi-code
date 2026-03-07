@@ -661,7 +661,11 @@ ${description}
    - Typical flow: explore(wave 1) → plan(wave 2) → code(wave 3) → test(wave 4) → review(wave 5)
    - But independent code tasks can run in parallel within the same wave
 
-6. **Call the orchestrate tool** with all structured data. It handles execution automatically.`
+6. **Call the orchestrate tool** with ALL fields in a SINGLE call:
+   - title, description, goals, requirements, constraints (project metadata)
+   - tasks (array of ALL task objects with title, description, agent, dependencies)
+   
+⚠️ CRITICAL: Include the \`tasks\` array in the SAME tool call as the project metadata. Do NOT make separate calls. All data must be in ONE orchestrate() invocation.`
 			);
 		},
 	});
