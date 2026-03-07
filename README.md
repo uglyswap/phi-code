@@ -93,7 +93,7 @@ phi-code/
 │   ├── agent-core/          # phi-code-agent — Core agent loop, tools, context
 │   ├── tui/                 # phi-code-tui — Terminal UI (Ink-based)
 │   ├── coding-agent/        # @phi-code-admin/phi-code — Main CLI entry point
-│   │   ├── extensions/phi/  # 9 TypeScript extensions (auto-loaded)
+│   │   ├── extensions/phi/  # 8 TypeScript extensions (auto-loaded)
 │   │   └── skills/          # 12 bundled coding skills (loaded on demand)
 │   ├── sigma-memory/        # sigma-memory — Memory subsystem (notes + ontology + QMD)
 │   ├── sigma-agents/        # sigma-agents — Sub-agent routing and profiles
@@ -108,7 +108,7 @@ phi-code/
 1. **Extensions**: The loader scans 3 locations in order:
    - `.phi/extensions/` in the current project directory
    - `~/.phi/agent/extensions/` (global user extensions)
-   - Bundled extensions shipped with the package (9 extensions)
+   - Bundled extensions shipped with the package (8 extensions)
    
 2. **Skills**: Listed in the system prompt as name + description only. The model reads the full skill content via the `read` tool only when relevant. Zero context overhead for unused skills.
 
@@ -120,7 +120,7 @@ phi-code/
 
 ## Extensions
 
-Phi Code includes 9 TypeScript extensions that are automatically loaded at startup. Each registers tools, commands, or event handlers.
+Phi Code includes 8 TypeScript extensions that are automatically loaded at startup. Each registers tools, commands, or event handlers.
 
 ### Memory Extension (`memory.ts`)
 
