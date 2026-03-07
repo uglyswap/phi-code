@@ -37,6 +37,38 @@ interface RoutingConfig {
 	default: { model: string; agent: string | null };
 }
 
+// ─── Model Database ─────────────────────────────────────────────────────
+
+const MODEL_DB: Record<string, { contextWindow: number; maxTokens: number; reasoning: boolean }> = {
+	// Alibaba / DashScope
+	"qwen3.5-plus":          { contextWindow: 1000000, maxTokens: 16384,  reasoning: true },
+	"qwen3-max-2026-01-23":  { contextWindow: 262144,  maxTokens: 16384,  reasoning: true },
+	"qwen3-coder-plus":      { contextWindow: 1000000, maxTokens: 16384,  reasoning: true },
+	"qwen3-coder-next":      { contextWindow: 1000000, maxTokens: 16384,  reasoning: true },
+	"kimi-k2.5":             { contextWindow: 262144,  maxTokens: 16384,  reasoning: true },
+	"glm-5":                 { contextWindow: 200000,  maxTokens: 128000, reasoning: true },
+	"glm-4.7":               { contextWindow: 200000,  maxTokens: 128000, reasoning: true },
+	"MiniMax-M2.5":          { contextWindow: 1000000, maxTokens: 16384,  reasoning: true },
+	// OpenAI
+	"gpt-4o":                { contextWindow: 128000,  maxTokens: 16384,  reasoning: false },
+	"gpt-4o-mini":           { contextWindow: 128000,  maxTokens: 16384,  reasoning: false },
+	"o1":                    { contextWindow: 200000,  maxTokens: 100000, reasoning: true },
+	"o3-mini":               { contextWindow: 200000,  maxTokens: 100000, reasoning: true },
+	// Anthropic
+	"claude-sonnet-4-20250514": { contextWindow: 200000, maxTokens: 64000, reasoning: true },
+	"claude-3-5-haiku-20241022": { contextWindow: 200000, maxTokens: 8192, reasoning: false },
+	// Google
+	"gemini-2.5-pro":        { contextWindow: 1000000, maxTokens: 65536, reasoning: true },
+	"gemini-2.5-flash":      { contextWindow: 1000000, maxTokens: 65536, reasoning: true },
+	// Groq
+	"llama-3.3-70b-versatile": { contextWindow: 128000, maxTokens: 32768, reasoning: false },
+	"mixtral-8x7b-32768":    { contextWindow: 32768,   maxTokens: 4096,  reasoning: false },
+};
+
+function getModelSpec(id: string): { contextWindow: number; maxTokens: number; reasoning: boolean } {
+	return MODEL_DB[id] || { contextWindow: 128000, maxTokens: 16384, reasoning: true };
+}
+
 // ─── Provider Detection ──────────────────────────────────────────────────
 
 function detectProviders(): DetectedProvider[] {
@@ -698,14 +730,17 @@ _Edit this file to customize Phi Code's behavior for your project._
 								baseUrl: chosen.baseUrl,
 								api: "openai-completions",
 								apiKey: apiKey.trim(),
-								models: chosen.models.map((id: string) => ({
-									id,
-									name: id,
-									reasoning: true,
-									input: ["text"],
-									contextWindow: 131072,
-									maxTokens: 16384,
-								})),
+								models: chosen.models.map((id: string) => {
+									const spec = getModelSpec(id);
+									return {
+										id,
+										name: id,
+										reasoning: spec.reasoning,
+										input: ["text"],
+										contextWindow: spec.contextWindow,
+										maxTokens: spec.maxTokens,
+									};
+								}),
 							};
 
 							await writeFile(modelsJsonPath, JSON.stringify(modelsConfig, null, 2), "utf-8");
@@ -913,10 +948,13 @@ For persistence, set environment variables:
 						baseUrl: providerDef.baseUrl,
 						api: "openai-completions",
 						apiKey: key,
-						models: providerDef.models.map((id: string) => ({
-							id, name: id, reasoning: true, input: ["text"],
-							contextWindow: 131072, maxTokens: 16384,
-						})),
+						models: providerDef.models.map((id: string) => {
+							const spec = getModelSpec(id);
+							return {
+								id, name: id, reasoning: spec.reasoning, input: ["text"],
+								contextWindow: spec.contextWindow, maxTokens: spec.maxTokens,
+							};
+						}),
 					};
 					writeFileSync(modelsJsonPath, JSON.stringify(modelsConfig, null, 2), "utf-8");
 				}
