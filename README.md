@@ -156,14 +156,16 @@ Analyzes user input keywords and suggests the best model for the task.
 
 **Routing categories:**
 
-| Category | Keywords | Preferred Model | Agent |
-|----------|----------|----------------|-------|
-| `code` | implement, create, build, refactor, write, add, modify | `qwen3-coder-plus` | code |
-| `debug` | fix, bug, error, debug, crash, broken, failing | `qwen3-max-2026-01-23` | code |
-| `explore` | read, analyze, explain, understand, find, search | `kimi-k2.5` | explore |
-| `plan` | plan, design, architect, spec, structure, organize | `qwen3-max-2026-01-23` | plan |
-| `test` | test, verify, validate, check, assert, coverage | `kimi-k2.5` | test |
-| `review` | review, audit, quality, security, improve, optimize | `qwen3.5-plus` | review |
+| Category | Keywords | Agent |
+|----------|----------|-------|
+| `code` | implement, create, build, refactor, write, add, modify | code |
+| `debug` | fix, bug, error, debug, crash, broken, failing | code |
+| `explore` | read, analyze, explain, understand, find, search | explore |
+| `plan` | plan, design, architect, spec, structure, organize | plan |
+| `test` | test, verify, validate, check, assert, coverage | test |
+| `review` | review, audit, quality, security, improve, optimize | review |
+
+> Models are assigned by `/phi-init` based on your provider and OpenRouter rankings. See [Intelligent Routing](#intelligent-routing).
 
 **Configuration:** Override defaults in `~/.phi/agent/routing.json`. Full schema in `config/routing.json`.
 
@@ -365,7 +367,7 @@ Phi Code defines 5 specialized sub-agents, each optimized for a specific task ty
 | **code** | Assigned by `/phi-init` | read, write, edit, bash, grep, find, ls | Writes and modifies code. Full tool access for implementation. |
 | **explore** | Assigned by `/phi-init` | read, grep, find, ls, bash | Fast codebase analysis. Returns structured context for other agents. |
 | **plan** | Assigned by `/phi-init` | read, grep, find, ls | Creates detailed implementation plans. Read-only — never modifies files. |
-| **test** | Assigned by `/phi-init` | read, bash, grep, find, ls | Runs tests, validates changes. Read-only except for test execution. |
+| **test** | Assigned by `/phi-init` | read, write, edit, bash, grep, find, ls | Writes tests, runs them, validates changes. Full tool access for test file creation. |
 | **review** | Assigned by `/phi-init` | read, grep, find, ls, bash | Senior code reviewer. Checks quality, security, maintainability. |
 
 > **Note**: Agent model assignments are configured by `/phi-init` based on your available models and OpenRouter rankings. All agents use `model: default` — the routing system determines the actual model at runtime.
@@ -381,10 +383,10 @@ Agent definitions are Markdown files with YAML frontmatter:
 name: code
 description: Writes and modifies code. Full tool access.
 tools: read, write, edit, bash, grep, find, ls
-model: qwen3-coder-plus
+model: default
 ---
 
-You are a coding specialist. You receive a task and implement it.
+You are a senior software engineer executing implementation tasks.
 [... detailed instructions ...]
 ```
 
@@ -405,14 +407,16 @@ The smart router analyzes each message and suggests the best model based on task
 
 ### Default Routes
 
+All routes default to `"default"` — run `/phi-init` to assign real models:
+
 ```json
 {
-  "code":    { "model": "qwen3-coder-plus",      "fallback": "qwen3.5-plus" },
-  "debug":   { "model": "qwen3-max-2026-01-23",  "fallback": "qwen3.5-plus" },
-  "explore": { "model": "kimi-k2.5",             "fallback": "glm-4.7" },
-  "plan":    { "model": "qwen3-max-2026-01-23",  "fallback": "qwen3.5-plus" },
-  "test":    { "model": "kimi-k2.5",             "fallback": "glm-4.7" },
-  "review":  { "model": "qwen3.5-plus",          "fallback": "qwen3-max-2026-01-23" }
+  "code":    { "preferredModel": "default", "fallback": "default", "agent": "code" },
+  "debug":   { "preferredModel": "default", "fallback": "default", "agent": "code" },
+  "explore": { "preferredModel": "default", "fallback": "default", "agent": "explore" },
+  "plan":    { "preferredModel": "default", "fallback": "default", "agent": "plan" },
+  "test":    { "preferredModel": "default", "fallback": "default", "agent": "test" },
+  "review":  { "preferredModel": "default", "fallback": "default", "agent": "review" }
 }
 ```
 
@@ -431,7 +435,7 @@ Edit `~/.phi/agent/routing.json`:
     }
   },
   "default": {
-    "model": "qwen3.5-plus"
+    "model": "your-default-model"
   }
 }
 ```
@@ -670,7 +674,7 @@ Standard Pi settings. Key fields:
 ```json
 {
   "defaultProvider": "alibaba-codingplan",
-  "defaultModel": "qwen3.5-plus",
+  "defaultModel": "your-default-model",
   "extensions": ["/path/to/custom/extension.ts"],
   "skills": ["/path/to/custom/skills/"],
   "hideThinkingBlock": true,

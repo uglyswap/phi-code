@@ -144,6 +144,12 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		task: TaskDef,
 		agentDefs: Map<string, AgentDef>,
 		cwd: string,
+		sharedContext: {
+			projectTitle: string;
+			projectDescription: string;
+			specSummary: string;
+			completedTasks: Array<{ index: number; title: string; agent: string; output: string }>;
+		},
 		timeoutMs: number = 300000,
 	): Promise<TaskResult> {
 		return new Promise((resolve) => {
@@ -153,7 +159,33 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			const phiBin = findPhiBinary();
 			const startTime = Date.now();
 
-			let taskPrompt = `Task: ${task.title}\n\n${task.description}`;
+			// Build prompt with shared context
+			let taskPrompt = "";
+
+			// Inject shared project context (lightweight, always included)
+			taskPrompt += `# Project Context\n\n`;
+			taskPrompt += `**Project:** ${sharedContext.projectTitle}\n`;
+			taskPrompt += `**Description:** ${sharedContext.projectDescription}\n\n`;
+
+			if (sharedContext.specSummary) {
+				taskPrompt += `## Specification Summary\n${sharedContext.specSummary}\n\n`;
+			}
+
+			// Inject results from dependency tasks (only the ones this task depends on)
+			const deps = task.dependencies || [];
+			if (deps.length > 0) {
+				const depResults = sharedContext.completedTasks.filter(ct => deps.includes(ct.index));
+				if (depResults.length > 0) {
+					taskPrompt += `## Previous Task Results (your dependencies)\n\n`;
+					for (const dep of depResults) {
+						const truncatedOutput = dep.output.length > 1500 ? dep.output.slice(0, 1500) + "\n...(truncated)" : dep.output;
+						taskPrompt += `### Task ${dep.index}: ${dep.title} [${dep.agent}]\n\`\`\`\n${truncatedOutput}\n\`\`\`\n\n`;
+					}
+				}
+			}
+
+			// The actual task
+			taskPrompt += `---\n\n# Your Task\n\n**${task.title}**\n\n${task.description}`;
 			if (task.subtasks && task.subtasks.length > 0) {
 				taskPrompt += "\n\nSub-tasks:\n" + task.subtasks.map((st, i) => `${i + 1}. ${st}`).join("\n");
 			}
@@ -199,17 +231,25 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		tasks: TaskDef[],
 		todoFile: string,
 		notify: (msg: string, type: "info" | "error" | "warning") => void,
+		projectContext?: { title: string; description: string; specSummary: string },
 	): Promise<{ results: TaskResult[]; progressFile: string }> {
 		const agentDefs = loadAgentDefs();
 		const progressFile = todoFile.replace("todo-", "progress-");
 		const progressPath = join(plansDir, progressFile);
 		let progress = `# Progress: ${todoFile}\n\n`;
 		progress += `**Started:** ${new Date().toLocaleString()}\n`;
-		progress += `**Tasks:** ${tasks.length}\n**Mode:** parallel (dependency-aware)\n\n`;
+		progress += `**Tasks:** ${tasks.length}\n**Mode:** parallel (dependency-aware, shared context)\n\n`;
 		await writeFile(progressPath, progress, "utf-8");
 
+		// Shared context for sub-agents
+		const sharedContext = {
+			projectTitle: projectContext?.title || "Project",
+			projectDescription: projectContext?.description || "",
+			specSummary: projectContext?.specSummary || "",
+			completedTasks: [] as Array<{ index: number; title: string; agent: string; output: string }>,
+		};
+
 		// Build dependency graph
-		// Task indices are 1-based in the plan files
 		const completed = new Set<number>();
 		const failed = new Set<number>();
 		const results: TaskResult[] = [];
@@ -268,22 +308,29 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 				notify(`⏳ Task ${idx + 1}: **${t.title}** [${t.agent || "code"}]`, "info");
 			}
 
-			// Launch all ready tasks simultaneously
+			// Launch all ready tasks simultaneously (each gets shared context)
 			const promises = readyIndices.map(async (idx) => {
 				const task = tasks[idx];
-				const result = await executeTask(task, agentDefs, process.cwd());
+				const result = await executeTask(task, agentDefs, process.cwd(), sharedContext);
 				result.taskIndex = idx + 1;
 				return result;
 			});
 
 			const waveResults = await Promise.all(promises);
 
-			// Process results
+			// Process results and feed into shared context for next wave
 			for (const result of waveResults) {
 				results.push(result);
 
 				if (result.status === "success") {
 					completed.add(result.taskIndex);
+					// Add to shared context so dependent tasks can see this result
+					sharedContext.completedTasks.push({
+						index: result.taskIndex,
+						title: result.title,
+						agent: result.agent,
+						output: result.output,
+					});
 				} else {
 					failed.add(result.taskIndex);
 				}
@@ -459,7 +506,18 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 				notify(`📋 Plan created: **${p.title}** (${p.tasks.length} tasks)\nNow executing with sub-agents...`, "info");
 
 				// Auto-execute all tasks
-				const { results, progressFile } = await executePlan(p.tasks, todoFile, notify);
+				// Build spec summary for shared context
+				const specSummary = [
+					`Goals: ${p.goals.join("; ")}`,
+					`Requirements: ${p.requirements.join("; ")}`,
+					p.architecture?.length ? `Architecture: ${p.architecture.join("; ")}` : "",
+					p.constraints?.length ? `Constraints: ${p.constraints.join("; ")}` : "",
+				].filter(Boolean).join("\n");
+
+				const { results, progressFile } = await executePlan(
+					p.tasks, todoFile, notify,
+					{ title: p.title, description: p.description, specSummary },
+				);
 
 				const succeeded = results.filter(r => r.status === "success").length;
 				const failed = results.filter(r => r.status === "error").length;
