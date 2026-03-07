@@ -1,3 +1,6 @@
+---
+description: "Crafting production-grade structured prompts for AI systems"
+---
 # Prompt Architect Skill
 
 ## When to use

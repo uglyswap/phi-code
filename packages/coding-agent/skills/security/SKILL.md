@@ -1,3 +1,6 @@
+---
+description: "Security auditing, vulnerability scanning, and hardening"
+---
 # Security Skill
 
 ## When to use

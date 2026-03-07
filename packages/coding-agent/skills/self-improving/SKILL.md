@@ -1,3 +1,6 @@
+---
+description: "Continuous learning from errors, corrections, and discoveries"
+---
 # Self-Improving Agent Skill
 
 ## When to use

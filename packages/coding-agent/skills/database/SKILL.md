@@ -1,3 +1,6 @@
+---
+description: "Database design, queries, migrations, and optimization"
+---
 # Database Skill
 
 ## When to use
