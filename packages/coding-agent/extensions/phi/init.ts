@@ -261,21 +261,126 @@ _Edit this file to customize Phi Code's behavior for your project._
 
 	// ─── MODE: Auto ──────────────────────────────────────────────────
 
+	// ─── Model Intelligence Database ─────────────────────────────────
+
+	interface ModelProfile {
+		id: string;
+		capabilities: {
+			coding: number;    // 0-100 score for code generation
+			reasoning: number; // 0-100 score for debugging/planning
+			speed: number;     // 0-100 score for fast tasks
+			general: number;   // 0-100 overall score
+		};
+		hasReasoning: boolean;
+	}
+
 	/**
-	 * Auto-assign models based on specialization heuristics.
-	 * Works with ANY provider — not just Alibaba.
-	 *
-	 * Strategy: match model names against known specialization patterns.
-	 * - "coder" in name → code tasks
-	 * - "mini"/"flash"/"fast"/"small" in name → explore/test (fast tasks)
-	 * - Largest/best model → plan/debug/review (reasoning tasks)
-	 * - If only 1 model available → everything uses that model (still works!)
+	 * Fetch model profiles from OpenRouter's free API.
+	 * Classifies each model based on its description, name, and supported parameters.
+	 * Falls back to name-based heuristics if OpenRouter is unreachable.
 	 */
-	function autoMode(availableModels: string[]): Record<string, { preferred: string; fallback: string }> {
+	async function fetchModelProfiles(modelIds: string[]): Promise<Map<string, ModelProfile>> {
+		const profiles = new Map<string, ModelProfile>();
+
+		try {
+			const controller = new AbortController();
+			const timeout = setTimeout(() => controller.abort(), 5000);
+			const res = await fetch("https://openrouter.ai/api/v1/models", {
+				signal: controller.signal,
+			});
+			clearTimeout(timeout);
+
+			if (res.ok) {
+				const data = await res.json() as any;
+				const orModels: any[] = data.data || [];
+
+				for (const modelId of modelIds) {
+					// Try exact match first, then fuzzy match by base name
+					const baseName = modelId.replace(/:.+$/, "").split("/").pop()?.toLowerCase() || modelId.toLowerCase();
+					const match = orModels.find((m: any) => {
+						const mId = m.id?.toLowerCase() || "";
+						const mName = m.name?.toLowerCase() || "";
+						return mId.includes(baseName) || mName.includes(baseName);
+					});
+
+					if (match) {
+						const desc = (match.description || "").toLowerCase();
+						const name = (match.name || "").toLowerCase();
+						const hasReasoning = (match.supported_parameters || []).includes("reasoning")
+							|| (match.supported_parameters || []).includes("include_reasoning");
+
+						// Score based on description keywords and model characteristics
+						let coding = 50, reasoning = 50, speed = 50, general = 60;
+
+						// Coding signals
+						if (/cod(e|ing|ex)|program|implement|refactor|software engineer/.test(desc) || /coder|codex|codestral/.test(name)) {
+							coding = 85;
+						}
+						// Reasoning signals
+						if (hasReasoning || /reason|think|logic|step.by.step|complex/.test(desc) || /o1|o3|pro|opus/.test(name)) {
+							reasoning = 85;
+						}
+						// Speed signals (smaller/cheaper models)
+						const pricing = match.pricing || {};
+						const promptCost = parseFloat(pricing.prompt || "0.01");
+						if (promptCost < 0.001 || /fast|flash|mini|small|haiku|lite|instant/.test(name)) {
+							speed = 85;
+						}
+						// General quality (larger context = usually better)
+						const ctx = match.context_length || 0;
+						if (ctx >= 200000) general = 80;
+						if (ctx >= 1000000) general = 90;
+						if (/frontier|flagship|most.advanced|best|state.of.the.art/.test(desc)) general = 90;
+
+						profiles.set(modelId, { id: modelId, capabilities: { coding, reasoning, speed, general }, hasReasoning });
+					}
+				}
+			}
+		} catch {
+			// OpenRouter unreachable — will fall back to heuristics
+		}
+
+		// Fill in any models not found in OpenRouter with name-based heuristics
+		for (const modelId of modelIds) {
+			if (!profiles.has(modelId)) {
+				profiles.set(modelId, classifyByName(modelId));
+			}
+		}
+
+		return profiles;
+	}
+
+	/**
+	 * Fallback: classify model by name patterns when OpenRouter data is unavailable.
+	 */
+	function classifyByName(modelId: string): ModelProfile {
+		const l = modelId.toLowerCase();
+		let coding = 50, reasoning = 50, speed = 50, general = 55;
+		let hasReasoning = false;
+
+		if (/coder|code|codestral/.test(l)) coding = 80;
+		if (/max|pro|plus|opus|large|o1|o3/.test(l)) { reasoning = 80; general = 75; }
+		if (/mini|flash|fast|small|haiku|lite/.test(l)) { speed = 80; }
+		if (/o1|o3|deepseek-r1|qwq/.test(l)) { hasReasoning = true; reasoning = 85; }
+
+		return { id: modelId, capabilities: { coding, reasoning, speed, general }, hasReasoning };
+	}
+
+	/**
+	 * Auto-assign models using OpenRouter rankings + models.dev data.
+	 * Works with ANY provider — cloud, local, or mixed.
+	 *
+	 * Strategy:
+	 * 1. Fetch model profiles from OpenRouter (free, no API key needed)
+	 * 2. Score each model for coding, reasoning, speed, and general tasks
+	 * 3. Assign best model per role based on scores
+	 * 4. Fall back to name-based heuristics if OpenRouter is unreachable
+	 * 5. Single model? → everything uses that model (still works!)
+	 */
+	async function autoMode(availableModels: string[], ctx?: any): Promise<Record<string, { preferred: string; fallback: string }>> {
 		const assignments: Record<string, { preferred: string; fallback: string }> = {};
 
 		if (availableModels.length === 0) {
-			// Shouldn't happen, but safety fallback
 			const fb = { preferred: "qwen3.5-plus", fallback: "qwen3.5-plus" };
 			for (const role of TASK_ROLES) assignments[role.key] = fb;
 			assignments["default"] = fb;
@@ -283,33 +388,66 @@ _Edit this file to customize Phi Code's behavior for your project._
 		}
 
 		if (availableModels.length === 1) {
-			// Single model: everything uses it
 			const single = { preferred: availableModels[0], fallback: availableModels[0] };
 			for (const role of TASK_ROLES) assignments[role.key] = single;
 			assignments["default"] = single;
 			return assignments;
 		}
 
-		// Categorize models by name heuristics
-		const lower = availableModels.map(m => ({ id: m, l: m.toLowerCase() }));
-		const coderModels = lower.filter(m => /coder|code|codestral/.test(m.l)).map(m => m.id);
-		const fastModels = lower.filter(m => /mini|flash|fast|small|haiku|lite/.test(m.l)).map(m => m.id);
-		const reasoningModels = lower.filter(m => /max|pro|plus|opus|large|o1|o3/.test(m.l)).map(m => m.id);
+		// Fetch intelligence from OpenRouter
+		if (ctx) ctx.ui.notify("📊 Fetching model rankings from OpenRouter...", "info");
+		const profiles = await fetchModelProfiles(availableModels);
 
-		// Pick best for each category, with fallback to first available
-		const bestCoder = coderModels[0] || reasoningModels[0] || availableModels[0];
-		const bestReasoning = reasoningModels[0] || availableModels[0];
-		const bestFast = fastModels[0] || availableModels[availableModels.length - 1] || availableModels[0];
-		const generalModel = reasoningModels[0] || availableModels[0];
-		const fallbackModel = availableModels.find(m => m !== generalModel) || generalModel;
+		// Find best model for each capability
+		function bestFor(capability: keyof ModelProfile["capabilities"]): string {
+			let best = availableModels[0], bestScore = 0;
+			for (const id of availableModels) {
+				const p = profiles.get(id);
+				if (p && p.capabilities[capability] > bestScore) {
+					bestScore = p.capabilities[capability];
+					best = id;
+				}
+			}
+			return best;
+		}
 
-		assignments["code"] = { preferred: bestCoder, fallback: generalModel };
-		assignments["debug"] = { preferred: bestReasoning, fallback: fallbackModel };
-		assignments["plan"] = { preferred: bestReasoning, fallback: fallbackModel };
-		assignments["explore"] = { preferred: bestFast, fallback: generalModel };
-		assignments["test"] = { preferred: bestFast, fallback: generalModel };
-		assignments["review"] = { preferred: generalModel, fallback: fallbackModel };
-		assignments["default"] = { preferred: generalModel, fallback: fallbackModel };
+		function secondBestFor(capability: keyof ModelProfile["capabilities"], excludeId: string): string {
+			let best = availableModels.find(m => m !== excludeId) || excludeId;
+			let bestScore = 0;
+			for (const id of availableModels) {
+				if (id === excludeId) continue;
+				const p = profiles.get(id);
+				if (p && p.capabilities[capability] > bestScore) {
+					bestScore = p.capabilities[capability];
+					best = id;
+				}
+			}
+			return best;
+		}
+
+		const bestCoder = bestFor("coding");
+		const bestReasoner = bestFor("reasoning");
+		const bestFast = bestFor("speed");
+		const bestGeneral = bestFor("general");
+
+		assignments["code"] = { preferred: bestCoder, fallback: secondBestFor("coding", bestCoder) };
+		assignments["debug"] = { preferred: bestReasoner, fallback: secondBestFor("reasoning", bestReasoner) };
+		assignments["plan"] = { preferred: bestReasoner, fallback: secondBestFor("reasoning", bestReasoner) };
+		assignments["explore"] = { preferred: bestFast, fallback: secondBestFor("speed", bestFast) };
+		assignments["test"] = { preferred: bestFast, fallback: secondBestFor("speed", bestFast) };
+		assignments["review"] = { preferred: bestGeneral, fallback: secondBestFor("general", bestGeneral) };
+		assignments["default"] = { preferred: bestGeneral, fallback: secondBestFor("general", bestGeneral) };
+
+		// Show what was assigned and why
+		if (ctx) {
+			ctx.ui.notify("📊 Model rankings applied:", "info");
+			for (const role of TASK_ROLES) {
+				const a = assignments[role.key];
+				const p = profiles.get(a.preferred);
+				const scores = p ? `(coding:${p.capabilities.coding} reasoning:${p.capabilities.reasoning} speed:${p.capabilities.speed})` : "";
+				ctx.ui.notify(`  ${role.label}: ${a.preferred} ${scores}`, "info");
+			}
+		}
 
 		return assignments;
 	}
@@ -347,7 +485,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 		ctx.ui.notify("Run: `/benchmark all` then `/phi-init` again with mode=benchmark to use results.\n", "info");
 
 		// Fall back to auto for now
-		return autoMode(availableModels);
+		return autoMode(availableModels, ctx);
 	}
 
 	function assignFromBenchmark(results: any[], availableModels: string[]): Record<string, { preferred: string; fallback: string }> {
@@ -517,8 +655,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 				let assignments: Record<string, { preferred: string; fallback: string }>;
 
 				if (mode === "auto") {
-					assignments = autoMode(allModels);
-					ctx.ui.notify("⚡ Auto-assigned models based on public rankings and model specializations.", "info");
+					assignments = await autoMode(allModels, ctx);
 				} else if (mode === "benchmark") {
 					assignments = await benchmarkMode(allModels, ctx);
 				} else {
