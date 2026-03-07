@@ -40,7 +40,7 @@ Phi Code takes Pi's brilliant minimal architecture and adds what's missing for s
 | **Memory** | None (session-only) | Persistent across sessions (notes + ontology + vector search) |
 | **Sub-agents** | Single agent | 5 specialized agents with parallel execution |
 | **Model routing** | Manual selection | Automatic task→model matching |
-| **Orchestration** | Manual | `/plan` creates spec + todo, `/run` executes with isolated sub-agents |
+| **Orchestration** | Manual | `/plan` → full workflow: plan + auto-execute with isolated sub-agents |
 | **Skills** | Community | 12 bundled coding skills loaded on demand |
 | **Pre-configured models** | BYO key | 8 Alibaba Coding Plan models included (requires API key) |
 | **Web search** | None | Brave API + DuckDuckGo fallback |
@@ -177,12 +177,12 @@ Breaks down complex project descriptions into structured plans.
 
 | Tool | Description |
 |------|-------------|
-| `orchestrate` | Takes a project description, generates `spec.md` (requirements) and `todo.md` (actionable tasks). Files saved in `.phi/plans/`. Use `/run` to execute tasks with sub-agents. |
+| `orchestrate` | Full-cycle: creates spec.md + todo.md, then auto-executes every task with isolated sub-agents. Each agent gets own context, model, system prompt. Results in progress.md. |
 
 **Commands:**
-- `/plan` — Interactive: describe your project, get a structured plan with spec + todo
-- `/run` — Execute plan tasks with isolated sub-agents (each gets own context + model)
-- `/plans` — List all existing plans and their execution status
+- `/plan` — Full workflow: describe your project → plan + auto-execute with sub-agents
+- `/run` — Re-execute an existing plan (e.g. after manual fixes)
+- `/plans` — List all plans with execution status (spec only / planned / executed)
 
 **Philosophy:** Plans are stored on disk, not in LLM context. This respects Pi's minimalist approach — the system prompt stays at ~200 tokens. The agent reads plan files via the `read` tool when needed.
 
@@ -632,9 +632,9 @@ Commands are typed in the Phi Code terminal with a `/` prefix.
 | `/benchmark results` | benchmark | Show saved results with leaderboard and category breakdown |
 | `/agents` | agents | List all configured sub-agents with model assignments |
 | `/agents <name>` | agents | Show detailed info for a specific agent |
-| `/plan` | orchestrator | Describe a project → generates `spec.md` + `todo.md` in `.phi/plans/` |
-| `/run` | orchestrator | Execute plan tasks with isolated sub-agents (own context + model) |
-| `/plans` | orchestrator | List all existing plans and their execution status |
+| `/plan` | orchestrator | Full workflow: plan → auto-execute with isolated sub-agents → progress report |
+| `/run` | orchestrator | Re-execute an existing plan's tasks with sub-agents |
+| `/plans` | orchestrator | List all plans with status (spec only / planned / executed) |
 | `/skills` | skill-loader | List all discovered skills with sources and descriptions |
 | `/routing` | smart-router | Show current routing configuration and model assignments |
 | `/search <query>` | web-search | Quick web search from the terminal |
