@@ -23,6 +23,7 @@ interface DetectedProvider {
 	baseUrl: string;
 	models: string[];
 	available: boolean;
+	local?: boolean; // True for Ollama/LM Studio (models discovered at runtime)
 }
 
 interface RoutingConfig {
@@ -82,13 +83,63 @@ function detectProviders(): DetectedProvider[] {
 			models: ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"],
 			available: false,
 		},
+		{
+			name: "Ollama",
+			envVar: "OLLAMA",
+			baseUrl: "http://localhost:11434/v1",
+			models: [], // Discovered at runtime
+			available: false,
+			local: true,
+		},
+		{
+			name: "LM Studio",
+			envVar: "LM_STUDIO",
+			baseUrl: "http://localhost:1234/v1",
+			models: [], // Discovered at runtime
+			available: false,
+			local: true,
+		},
 	];
 
 	for (const p of providers) {
-		p.available = !!process.env[p.envVar];
+		if (p.local) {
+			// Local providers: check if server is running by probing the URL
+			p.available = false; // Will be checked async in detectLocalProviders()
+		} else {
+			p.available = !!process.env[p.envVar];
+		}
 	}
 
 	return providers;
+}
+
+/**
+ * Detect local providers (Ollama, LM Studio) by probing their endpoints
+ * and fetching available models dynamically.
+ */
+async function detectLocalProviders(providers: DetectedProvider[]): Promise<void> {
+	for (const p of providers) {
+		if (!p.local) continue;
+		try {
+			const controller = new AbortController();
+			const timeout = setTimeout(() => controller.abort(), 3000);
+			const res = await fetch(`${p.baseUrl}/models`, {
+				signal: controller.signal,
+				headers: { Authorization: `Bearer ${p.envVar === "OLLAMA" ? "ollama" : "lm-studio"}` },
+			});
+			clearTimeout(timeout);
+			if (res.ok) {
+				const data = await res.json() as any;
+				const models = (data.data || []).map((m: any) => m.id).filter(Boolean);
+				if (models.length > 0) {
+					p.models = models;
+					p.available = true;
+				}
+			}
+		} catch {
+			// Server not running — that's fine
+		}
+	}
 }
 
 function getAllAvailableModels(providers: DetectedProvider[]): string[] {
@@ -210,18 +261,55 @@ _Edit this file to customize Phi Code's behavior for your project._
 
 	// ─── MODE: Auto ──────────────────────────────────────────────────
 
+	/**
+	 * Auto-assign models based on specialization heuristics.
+	 * Works with ANY provider — not just Alibaba.
+	 *
+	 * Strategy: match model names against known specialization patterns.
+	 * - "coder" in name → code tasks
+	 * - "mini"/"flash"/"fast"/"small" in name → explore/test (fast tasks)
+	 * - Largest/best model → plan/debug/review (reasoning tasks)
+	 * - If only 1 model available → everything uses that model (still works!)
+	 */
 	function autoMode(availableModels: string[]): Record<string, { preferred: string; fallback: string }> {
 		const assignments: Record<string, { preferred: string; fallback: string }> = {};
 
-		for (const role of TASK_ROLES) {
-			const preferred = availableModels.includes(role.defaultModel) ? role.defaultModel : availableModels[0];
-			const fallbackModel = availableModels.includes("qwen3.5-plus") ? "qwen3.5-plus" : availableModels[0];
-			assignments[role.key] = { preferred, fallback: fallbackModel };
+		if (availableModels.length === 0) {
+			// Shouldn't happen, but safety fallback
+			const fb = { preferred: "qwen3.5-plus", fallback: "qwen3.5-plus" };
+			for (const role of TASK_ROLES) assignments[role.key] = fb;
+			assignments["default"] = fb;
+			return assignments;
 		}
-		assignments["default"] = {
-			preferred: availableModels.includes("qwen3.5-plus") ? "qwen3.5-plus" : availableModels[0],
-			fallback: availableModels[0],
-		};
+
+		if (availableModels.length === 1) {
+			// Single model: everything uses it
+			const single = { preferred: availableModels[0], fallback: availableModels[0] };
+			for (const role of TASK_ROLES) assignments[role.key] = single;
+			assignments["default"] = single;
+			return assignments;
+		}
+
+		// Categorize models by name heuristics
+		const lower = availableModels.map(m => ({ id: m, l: m.toLowerCase() }));
+		const coderModels = lower.filter(m => /coder|code|codestral/.test(m.l)).map(m => m.id);
+		const fastModels = lower.filter(m => /mini|flash|fast|small|haiku|lite/.test(m.l)).map(m => m.id);
+		const reasoningModels = lower.filter(m => /max|pro|plus|opus|large|o1|o3/.test(m.l)).map(m => m.id);
+
+		// Pick best for each category, with fallback to first available
+		const bestCoder = coderModels[0] || reasoningModels[0] || availableModels[0];
+		const bestReasoning = reasoningModels[0] || availableModels[0];
+		const bestFast = fastModels[0] || availableModels[availableModels.length - 1] || availableModels[0];
+		const generalModel = reasoningModels[0] || availableModels[0];
+		const fallbackModel = availableModels.find(m => m !== generalModel) || generalModel;
+
+		assignments["code"] = { preferred: bestCoder, fallback: generalModel };
+		assignments["debug"] = { preferred: bestReasoning, fallback: fallbackModel };
+		assignments["plan"] = { preferred: bestReasoning, fallback: fallbackModel };
+		assignments["explore"] = { preferred: bestFast, fallback: generalModel };
+		assignments["test"] = { preferred: bestFast, fallback: generalModel };
+		assignments["review"] = { preferred: generalModel, fallback: fallbackModel };
+		assignments["default"] = { preferred: generalModel, fallback: fallbackModel };
 
 		return assignments;
 	}
@@ -376,21 +464,32 @@ _Edit this file to customize Phi Code's behavior for your project._
 				ctx.ui.notify("║     Φ  Phi Code Setup Wizard        ║", "info");
 				ctx.ui.notify("╚══════════════════════════════════════╝\n", "info");
 
-				// 1. Detect API keys
-				ctx.ui.notify("🔍 Detecting API keys...", "info");
+				// 1. Detect API keys and local providers
+				ctx.ui.notify("🔍 Detecting providers...", "info");
 				const providers = detectProviders();
+
+				// Probe local providers (Ollama, LM Studio)
+				ctx.ui.notify("🔍 Probing local model servers...", "info");
+				await detectLocalProviders(providers);
+
 				const available = providers.filter(p => p.available);
 
 				if (available.length === 0) {
-					ctx.ui.notify("❌ No API keys found. Set at least one:\n" +
-						providers.map(p => `  export ${p.envVar}="your-key"  # ${p.name}`).join("\n") +
-						"\n\n💡 Free option: Get an Alibaba Coding Plan key at https://help.aliyun.com/zh/model-studio/", "error");
+					const cloudProviders = providers.filter(p => !p.local);
+					ctx.ui.notify("❌ No providers found. Options:\n\n" +
+						"**Cloud providers** (set API key):\n" +
+						cloudProviders.map(p => `  export ${p.envVar}="your-key"  # ${p.name}`).join("\n") +
+						"\n\n**Local providers** (start the server):\n" +
+						"  • Ollama: `ollama serve` (default port 11434)\n" +
+						"  • LM Studio: Start server in app (default port 1234)\n" +
+						"\n💡 Free options: Alibaba Coding Plan (cloud, $0) or Ollama (local, free)", "error");
 					return;
 				}
 
 				ctx.ui.notify(`✅ Found ${available.length} provider(s):`, "info");
 				for (const p of available) {
-					ctx.ui.notify(`  • ${p.name} — ${p.models.length} models`, "info");
+					const tag = p.local ? " (local)" : "";
+					ctx.ui.notify(`  • ${p.name}${tag} — ${p.models.length} model(s)${p.local ? ": " + p.models.join(", ") : ""}`, "info");
 				}
 
 				const allModels = getAllAvailableModels(providers);

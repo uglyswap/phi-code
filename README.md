@@ -541,6 +541,13 @@ Phi Code inherits all of Pi's providers:
 
 Phi Code supports any OpenAI-compatible API, which includes local model servers.
 
+> **🔍 Auto-detection**: `/phi-init` automatically probes `localhost:11434` (Ollama) and `localhost:1234` (LM Studio). If a server is running, its models are discovered and configured automatically — no manual setup needed.
+
+> **💡 Multi-model**: Both Ollama and LM Studio support loading **multiple models simultaneously** (limited by available VRAM/RAM). You can even run **both together** — Ollama on port 11434 + LM Studio on port 1234 — to use different models for different task roles (e.g., a coder model in Ollama + a reasoning model in LM Studio).
+>
+> - **Ollama**: Multiple models stay in memory automatically. Control with `OLLAMA_MAX_LOADED_MODELS` (default: 1 on CPU, 3 with GPU).
+> - **LM Studio**: Multi-model sessions available in the Playground tab. Load multiple models, then start the server.
+
 ### Ollama
 
 1. Install [Ollama](https://ollama.ai) and pull a model:
@@ -548,7 +555,9 @@ Phi Code supports any OpenAI-compatible API, which includes local model servers.
    ollama pull qwen2.5-coder:32b
    ```
 
-2. Add to `~/.phi/agent/models.json`:
+2. **Quick path**: Run `/phi-init` — Ollama models are auto-discovered.
+
+3. **Manual path**: Add to `~/.phi/agent/models.json`:
    ```json
    {
      "providers": {
@@ -578,7 +587,9 @@ Phi Code supports any OpenAI-compatible API, which includes local model servers.
 
 1. Start LM Studio server (default port 1234)
 
-2. Add to `~/.phi/agent/models.json`:
+2. **Quick path**: Run `/phi-init` — LM Studio models are auto-discovered.
+
+3. **Manual path**: Add to `~/.phi/agent/models.json`:
    ```json
    {
      "providers": {
