@@ -1,7 +1,7 @@
 {
   "$schema": "./routing.schema.json",
+  "$comment": "Default routing config. Model names are defaults for Alibaba Coding Plan. Run /phi-init to configure for your provider (OpenAI, Anthropic, Ollama, etc.)",
   "version": 1,
-  "description": "Default routing configuration for Phi Code. Maps task categories to preferred models.",
   "routes": {
     "code": {
       "description": "Code generation, implementation, refactoring",
