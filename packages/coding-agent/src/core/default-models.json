@@ -10,7 +10,7 @@
           "name": "Qwen 3.5 Plus",
           "reasoning": true,
           "input": ["text"],
-          "contextWindow": 131072,
+          "contextWindow": 1000000,
           "maxTokens": 16384
         },
         {
@@ -18,23 +18,23 @@
           "name": "Qwen 3 Max",
           "reasoning": true,
           "input": ["text"],
-          "contextWindow": 131072,
+          "contextWindow": 262144,
           "maxTokens": 16384
         },
         {
           "id": "qwen3-coder-plus",
           "name": "Qwen 3 Coder Plus",
-          "reasoning": false,
+          "reasoning": true,
           "input": ["text"],
-          "contextWindow": 131072,
+          "contextWindow": 1000000,
           "maxTokens": 16384
         },
         {
           "id": "qwen3-coder-next",
           "name": "Qwen 3 Coder Next",
-          "reasoning": false,
+          "reasoning": true,
           "input": ["text"],
-          "contextWindow": 131072,
+          "contextWindow": 1000000,
           "maxTokens": 16384
         },
         {
@@ -42,31 +42,31 @@
           "name": "Kimi K2.5",
           "reasoning": true,
           "input": ["text"],
-          "contextWindow": 131072,
+          "contextWindow": 262144,
           "maxTokens": 16384
         },
         {
           "id": "glm-5",
           "name": "GLM 5",
-          "reasoning": false,
+          "reasoning": true,
           "input": ["text"],
-          "contextWindow": 131072,
-          "maxTokens": 16384
+          "contextWindow": 200000,
+          "maxTokens": 128000
         },
         {
           "id": "glm-4.7",
           "name": "GLM 4.7",
-          "reasoning": false,
+          "reasoning": true,
           "input": ["text"],
-          "contextWindow": 131072,
-          "maxTokens": 16384
+          "contextWindow": 200000,
+          "maxTokens": 128000
         },
         {
           "id": "MiniMax-M2.5",
           "name": "MiniMax M2.5",
-          "reasoning": false,
+          "reasoning": true,
           "input": ["text"],
-          "contextWindow": 131072,
+          "contextWindow": 1000000,
           "maxTokens": 16384
         }
       ]
