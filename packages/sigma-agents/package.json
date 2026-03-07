@@ -1,6 +1,6 @@
 {
 	"name": "sigma-agents",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "Intelligent sub-agent system with model routing for Phi Code",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",

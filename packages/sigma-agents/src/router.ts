@@ -79,56 +79,58 @@ export class SmartRouter {
   }
 
   /**
-   * Configuration par défaut utilisant les modèles Alibaba Coding Plan
+   * Default configuration with provider-agnostic model names.
+   * Uses 'default' as model placeholder — the actual model is determined
+   * at runtime by /phi-init or the user's routing.json.
    */
   static defaultConfig(): RoutingConfig {
     return {
       routes: {
         code: {
-          preferredModel: 'qwen3-coder-plus',
-          fallback: 'qwen3.5-plus',
+          preferredModel: 'default',
+          fallback: 'default',
           agent: null,
           keywords: ['code', 'implement', 'write', 'create', 'build', 'développer', 'coder', 'programmer', 'function', 'class', 'method']
         },
         debug: {
-          preferredModel: 'qwen3-max-2026-01-23',
-          fallback: 'qwen3.5-plus',
+          preferredModel: 'default',
+          fallback: 'default',
           agent: null,
           keywords: ['debug', 'fix', 'error', 'bug', 'broken', 'issue', 'problem', 'repair', 'correct', 'erreur', 'problème', 'réparer']
         },
         explore: {
-          preferredModel: 'kimi-k2.5',
-          fallback: 'glm-4.7',
+          preferredModel: 'default',
+          fallback: 'default',
           agent: null,
           keywords: ['explore', 'understand', 'analyze', 'examine', 'investigate', 'study', 'review', 'explorer', 'analyser', 'comprendre']
         },
         plan: {
-          preferredModel: 'qwen3-max-2026-01-23',
-          fallback: 'qwen3.5-plus',
+          preferredModel: 'default',
+          fallback: 'default',
           agent: null,
           keywords: ['plan', 'design', 'architecture', 'strategy', 'approach', 'structure', 'organize', 'concevoir', 'planifier', 'architecture']
         },
         test: {
-          preferredModel: 'kimi-k2.5',
-          fallback: 'qwen3-coder-next',
+          preferredModel: 'default',
+          fallback: 'default',
           agent: null,
           keywords: ['test', 'testing', 'unit', 'integration', 'verify', 'validate', 'check', 'tester', 'vérifier', 'valider']
         },
         review: {
-          preferredModel: 'qwen3.5-plus',
-          fallback: 'qwen3-max-2026-01-23',
+          preferredModel: 'default',
+          fallback: 'default',
           agent: null,
           keywords: ['review', 'audit', 'check', 'validate', 'quality', 'improve', 'optimize', 'réviser', 'améliorer', 'optimiser']
         },
         general: {
-          preferredModel: 'qwen3.5-plus',
-          fallback: 'glm-5',
+          preferredModel: 'default',
+          fallback: 'default',
           agent: null,
           keywords: ['help', 'explain', 'what', 'how', 'why', 'question', 'aide', 'expliquer', 'comment', 'pourquoi']
         }
       },
       default: {
-        model: 'qwen3.5-plus',
+        model: 'default',
         agent: null
       }
     };
