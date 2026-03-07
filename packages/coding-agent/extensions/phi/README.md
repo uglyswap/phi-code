@@ -1,6 +1,6 @@
 # Phi Code Extensions
 
-9 TypeScript extensions automatically loaded at startup.
+8 TypeScript extensions automatically loaded at startup.
 
 ## Extensions
 
