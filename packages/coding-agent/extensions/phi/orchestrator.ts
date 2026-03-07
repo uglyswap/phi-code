@@ -202,7 +202,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			args.push("--print");
 			if (model && model !== "default") args.push("--model", model);
 			if (agentDef?.systemPrompt) args.push("--system-prompt", agentDef.systemPrompt);
-			args.push("--no-save");
+			args.push("--no-session");
 			args.push(taskPrompt);
 
 			const cmd = phiBin === "npx" ? "npx" : "node";

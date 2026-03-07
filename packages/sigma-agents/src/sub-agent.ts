@@ -47,11 +47,11 @@ export class SubAgentManager {
   createCommand(agent: SubAgentConfig, task: string): string[] {
     return [
       'phi',
-      '--json',
+      '--print',
       '--model',
       agent.model,
-      '--no-save',
-      '--system',
+      '--no-session',
+      '--system-prompt',
       agent.systemPrompt,
       task
     ];

@@ -80,90 +80,11 @@ export class ModelProfiler {
   }
 
   /**
-   * Retourne les profiles par défaut des 8 modèles Alibaba
+   * Returns empty default profiles.
+   * Actual profiles should be populated from /phi-init or user configuration.
+   * sigma-agents is provider-agnostic — no hardcoded model names.
    */
   getDefaultProfiles(): ModelProfile[] {
-    return [
-      {
-        id: 'qwen3.5-plus',
-        provider: 'alibaba',
-        cost: 0,
-        speed: 'medium',
-        quality: 'high',
-        strengths: ['code', 'debug', 'plan', 'review', 'general'],
-        maxTokens: 131072,
-        supportsTools: true
-      },
-      {
-        id: 'qwen3-max-2026-01-23',
-        provider: 'alibaba',
-        cost: 0,
-        speed: 'slow',
-        quality: 'high',
-        strengths: ['plan', 'debug', 'review'],
-        maxTokens: 131072,
-        supportsTools: true
-      },
-      {
-        id: 'qwen3-coder-plus',
-        provider: 'alibaba',
-        cost: 0,
-        speed: 'medium',
-        quality: 'high',
-        strengths: ['code', 'debug'],
-        maxTokens: 131072,
-        supportsTools: true
-      },
-      {
-        id: 'qwen3-coder-next',
-        provider: 'alibaba',
-        cost: 0,
-        speed: 'fast',
-        quality: 'high',
-        strengths: ['code'],
-        maxTokens: 131072,
-        supportsTools: true
-      },
-      {
-        id: 'kimi-k2.5',
-        provider: 'alibaba',
-        cost: 0,
-        speed: 'fast',
-        quality: 'medium',
-        strengths: ['explore', 'test', 'general'],
-        maxTokens: 131072,
-        supportsTools: true
-      },
-      {
-        id: 'glm-5',
-        provider: 'alibaba',
-        cost: 0,
-        speed: 'medium',
-        quality: 'medium',
-        strengths: ['general', 'code'],
-        maxTokens: 131072,
-        supportsTools: true
-      },
-      {
-        id: 'glm-4.7',
-        provider: 'alibaba',
-        cost: 0,
-        speed: 'fast',
-        quality: 'low',
-        strengths: ['explore', 'general'],
-        maxTokens: 131072,
-        supportsTools: true
-      },
-      {
-        id: 'MiniMax-M2.5',
-        provider: 'alibaba',
-        cost: 0,
-        speed: 'fast',
-        quality: 'medium',
-        strengths: ['general'],
-        maxTokens: 131072,
-        supportsTools: true
-      }
-    ];
+    return [];
   }
 }
