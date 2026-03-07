@@ -1,408 +1,293 @@
 /**
- * Orchestrator Extension - High-level project planning and task orchestration
+ * Orchestrator Extension - Project planning and task management
  *
- * Provides tools to break down high-level project descriptions into structured 
- * specifications and actionable task lists. Helps manage complex projects by
- * creating organized plans and tracking progress.
+ * Provides tools for the LLM to create structured project plans:
+ * - /plan: Interactive planning command
+ * - /plans: List and manage existing plans
+ * - orchestrate tool: Create spec.md + todo.md from structured input
  *
- * Features:
- * - /plan command for interactive planning
- * - orchestrate tool callable by LLM
- * - Automatic directory structure creation
- * - Timestamped spec and todo files
- * - Task status tracking (pending/done)
+ * Architecture:
+ * The LLM analyzes the user's request (using prompt-architect skill patterns
+ * if available), then calls the orchestrate tool with structured data.
+ * The tool writes files to disk. The LLM does the thinking, the tool does the I/O.
  *
- * Usage:
- * 1. Copy to packages/coding-agent/extensions/phi/orchestrator.ts
- * 2. Use /plan <description> to create project plans
- * 3. Plans are stored in .phi/plans/ directory
+ * Integration with Prompt Architect skill:
+ * When the prompt-architect skill is loaded, the LLM uses its patterns
+ * (ROLE/CONTEXT/TASK/FORMAT/CONSTRAINTS) to structure the spec.
+ * The skill-loader extension handles this automatically.
  */
 
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "phi-code";
-import { writeFile, mkdir, readdir, readFile } from "node:fs/promises";
+import { writeFile, mkdir, readdir, readFile, access } from "node:fs/promises";
 import { join } from "node:path";
-
-interface TaskItem {
-	id: number;
-	description: string;
-	status: "pending" | "done";
-	subtasks?: TaskItem[];
-}
-
-interface ProjectPlan {
-	title: string;
-	description: string;
-	timestamp: string;
-	goals: string[];
-	requirements: string[];
-	architecture: string[];
-	tasks: TaskItem[];
-}
+import { existsSync } from "node:fs";
 
 export default function orchestratorExtension(pi: ExtensionAPI) {
 	const plansDir = join(process.cwd(), ".phi", "plans");
 
-	/**
-	 * Ensure plans directory exists
-	 */
-	async function ensurePlansDirectory() {
-		try {
-			await mkdir(plansDir, { recursive: true });
-		} catch (error) {
-			console.warn("Failed to create plans directory:", error);
-		}
+	async function ensurePlansDir() {
+		await mkdir(plansDir, { recursive: true });
 	}
 
-	/**
-	 * Generate timestamp for file naming
-	 */
-	function getTimestamp(): string {
+	function timestamp(): string {
 		return new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
 	}
 
-	/**
-	 * Analyze description and create structured project plan
-	 */
-	function analyzeProject(description: string): ProjectPlan {
-		const timestamp = new Date().toISOString();
-		
-		// Extract title from first sentence or use generic title
-		let title = "Project Plan";
-		const firstSentence = description.split('.')[0].trim();
-		if (firstSentence.length > 10 && firstSentence.length < 100) {
-			title = firstSentence;
-		}
+	// ─── Orchestrate Tool ────────────────────────────────────────────
 
-		// Basic analysis to extract goals, requirements, and tasks
-		const lines = description.split('\n').filter(line => line.trim());
-		const goals: string[] = [];
-		const requirements: string[] = [];
-		const architecture: string[] = [];
-		const tasks: TaskItem[] = [];
-
-		// Simple pattern matching for structure
-		let taskId = 1;
-		for (const line of lines) {
-			const trimmed = line.trim();
-			
-			// Look for action words to identify tasks
-			if (trimmed.match(/^(create|build|implement|develop|add|setup|configure|install|write|design|test)/i)) {
-				tasks.push({
-					id: taskId++,
-					description: trimmed,
-					status: "pending"
-				});
-			}
-			// Look for requirements keywords
-			else if (trimmed.match(/(require|need|must|should have|depend)/i)) {
-				requirements.push(trimmed);
-			}
-			// Look for architecture/tech keywords
-			else if (trimmed.match(/(using|with|technology|framework|database|api|service)/i)) {
-				architecture.push(trimmed);
-			}
-			// Everything else could be goals
-			else if (trimmed.length > 10) {
-				goals.push(trimmed);
-			}
-		}
-
-		// If no explicit tasks found, break down description into logical steps
-		if (tasks.length === 0) {
-			const generalTasks = [
-				"Analyze requirements and define scope",
-				"Design system architecture",
-				"Set up development environment",
-				"Implement core functionality",
-				"Add tests and documentation",
-				"Deploy and validate solution"
-			];
-
-			generalTasks.forEach((task, index) => {
-				tasks.push({
-					id: index + 1,
-					description: task,
-					status: "pending"
-				});
-			});
-		}
-
-		return {
-			title,
-			description,
-			timestamp,
-			goals: goals.length > 0 ? goals : [description],
-			requirements,
-			architecture,
-			tasks
-		};
-	}
-
-	/**
-	 * Generate specification markdown content
-	 */
-	function generateSpecContent(plan: ProjectPlan): string {
-		const timestamp = new Date(plan.timestamp).toLocaleString();
-		
-		return `# ${plan.title}
-
-**Created:** ${timestamp}
-
-## Description
-
-${plan.description}
-
-## Goals
-
-${plan.goals.map(goal => `- ${goal}`).join('\n')}
-
-## Requirements
-
-${plan.requirements.length > 0 
-	? plan.requirements.map(req => `- ${req}`).join('\n')
-	: '- To be defined based on project analysis'
-}
-
-## Architecture
-
-${plan.architecture.length > 0
-	? plan.architecture.map(arch => `- ${arch}`).join('\n')
-	: '- To be designed during implementation planning'
-}
-
-## Implementation Notes
-
-- This specification was generated automatically from the project description
-- Review and refine requirements based on detailed analysis
-- Update architecture section with technical decisions
-- Use the corresponding TODO file to track progress
-
----
-
-*Generated by Phi Code Orchestrator*
-`;
-	}
-
-	/**
-	 * Generate TODO markdown content  
-	 */
-	function generateTodoContent(plan: ProjectPlan): string {
-		const timestamp = new Date(plan.timestamp).toLocaleString();
-		
-		let todoContent = `# TODO: ${plan.title}
-
-**Created:** ${timestamp}
-
-## Tasks
-
-`;
-
-		plan.tasks.forEach(task => {
-			const checkbox = task.status === "done" ? "[x]" : "[ ]";
-			todoContent += `${checkbox} **Task ${task.id}:** ${task.description}\n`;
-			
-			if (task.subtasks) {
-				task.subtasks.forEach(subtask => {
-					const subCheckbox = subtask.status === "done" ? "[x]" : "[ ]";
-					todoContent += `  ${subCheckbox} ${subtask.description}\n`;
-				});
-			}
-			todoContent += '\n';
-		});
-
-		todoContent += `
-## Progress
-
-- Total tasks: ${plan.tasks.length}
-- Completed: ${plan.tasks.filter(t => t.status === "done").length}
-- Remaining: ${plan.tasks.filter(t => t.status === "pending").length}
-
-## Notes
-
-- Update task status by changing [ ] to [x] when completed
-- Add subtasks under main tasks as needed
-- Use this file to track detailed progress
-
----
-
-*Generated by Phi Code Orchestrator*
-`;
-
-		return todoContent;
-	}
-
-	/**
-	 * Create project plan files
-	 */
-	async function createPlanFiles(description: string): Promise<{ specFile: string; todoFile: string; plan: ProjectPlan }> {
-		await ensurePlansDirectory();
-
-		const plan = analyzeProject(description);
-		const timestamp = getTimestamp();
-		
-		const specFilename = `spec-${timestamp}.md`;
-		const todoFilename = `todo-${timestamp}.md`;
-		
-		const specPath = join(plansDir, specFilename);
-		const todoPath = join(plansDir, todoFilename);
-
-		const specContent = generateSpecContent(plan);
-		const todoContent = generateTodoContent(plan);
-
-		await writeFile(specPath, specContent, 'utf-8');
-		await writeFile(todoPath, todoContent, 'utf-8');
-
-		return {
-			specFile: specFilename,
-			todoFile: todoFilename,
-			plan
-		};
-	}
-
-	/**
-	 * Orchestrate tool - Create project plans programmatically
-	 */
 	pi.registerTool({
 		name: "orchestrate",
 		label: "Project Orchestrator",
-		description: "Break down high-level project descriptions into structured specifications and task lists",
+		description: "Create structured project plan files (spec.md + todo.md) from analyzed project requirements. Call this AFTER you have analyzed the user's request and structured it into goals, requirements, architecture decisions, and tasks.",
+		promptSnippet: "Create spec.md + todo.md project plans. Use prompt-architect patterns to structure specs before calling.",
+		promptGuidelines: [
+			"When asked to plan a project: first analyze the request thoroughly, then call orchestrate with structured data.",
+			"Use the prompt-architect skill patterns (ROLE/CONTEXT/TASK/FORMAT/CONSTRAINTS) when structuring specifications.",
+			"Break tasks into small, actionable items. Each task should be completable by a single sub-agent.",
+			"Assign agent types to tasks: 'explore' for analysis, 'plan' for design, 'code' for implementation, 'test' for validation, 'review' for quality.",
+		],
 		parameters: Type.Object({
-			description: Type.String({ 
-				description: "High-level project description to analyze and plan" 
-			}),
+			title: Type.String({ description: "Project title" }),
+			description: Type.String({ description: "Full project description with context" }),
+			goals: Type.Array(Type.String(), { description: "List of project goals" }),
+			requirements: Type.Array(Type.String(), { description: "Technical and functional requirements" }),
+			architecture: Type.Optional(Type.Array(Type.String(), { description: "Architecture decisions and tech stack" })),
+			tasks: Type.Array(
+				Type.Object({
+					title: Type.String({ description: "Task title" }),
+					description: Type.String({ description: "Detailed task description" }),
+					agent: Type.Optional(Type.String({ description: "Recommended agent: explore, plan, code, test, or review" })),
+					priority: Type.Optional(Type.String({ description: "high, medium, or low" })),
+					dependencies: Type.Optional(Type.Array(Type.Number(), { description: "IDs of tasks this depends on" })),
+					subtasks: Type.Optional(Type.Array(Type.String(), { description: "Sub-task descriptions" })),
+				}),
+				{ description: "Ordered list of tasks" }
+			),
+			constraints: Type.Optional(Type.Array(Type.String(), { description: "Project constraints and limitations" })),
+			successCriteria: Type.Optional(Type.Array(Type.String(), { description: "How to verify the project is done" })),
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-			const { description } = params as { description: string };
+			const p = params as {
+				title: string;
+				description: string;
+				goals: string[];
+				requirements: string[];
+				architecture?: string[];
+				tasks: Array<{
+					title: string;
+					description: string;
+					agent?: string;
+					priority?: string;
+					dependencies?: number[];
+					subtasks?: string[];
+				}>;
+				constraints?: string[];
+				successCriteria?: string[];
+			};
 
 			try {
-				const result = await createPlanFiles(description);
+				await ensurePlansDir();
+				const ts = timestamp();
+				const specFile = `spec-${ts}.md`;
+				const todoFile = `todo-${ts}.md`;
 
-				const summary = `**Project orchestration completed!**
+				// ─── Generate spec.md ─────────────────────────────────
+				let spec = `# ${p.title}\n\n`;
+				spec += `**Created:** ${new Date().toLocaleString()}\n\n`;
+				spec += `## Description\n\n${p.description}\n\n`;
 
-**Generated files:**
-- Specification: ${result.specFile}
-- Task list: ${result.todoFile}
+				spec += `## Goals\n\n`;
+				p.goals.forEach((g, i) => { spec += `${i + 1}. ${g}\n`; });
+				spec += "\n";
 
-**Project:** ${result.plan.title}
-**Tasks created:** ${result.plan.tasks.length}
-**Goals identified:** ${result.plan.goals.length}
-**Requirements:** ${result.plan.requirements.length}
+				spec += `## Requirements\n\n`;
+				p.requirements.forEach(r => { spec += `- ${r}\n`; });
+				spec += "\n";
+
+				if (p.architecture && p.architecture.length > 0) {
+					spec += `## Architecture\n\n`;
+					p.architecture.forEach(a => { spec += `- ${a}\n`; });
+					spec += "\n";
+				}
+
+				if (p.constraints && p.constraints.length > 0) {
+					spec += `## Constraints\n\n`;
+					p.constraints.forEach(c => { spec += `- ${c}\n`; });
+					spec += "\n";
+				}
+
+				if (p.successCriteria && p.successCriteria.length > 0) {
+					spec += `## Success Criteria\n\n`;
+					p.successCriteria.forEach(s => { spec += `- [ ] ${s}\n`; });
+					spec += "\n";
+				}
+
+				spec += `## Task Overview\n\n`;
+				spec += `| # | Task | Agent | Priority | Dependencies |\n`;
+				spec += `|---|------|-------|----------|-------------|\n`;
+				p.tasks.forEach((t, i) => {
+					const deps = t.dependencies?.map(d => `#${d}`).join(", ") || "—";
+					spec += `| ${i + 1} | ${t.title} | ${t.agent || "code"} | ${t.priority || "medium"} | ${deps} |\n`;
+				});
+				spec += "\n";
+
+				spec += `---\n*Generated by Phi Code Orchestrator*\n`;
+
+				// ─── Generate todo.md ─────────────────────────────────
+				let todo = `# TODO: ${p.title}\n\n`;
+				todo += `**Created:** ${new Date().toLocaleString()}\n`;
+				todo += `**Tasks:** ${p.tasks.length}\n\n`;
+
+				p.tasks.forEach((t, i) => {
+					const agentTag = t.agent ? ` [${t.agent}]` : "";
+					const prioTag = t.priority === "high" ? " 🔴" : t.priority === "low" ? " 🟢" : " 🟡";
+					const depsTag = t.dependencies?.length ? ` (after #${t.dependencies.join(", #")})` : "";
+
+					todo += `## Task ${i + 1}: ${t.title}${prioTag}${agentTag}${depsTag}\n\n`;
+					todo += `- [ ] ${t.description}\n`;
+
+					if (t.subtasks) {
+						t.subtasks.forEach(st => {
+							todo += `  - [ ] ${st}\n`;
+						});
+					}
+					todo += "\n";
+				});
+
+				todo += `---\n\n## Progress\n\n`;
+				todo += `- Total: ${p.tasks.length} tasks\n`;
+				todo += `- High priority: ${p.tasks.filter(t => t.priority === "high").length}\n`;
+				todo += `- Agents needed: ${[...new Set(p.tasks.map(t => t.agent || "code"))].join(", ")}\n\n`;
+				todo += `*Update [ ] to [x] when tasks are completed.*\n`;
+
+				// Write files
+				await writeFile(join(plansDir, specFile), spec, "utf-8");
+				await writeFile(join(plansDir, todoFile), todo, "utf-8");
+
+				const summary = `**✅ Project plan created!**
+
+📋 **${p.title}**
+
+**Files:**
+- \`${specFile}\` — Full specification (goals, requirements, architecture, constraints)
+- \`${todoFile}\` — Actionable task list with priorities and agent assignments
+
+**Summary:**
+- ${p.goals.length} goals
+- ${p.requirements.length} requirements
+- ${p.tasks.length} tasks (${p.tasks.filter(t => t.priority === "high").length} high priority)
+- Agents: ${[...new Set(p.tasks.map(t => t.agent || "code"))].join(", ")}
 
 **Next steps:**
-1. Review and refine the specification
-2. Update task details in the TODO file  
-3. Begin implementation following the task order
-4. Mark tasks as completed by updating the TODO file
+1. Review the spec and todo files
+2. Start with high-priority tasks
+3. Follow dependency order
+4. Mark tasks [x] when done
 
-Files are saved in .phi/plans/ directory.`;
+Files saved in \`.phi/plans/\``;
 
 				return {
 					content: [{ type: "text", text: summary }],
-					details: {
-						specFile: result.specFile,
-						todoFile: result.todoFile,
-						taskCount: result.plan.tasks.length,
-						project: result.plan.title
-					}
+					details: { specFile, todoFile, taskCount: p.tasks.length, title: p.title },
 				};
-
 			} catch (error) {
 				return {
 					content: [{ type: "text", text: `Orchestration failed: ${error}` }],
-					details: { error: String(error) }
+					details: { error: String(error) },
 				};
 			}
 		},
 	});
 
-	/**
-	 * /plan command - Interactive project planning
-	 */
+	// ─── /plan Command ───────────────────────────────────────────────
+
 	pi.registerCommand("plan", {
-		description: "Create a structured project plan from a description",
+		description: "Create a structured project plan (the LLM analyzes your description, then creates spec + todo files)",
 		handler: async (args, ctx) => {
 			const description = args.trim();
 
 			if (!description) {
-				ctx.ui.notify("Usage: /plan <project description>", "warning");
+				ctx.ui.notify(`**Usage:** \`/plan <project description>\`
+
+**Examples:**
+  /plan Build a REST API for user authentication with JWT tokens
+  /plan Migrate the frontend from React to Next.js App Router
+  /plan Add comprehensive test coverage to the payment module
+
+The LLM will:
+1. Analyze your description using prompt-architect patterns
+2. Identify goals, requirements, architecture decisions
+3. Break down into tasks with agent assignments and priorities
+4. Create spec.md + todo.md files in .phi/plans/
+
+💡 The more detail you provide, the better the plan.`, "info");
 				return;
 			}
 
-			try {
-				ctx.ui.notify("Creating project plan...", "info");
-				
-				const result = await createPlanFiles(description);
+			// Send as user message to trigger the LLM to analyze and call orchestrate
+			ctx.sendUserMessage(
+				`Please analyze this project request and create a structured plan using the orchestrate tool.
 
-				const message = `✅ Project plan created!
+Project description: ${description}
 
-📋 **${result.plan.title}**
-📁 Spec: ${result.specFile}
-📋 TODO: ${result.todoFile}
-🎯 ${result.plan.tasks.length} tasks identified
-
-Open .phi/plans/ to review your project files.`;
-
-				ctx.ui.notify(message, "info");
-
-			} catch (error) {
-				ctx.ui.notify(`Failed to create plan: ${error}`, "error");
-			}
+Instructions:
+- Identify clear goals, requirements, and architecture decisions
+- Break the work into small, actionable tasks (each doable by one agent)
+- Assign the best agent type to each task: explore (analysis), plan (design), code (implementation), test (validation), review (quality)
+- Set priorities (high/medium/low) and dependencies between tasks
+- Define success criteria for the project
+- If the prompt-architect skill is available, use its ROLE/CONTEXT/TASK/FORMAT patterns to structure the specification`
+			);
 		},
 	});
 
-	/**
-	 * /plans command - List existing plans
-	 */
+	// ─── /plans Command ──────────────────────────────────────────────
+
 	pi.registerCommand("plans", {
 		description: "List existing project plans",
 		handler: async (_args, ctx) => {
 			try {
-				const files = await readdir(plansDir);
-				const specFiles = files.filter(f => f.startsWith('spec-') && f.endsWith('.md'));
-				const todoFiles = files.filter(f => f.startsWith('todo-') && f.endsWith('.md'));
-
-				if (specFiles.length === 0) {
-					ctx.ui.notify("No project plans found. Use /plan <description> to create one.", "info");
+				if (!existsSync(plansDir)) {
+					ctx.ui.notify("No plans yet. Use `/plan <description>` to create one.", "info");
 					return;
 				}
 
-				let message = `📁 **Project Plans** (${specFiles.length} found)\n\n`;
-				
-				// Group by timestamp
-				const planPairs: Array<{ spec: string; todo: string; timestamp: string }> = [];
-				
-				for (const specFile of specFiles) {
-					const timestamp = specFile.replace('spec-', '').replace('.md', '');
-					const todoFile = `todo-${timestamp}.md`;
-					
-					if (todoFiles.includes(todoFile)) {
-						planPairs.push({ spec: specFile, todo: todoFile, timestamp });
-					}
+				const files = await readdir(plansDir);
+				const specs = files.filter(f => f.startsWith("spec-") && f.endsWith(".md")).sort().reverse();
+
+				if (specs.length === 0) {
+					ctx.ui.notify("No plans found. Use `/plan <description>` to create one.", "info");
+					return;
 				}
 
-				planPairs.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+				let output = `📁 **Project Plans** (${specs.length})\n\n`;
 
-				for (const pair of planPairs) {
-					// Try to read spec title
+				for (const specFile of specs) {
+					const ts = specFile.replace("spec-", "").replace(".md", "");
+					const todoFile = `todo-${ts}.md`;
+
 					try {
-						const specContent = await readFile(join(plansDir, pair.spec), 'utf-8');
-						const titleMatch = specContent.match(/^# (.+)$/m);
-						const title = titleMatch ? titleMatch[1] : pair.spec;
-						
-						const date = pair.timestamp.replace(/_/g, ' ').replace(/-/g, ':');
-						message += `📋 **${title}**\n`;
-						message += `   📄 ${pair.spec}\n`;
-						message += `   ✅ ${pair.todo}\n`;
-						message += `   🕒 ${date}\n\n`;
+						const content = await readFile(join(plansDir, specFile), "utf-8");
+						const titleMatch = content.match(/^# (.+)$/m);
+						const title = titleMatch ? titleMatch[1] : specFile;
+						const taskCount = (content.match(/\| \d+ \|/g) || []).length;
+						const date = ts.replace(/_/g, " ").substring(0, 10);
+
+						const hasTodo = files.includes(todoFile);
+
+						output += `📋 **${title}** (${date})\n`;
+						output += `   Spec: \`${specFile}\`${hasTodo ? ` | Todo: \`${todoFile}\`` : ""}\n`;
+						if (taskCount > 0) output += `   Tasks: ${taskCount}\n`;
+						output += "\n";
 					} catch {
-						message += `📋 ${pair.spec} / ${pair.todo}\n\n`;
+						output += `📋 \`${specFile}\`\n\n`;
 					}
 				}
 
-				ctx.ui.notify(message, "info");
-
+				output += `_Use \`read .phi/plans/<file>\` to view a plan._`;
+				ctx.ui.notify(output, "info");
 			} catch (error) {
 				ctx.ui.notify(`Failed to list plans: ${error}`, "error");
 			}
