@@ -19,7 +19,7 @@ import * as _bundledPiTui from "phi-code-tui";
 // These MUST be static so Bun bundles them into the compiled binary.
 // The virtualModules option then makes them available to extensions.
 import * as _bundledTypebox from "@sinclair/typebox";
-import { getAgentDir, isBunBinary } from "../../config.js";
+import { getAgentDir, isBunBinary, CONFIG_DIR_NAME } from "../../config.js";
 // NOTE: This import works because loader.ts exports are NOT re-exported from index.ts,
 // avoiding a circular dependency. Extensions can import from phi-code.
 import * as _bundledPiCodingAgent from "../../index.js";
@@ -395,6 +395,9 @@ function readPiManifest(packageJsonPath: string): PiManifest | null {
 	try {
 		const content = fs.readFileSync(packageJsonPath, "utf-8");
 		const pkg = JSON.parse(content);
+		if (pkg.phi && typeof pkg.phi === "object") {
+			return pkg.phi as PiManifest;
+		}
 		if (pkg.pi && typeof pkg.pi === "object") {
 			return pkg.pi as PiManifest;
 		}
@@ -515,13 +518,19 @@ export async function discoverAndLoadExtensions(
 		}
 	};
 
-	// 1. Project-local extensions: cwd/.pi/extensions/
-	const localExtDir = path.join(cwd, ".pi", "extensions");
+	// 1. Project-local extensions: cwd/.phi/extensions/ (or cwd/.pi/extensions/ for Pi compat)
+	const localExtDir = path.join(cwd, CONFIG_DIR_NAME, "extensions");
 	addPaths(discoverExtensionsInDir(localExtDir));
 
 	// 2. Global extensions: agentDir/extensions/
 	const globalExtDir = path.join(agentDir, "extensions");
 	addPaths(discoverExtensionsInDir(globalExtDir));
+
+	// 2b. Bundled Phi Code extensions (shipped with the package)
+	const bundledExtDir = path.resolve(path.join(__dirname, "..", "..", "..", "extensions", "phi"));
+	if (fs.existsSync(bundledExtDir)) {
+		addPaths(discoverExtensionsInDir(bundledExtDir));
+	}
 
 	// 3. Explicitly configured paths
 	for (const p of configuredPaths) {

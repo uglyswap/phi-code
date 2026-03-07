@@ -402,6 +402,12 @@ export function loadSkills(options: LoadSkillsOptions = {}): LoadSkillsResult {
 	if (includeDefaults) {
 		addSkills(loadSkillsFromDirInternal(join(resolvedAgentDir, "skills"), "user", true));
 		addSkills(loadSkillsFromDirInternal(resolve(cwd, CONFIG_DIR_NAME, "skills"), "project", true));
+
+		// Bundled Phi Code skills (shipped with the package)
+		const bundledSkillsDir = resolve(join(__dirname, "..", "..", "skills"));
+		if (existsSync(bundledSkillsDir)) {
+			addSkills(loadSkillsFromDirInternal(bundledSkillsDir, "user", true));
+		}
 	}
 
 	const userSkillsDir = join(resolvedAgentDir, "skills");
