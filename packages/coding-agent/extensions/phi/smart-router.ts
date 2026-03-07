@@ -1,23 +1,16 @@
 /**
  * Smart Router Extension - Intelligent model routing for different task types
  *
- * Analyzes user input to suggest the most appropriate model for the task:
- * - Code tasks (implement, create, refactor, build) → coder model
- * - Debug tasks (fix, bug, error, debug) → reasoning model  
- * - Exploration tasks (read, analyze, explain, understand) → fast model
- * - Planning tasks (plan, design, architect, spec) → reasoning model
+ * Analyzes user input keywords and suggests the optimal model:
+ * - code: implement, create, build, refactor → qwen3-coder-plus
+ * - debug: fix, bug, error, crash → qwen3-max-2026-01-23
+ * - explore: read, analyze, explain, understand → kimi-k2.5
+ * - plan: plan, design, architect, spec → qwen3-max-2026-01-23
+ * - test: test, verify, validate, check → kimi-k2.5
+ * - review: review, audit, quality, security → qwen3.5-plus
  *
- * Reads configuration from ~/.phi/agent/routing.json if available.
- * Currently only notifies user of recommendations - automatic switching to be added later.
- *
- * Features:
- * - Input analysis and model recommendations
- * - Configurable routing rules
- * - User notifications via ctx.ui.notify
- *
- * Usage:
- * 1. Copy to packages/coding-agent/extensions/phi/smart-router.ts
- * 2. Optionally configure via ~/.phi/agent/routing.json
+ * Configuration: ~/.phi/agent/routing.json (same format as config/routing.json)
+ * Command: /routing — show config, enable/disable, test, reload
  */
 
 import type { ExtensionAPI } from "phi-code";
@@ -25,265 +18,254 @@ import { readFile, mkdir, writeFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
+// ─── Types ───────────────────────────────────────────────────────────────
+
+interface RouteEntry {
+	description: string;
+	keywords: string[];
+	preferredModel: string;
+	fallback: string;
+	agent: string;
+}
+
 interface RoutingConfig {
-	patterns: {
-		code: string[];
-		debug: string[];
-		exploration: string[];
-		planning: string[];
-	};
-	models: {
-		coder: string;
-		reasoning: string;
-		fast: string;
-	};
+	routes: Record<string, RouteEntry>;
+	default: { model: string; agent: string | null };
+}
+
+interface FullConfig {
+	routing: RoutingConfig;
 	enabled: boolean;
 	notifyOnRecommendation: boolean;
 }
 
-const DEFAULT_CONFIG: RoutingConfig = {
-	patterns: {
-		code: ["implement", "create", "build", "refactor", "code", "write", "develop", "generate"],
-		debug: ["fix", "bug", "error", "debug", "troubleshoot", "repair", "solve", "issue"],
-		exploration: ["read", "analyze", "explain", "understand", "explore", "examine", "review", "what is"],
-		planning: ["plan", "design", "architect", "spec", "strategy", "approach", "organize", "structure"]
+// ─── Defaults (aligned with config/routing.json and default-models.json) ──
+
+const DEFAULT_ROUTING: RoutingConfig = {
+	routes: {
+		code: {
+			description: "Code generation, implementation, refactoring",
+			keywords: ["implement", "create", "build", "refactor", "write", "add", "modify", "update", "generate", "code", "develop", "function", "class"],
+			preferredModel: "qwen3-coder-plus",
+			fallback: "qwen3.5-plus",
+			agent: "code",
+		},
+		debug: {
+			description: "Debugging, fixing, error resolution",
+			keywords: ["fix", "bug", "error", "debug", "crash", "broken", "failing", "issue", "troubleshoot", "repair", "solve"],
+			preferredModel: "qwen3-max-2026-01-23",
+			fallback: "qwen3.5-plus",
+			agent: "code",
+		},
+		explore: {
+			description: "Code reading, analysis, understanding",
+			keywords: ["read", "analyze", "explain", "understand", "find", "search", "look", "show", "what", "how", "explore", "examine"],
+			preferredModel: "kimi-k2.5",
+			fallback: "glm-4.7",
+			agent: "explore",
+		},
+		plan: {
+			description: "Architecture, design, planning",
+			keywords: ["plan", "design", "architect", "spec", "structure", "organize", "strategy", "approach", "roadmap"],
+			preferredModel: "qwen3-max-2026-01-23",
+			fallback: "qwen3.5-plus",
+			agent: "plan",
+		},
+		test: {
+			description: "Testing, validation, verification",
+			keywords: ["test", "verify", "validate", "check", "assert", "coverage", "unit", "integration", "e2e"],
+			preferredModel: "kimi-k2.5",
+			fallback: "glm-4.7",
+			agent: "test",
+		},
+		review: {
+			description: "Code review, quality assessment",
+			keywords: ["review", "audit", "quality", "security", "improve", "optimize", "refine", "critique"],
+			preferredModel: "qwen3.5-plus",
+			fallback: "qwen3-max-2026-01-23",
+			agent: "review",
+		},
 	},
-	models: {
-		coder: "anthropic/claude-sonnet-3.5",
-		reasoning: "anthropic/claude-opus",  
-		fast: "anthropic/claude-haiku"
+	default: {
+		model: "qwen3.5-plus",
+		agent: null,
 	},
-	enabled: true,
-	notifyOnRecommendation: true
 };
 
+// ─── Extension ───────────────────────────────────────────────────────────
+
 export default function smartRouterExtension(pi: ExtensionAPI) {
-	let config: RoutingConfig = DEFAULT_CONFIG;
 	const configDir = join(homedir(), ".phi", "agent");
 	const configPath = join(configDir, "routing.json");
 
+	let config: FullConfig = {
+		routing: DEFAULT_ROUTING,
+		enabled: true,
+		notifyOnRecommendation: true,
+	};
+
 	/**
-	 * Load routing configuration
+	 * Load routing config from ~/.phi/agent/routing.json
 	 */
 	async function loadConfig() {
 		try {
 			await access(configPath);
-			const configText = await readFile(configPath, 'utf-8');
-			const userConfig = JSON.parse(configText) as Partial<RoutingConfig>;
-			
-			// Merge with defaults
-			config = {
-				...DEFAULT_CONFIG,
-				...userConfig,
-				patterns: { ...DEFAULT_CONFIG.patterns, ...userConfig.patterns },
-				models: { ...DEFAULT_CONFIG.models, ...userConfig.models }
-			};
-		} catch (error) {
-			// Config doesn't exist or is invalid, use defaults
-			console.log("Using default routing configuration");
-			await saveDefaultConfig();
+			const text = await readFile(configPath, "utf-8");
+			const userConfig = JSON.parse(text);
+
+			// Support both flat format (routes at top level) and wrapped format
+			if (userConfig.routes) {
+				config.routing = {
+					routes: { ...DEFAULT_ROUTING.routes, ...userConfig.routes },
+					default: userConfig.default || DEFAULT_ROUTING.default,
+				};
+			}
+
+			if (typeof userConfig.enabled === "boolean") config.enabled = userConfig.enabled;
+			if (typeof userConfig.notifyOnRecommendation === "boolean") config.notifyOnRecommendation = userConfig.notifyOnRecommendation;
+		} catch {
+			// No config file — use defaults, and save them for reference
+			try {
+				await mkdir(configDir, { recursive: true });
+				await writeFile(configPath, JSON.stringify(DEFAULT_ROUTING, null, 2), "utf-8");
+			} catch {
+				// Can't write, that's fine
+			}
 		}
 	}
 
 	/**
-	 * Save default configuration file
+	 * Analyze input text to classify task type
 	 */
-	async function saveDefaultConfig() {
-		try {
-			await mkdir(configDir, { recursive: true });
-			await writeFile(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2), 'utf-8');
-			console.log(`Created default routing config at ${configPath}`);
-		} catch (error) {
-			console.warn("Failed to save default routing config:", error);
-		}
-	}
+	function classifyTask(text: string): { category: string | null; confidence: number; matches: string[]; route: RouteEntry | null } {
+		const lower = text.toLowerCase();
+		const results: Array<{ category: string; confidence: number; matches: string[]; route: RouteEntry }> = [];
 
-	/**
-	 * Analyze input text to determine task type
-	 */
-	function analyzeTaskType(text: string): { type: keyof RoutingConfig['patterns'] | null; confidence: number; matches: string[] } {
-		const normalizedText = text.toLowerCase();
-		const results: Array<{ type: keyof RoutingConfig['patterns']; confidence: number; matches: string[] }> = [];
-
-		// Check each pattern category
-		for (const [category, patterns] of Object.entries(config.patterns)) {
+		for (const [category, route] of Object.entries(config.routing.routes)) {
 			const matches: string[] = [];
-			let matchCount = 0;
 
-			for (const pattern of patterns) {
-				if (normalizedText.includes(pattern.toLowerCase())) {
-					matches.push(pattern);
-					matchCount++;
+			for (const keyword of route.keywords) {
+				if (lower.includes(keyword.toLowerCase())) {
+					matches.push(keyword);
 				}
 			}
 
-			if (matchCount > 0) {
-				// Calculate confidence based on match count and pattern length
-				const confidence = (matchCount / patterns.length) * 100;
-				results.push({ 
-					type: category as keyof RoutingConfig['patterns'], 
-					confidence, 
-					matches 
-				});
+			if (matches.length > 0) {
+				// Confidence = weighted match ratio
+				// More matches = higher confidence, but cap at 95%
+				const ratio = matches.length / route.keywords.length;
+				const confidence = Math.min(95, Math.round(ratio * 100 + matches.length * 5));
+				results.push({ category, confidence, matches, route });
 			}
 		}
 
-		// Return the highest confidence match
 		if (results.length === 0) {
-			return { type: null, confidence: 0, matches: [] };
+			return { category: null, confidence: 0, matches: [], route: null };
 		}
 
+		// Highest confidence wins
 		results.sort((a, b) => b.confidence - a.confidence);
 		return results[0];
 	}
 
-	/**
-	 * Get recommended model for task type
-	 */
-	function getRecommendedModel(taskType: keyof RoutingConfig['patterns'] | null): string | null {
-		if (!taskType) return null;
+	// ─── Input Event ─────────────────────────────────────────────────
 
-		switch (taskType) {
-			case 'code':
-				return config.models.coder;
-			case 'debug':
-			case 'planning':
-				return config.models.reasoning;
-			case 'exploration':
-				return config.models.fast;
-			default:
-				return null;
-		}
-	}
-
-	/**
-	 * Get task type description
-	 */
-	function getTaskDescription(taskType: keyof RoutingConfig['patterns'] | null): string {
-		switch (taskType) {
-			case 'code':
-				return 'Code Implementation';
-			case 'debug':
-				return 'Debugging & Problem Solving';
-			case 'exploration':
-				return 'Analysis & Understanding';
-			case 'planning':
-				return 'Planning & Design';
-			default:
-				return 'General Task';
-		}
-	}
-
-	/**
-	 * Input interceptor for smart routing
-	 */
 	pi.on("input", async (event, ctx) => {
-		// Skip if routing is disabled or this is an extension-generated message
 		if (!config.enabled || event.source === "extension") {
 			return { action: "continue" };
 		}
 
-		// Analyze the input
-		const analysis = analyzeTaskType(event.text);
-		
-		// Only recommend if we have good confidence (>= 30%)
-		if (analysis.type && analysis.confidence >= 30) {
-			const recommendedModel = getRecommendedModel(analysis.type);
-			const taskDescription = getTaskDescription(analysis.type);
+		const result = classifyTask(event.text);
 
-			if (recommendedModel && config.notifyOnRecommendation) {
-				const message = `💡 Detected: ${taskDescription} (${analysis.confidence.toFixed(0)}% confidence)
-Recommended model: ${recommendedModel}
-Matched patterns: ${analysis.matches.join(", ")}`;
-
-				ctx.ui.notify(message, "info");
+		if (result.category && result.confidence >= 25 && result.route) {
+			if (config.notifyOnRecommendation) {
+				ctx.ui.notify(
+					`🔀 ${result.route.description} → \`${result.route.preferredModel}\` (${result.confidence}% | ${result.matches.join(", ")})`,
+					"info"
+				);
 			}
 		}
 
 		return { action: "continue" };
 	});
 
-	/**
-	 * Register routing configuration command
-	 */
+	// ─── /routing Command ────────────────────────────────────────────
+
 	pi.registerCommand("routing", {
-		description: "Show or configure smart routing settings",
+		description: "Show or configure smart routing (enable/disable/test/reload)",
 		handler: async (args, ctx) => {
-			if (!args.trim()) {
-				// Show current configuration
-				const statusMessage = `Smart Router Configuration:
+			const arg = args.trim().toLowerCase();
 
-**Status:** ${config.enabled ? "Enabled" : "Disabled"}
-**Notifications:** ${config.notifyOnRecommendation ? "Enabled" : "Disabled"}
+			if (!arg) {
+				// Show current config
+				let output = `**🔀 Smart Router**\n\n`;
+				output += `Status: ${config.enabled ? "✅ Enabled" : "❌ Disabled"}\n`;
+				output += `Notifications: ${config.notifyOnRecommendation ? "On" : "Off"}\n\n`;
 
-**Model Assignments:**
-- Code tasks: ${config.models.coder}
-- Debug tasks: ${config.models.reasoning}
-- Exploration: ${config.models.fast}  
-- Planning: ${config.models.reasoning}
+				output += `**Routes:**\n`;
+				for (const [cat, route] of Object.entries(config.routing.routes)) {
+					output += `  **${cat}** → \`${route.preferredModel}\` (fallback: \`${route.fallback}\`) [agent: ${route.agent}]\n`;
+					output += `    Keywords: ${route.keywords.slice(0, 6).join(", ")}${route.keywords.length > 6 ? "..." : ""}\n`;
+				}
+				output += `\n  **default** → \`${config.routing.default.model}\`\n`;
 
-**Pattern Matching:**
-- Code: ${config.patterns.code.join(", ")}
-- Debug: ${config.patterns.debug.join(", ")}
-- Exploration: ${config.patterns.exploration.join(", ")}
-- Planning: ${config.patterns.planning.join(", ")}
+				output += `\nConfig: \`${configPath}\``;
+				output += `\nCommands: \`/routing enable|disable|notify-on|notify-off|reload|test\``;
 
-Config file: ${configPath}`;
-
-				ctx.ui.notify(statusMessage, "info");
+				ctx.ui.notify(output, "info");
 				return;
 			}
-
-			const arg = args.trim().toLowerCase();
 
 			switch (arg) {
 				case "enable":
 					config.enabled = true;
-					ctx.ui.notify("Smart routing enabled", "info");
+					ctx.ui.notify("✅ Smart routing enabled.", "info");
 					break;
 				case "disable":
 					config.enabled = false;
-					ctx.ui.notify("Smart routing disabled", "info");
+					ctx.ui.notify("❌ Smart routing disabled.", "info");
 					break;
 				case "notify-on":
 					config.notifyOnRecommendation = true;
-					ctx.ui.notify("Routing notifications enabled", "info");
+					ctx.ui.notify("🔔 Routing notifications enabled.", "info");
 					break;
 				case "notify-off":
 					config.notifyOnRecommendation = false;
-					ctx.ui.notify("Routing notifications disabled", "info");
+					ctx.ui.notify("🔕 Routing notifications disabled.", "info");
 					break;
 				case "reload":
 					await loadConfig();
-					ctx.ui.notify("Routing configuration reloaded", "info");
+					ctx.ui.notify("🔄 Routing config reloaded from disk.", "info");
 					break;
-				case "test":
-					// Test mode - show what would be recommended for different inputs
-					const testInputs = [
-						"implement a new feature",
-						"fix this bug", 
-						"explain how this works",
-						"plan the system architecture"
+				case "test": {
+					const tests = [
+						"implement a new user authentication system",
+						"fix the crash when uploading files larger than 10MB",
+						"explain how the middleware chain works",
+						"plan the migration from REST to GraphQL",
+						"run all unit tests and check coverage",
+						"review the PR for security vulnerabilities",
+						"what time is it",
 					];
-					
-					let testResults = "**Routing Test Results:**\n\n";
-					for (const input of testInputs) {
-						const analysis = analyzeTaskType(input);
-						const model = getRecommendedModel(analysis.type);
-						testResults += `"${input}" → ${analysis.type || 'none'} (${analysis.confidence.toFixed(0)}%) → ${model || 'default'}\n`;
+
+					let output = "**🧪 Routing Test:**\n\n";
+					for (const input of tests) {
+						const result = classifyTask(input);
+						const model = result.route?.preferredModel || config.routing.default.model;
+						const tag = result.category || "default";
+						output += `"${input}"\n  → **${tag}** (${result.confidence}%) → \`${model}\`\n\n`;
 					}
-					
-					ctx.ui.notify(testResults, "info");
+					ctx.ui.notify(output, "info");
 					break;
+				}
 				default:
-					ctx.ui.notify("Usage: /routing [enable|disable|notify-on|notify-off|reload|test]", "warning");
+					ctx.ui.notify("Usage: `/routing [enable|disable|notify-on|notify-off|reload|test]`", "warning");
 			}
 		},
 	});
 
-	/**
-	 * Load configuration on session start
-	 */
+	// ─── Session Start ───────────────────────────────────────────────
+
 	pi.on("session_start", async (_event, _ctx) => {
 		await loadConfig();
 	});
