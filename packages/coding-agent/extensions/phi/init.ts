@@ -37,36 +37,110 @@ interface RoutingConfig {
 	default: { model: string; agent: string | null };
 }
 
-// ─── Model Database ─────────────────────────────────────────────────────
+// ─── Dynamic Model Specs via OpenRouter ──────────────────────────────────
 
-const MODEL_DB: Record<string, { contextWindow: number; maxTokens: number; reasoning: boolean }> = {
-	// Alibaba / DashScope
-	"qwen3.5-plus":          { contextWindow: 1000000, maxTokens: 16384,  reasoning: true },
-	"qwen3-max-2026-01-23":  { contextWindow: 262144,  maxTokens: 16384,  reasoning: true },
-	"qwen3-coder-plus":      { contextWindow: 1000000, maxTokens: 16384,  reasoning: true },
-	"qwen3-coder-next":      { contextWindow: 1000000, maxTokens: 16384,  reasoning: true },
-	"kimi-k2.5":             { contextWindow: 262144,  maxTokens: 16384,  reasoning: true },
-	"glm-5":                 { contextWindow: 200000,  maxTokens: 128000, reasoning: true },
-	"glm-4.7":               { contextWindow: 200000,  maxTokens: 128000, reasoning: true },
-	"MiniMax-M2.5":          { contextWindow: 1000000, maxTokens: 16384,  reasoning: true },
-	// OpenAI
-	"gpt-4o":                { contextWindow: 128000,  maxTokens: 16384,  reasoning: false },
-	"gpt-4o-mini":           { contextWindow: 128000,  maxTokens: 16384,  reasoning: false },
-	"o1":                    { contextWindow: 200000,  maxTokens: 100000, reasoning: true },
-	"o3-mini":               { contextWindow: 200000,  maxTokens: 100000, reasoning: true },
-	// Anthropic
-	"claude-sonnet-4-20250514": { contextWindow: 200000, maxTokens: 64000, reasoning: true },
-	"claude-3-5-haiku-20241022": { contextWindow: 200000, maxTokens: 8192, reasoning: false },
-	// Google
-	"gemini-2.5-pro":        { contextWindow: 1000000, maxTokens: 65536, reasoning: true },
-	"gemini-2.5-flash":      { contextWindow: 1000000, maxTokens: 65536, reasoning: true },
-	// Groq
-	"llama-3.3-70b-versatile": { contextWindow: 128000, maxTokens: 32768, reasoning: false },
-	"mixtral-8x7b-32768":    { contextWindow: 32768,   maxTokens: 4096,  reasoning: false },
-};
+interface ModelSpec {
+	contextWindow: number;
+	maxTokens: number;
+	reasoning: boolean;
+}
 
-function getModelSpec(id: string): { contextWindow: number; maxTokens: number; reasoning: boolean } {
-	return MODEL_DB[id] || { contextWindow: 128000, maxTokens: 16384, reasoning: true };
+// Cache for OpenRouter model data (fetched once per session)
+let openRouterCache: Map<string, ModelSpec> | null = null;
+
+/**
+ * Fetch model specs from OpenRouter's free API (no key needed).
+ * Returns a map of model base name → specs.
+ * Falls back to conservative defaults if unreachable.
+ */
+async function fetchModelSpecs(): Promise<Map<string, ModelSpec>> {
+	if (openRouterCache) return openRouterCache;
+
+	const cache = new Map<string, ModelSpec>();
+
+	try {
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 5000);
+		const res = await fetch("https://openrouter.ai/api/v1/models", {
+			signal: controller.signal,
+		});
+		clearTimeout(timeout);
+
+		if (res.ok) {
+			const data = await res.json() as any;
+			for (const m of (data.data || [])) {
+				const contextLength = m.context_length || 128000;
+				const maxOutput = m.top_provider?.max_completion_tokens || Math.min(contextLength, 16384);
+				const hasReasoning = (m.supported_parameters || []).includes("reasoning");
+
+				// Store by full ID and by base name (for fuzzy matching)
+				const spec: ModelSpec = {
+					contextWindow: contextLength,
+					maxTokens: typeof maxOutput === "number" ? maxOutput : 16384,
+					reasoning: hasReasoning,
+				};
+
+				cache.set(m.id, spec);
+				// Also store by short name (e.g., "qwen3.5-plus" from "qwen/qwen3.5-plus-02-15")
+				const parts = m.id.split("/");
+				if (parts.length > 1) {
+					cache.set(parts[1], spec);
+				}
+			}
+		}
+	} catch {
+		// OpenRouter unreachable — cache stays empty, fallback used
+	}
+
+	openRouterCache = cache;
+	return cache;
+}
+
+/**
+ * Get model spec by ID. Tries OpenRouter cache first with fuzzy matching,
+ * then falls back to conservative defaults.
+ */
+async function getModelSpec(id: string): Promise<ModelSpec> {
+	const cache = await fetchModelSpecs();
+
+	// Exact match
+	if (cache.has(id)) return cache.get(id)!;
+
+	// Try common prefixed variants
+	const prefixes = ["qwen/", "moonshotai/", "z-ai/", "minimax/", "openai/", "anthropic/", "google/"];
+	for (const prefix of prefixes) {
+		const key = prefix + id;
+		if (cache.has(key)) return cache.get(key)!;
+	}
+
+	// Fuzzy: find by base name inclusion
+	const lower = id.toLowerCase().replace(/[-_.]/g, "");
+	for (const [key, spec] of cache) {
+		const keyLower = key.toLowerCase().replace(/[-_.]/g, "");
+		if (keyLower.includes(lower) || lower.includes(keyLower.split("/").pop() || "")) {
+			return spec;
+		}
+	}
+
+	// Conservative fallback
+	return { contextWindow: 128000, maxTokens: 16384, reasoning: true };
+}
+
+/**
+ * Synchronous fallback for non-async contexts.
+ * Uses cached data if available, otherwise returns defaults.
+ */
+function getModelSpecSync(id: string): ModelSpec {
+	if (!openRouterCache) return { contextWindow: 128000, maxTokens: 16384, reasoning: true };
+
+	if (openRouterCache.has(id)) return openRouterCache.get(id)!;
+
+	const prefixes = ["qwen/", "moonshotai/", "z-ai/", "minimax/", "openai/", "anthropic/", "google/"];
+	for (const prefix of prefixes) {
+		if (openRouterCache.has(prefix + id)) return openRouterCache.get(prefix + id)!;
+	}
+
+	return { contextWindow: 128000, maxTokens: 16384, reasoning: true };
 }
 
 // ─── Provider Detection ──────────────────────────────────────────────────
@@ -640,6 +714,10 @@ _Edit this file to customize Phi Code's behavior for your project._
 				ctx.ui.notify("║     Φ  Phi Code Setup Wizard        ║", "info");
 				ctx.ui.notify("╚══════════════════════════════════════╝\n", "info");
 
+				// Pre-fetch model specs from OpenRouter (async, cached)
+				ctx.ui.notify("🔍 Fetching model specs from OpenRouter...", "info");
+				await fetchModelSpecs();
+
 				// 1. Detect providers
 				ctx.ui.notify("🔍 Detecting providers...\n", "info");
 				const providers = detectProviders();
@@ -730,8 +808,8 @@ _Edit this file to customize Phi Code's behavior for your project._
 								baseUrl: chosen.baseUrl,
 								api: "openai-completions",
 								apiKey: apiKey.trim(),
-								models: chosen.models.map((id: string) => {
-									const spec = getModelSpec(id);
+								models: await Promise.all(chosen.models.map(async (id: string) => {
+									const spec = await getModelSpec(id);
 									return {
 										id,
 										name: id,
@@ -740,7 +818,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 										contextWindow: spec.contextWindow,
 										maxTokens: spec.maxTokens,
 									};
-								}),
+								})),
 							};
 
 							await writeFile(modelsJsonPath, JSON.stringify(modelsConfig, null, 2), "utf-8");
@@ -948,13 +1026,13 @@ For persistence, set environment variables:
 						baseUrl: providerDef.baseUrl,
 						api: "openai-completions",
 						apiKey: key,
-						models: providerDef.models.map((id: string) => {
-							const spec = getModelSpec(id);
+						models: await Promise.all(providerDef.models.map(async (id: string) => {
+							const spec = await getModelSpec(id);
 							return {
 								id, name: id, reasoning: spec.reasoning, input: ["text"],
 								contextWindow: spec.contextWindow, maxTokens: spec.maxTokens,
 							};
-						}),
+						})),
 					};
 					writeFileSync(modelsJsonPath, JSON.stringify(modelsConfig, null, 2), "utf-8");
 				}
