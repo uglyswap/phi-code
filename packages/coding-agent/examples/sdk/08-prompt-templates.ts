@@ -9,7 +9,7 @@ import {
 	DefaultResourceLoader,
 	type PromptTemplate,
 	SessionManager,
-} from "@mariozechner/pi-coding-agent";
+} from "phi-code";
 
 // Define custom templates
 const deployTemplate: PromptTemplate = {

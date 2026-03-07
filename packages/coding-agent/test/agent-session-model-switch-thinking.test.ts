@@ -1,5 +1,5 @@
-import { Agent, type ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { getModel } from "@mariozechner/pi-ai";
+import { Agent, type ThinkingLevel } from "phi-code-agent";
+import { getModel } from "phi-code-ai";
 import { describe, expect, it } from "vitest";
 import { AgentSession } from "../src/core/agent-session.js";
 import { AuthStorage } from "../src/core/auth-storage.js";

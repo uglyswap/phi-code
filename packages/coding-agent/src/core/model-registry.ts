@@ -16,18 +16,23 @@ import {
 	registerApiProvider,
 	resetApiProviders,
 	type SimpleStreamOptions,
-} from "@mariozechner/pi-ai";
-import { registerOAuthProvider, resetOAuthProviders } from "@mariozechner/pi-ai/oauth";
+} from "phi-code-ai";
+import { registerOAuthProvider, resetOAuthProviders } from "phi-code-ai/oauth";
 import { type Static, Type } from "@sinclair/typebox";
 import AjvModule from "ajv";
 import { existsSync, readFileSync } from "fs";
-import { join } from "path";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { getAgentDir } from "../config.js";
 import type { AuthStorage } from "./auth-storage.js";
 import { clearConfigValueCache, resolveConfigValue, resolveHeaders } from "./resolve-config-value.js";
 
 const Ajv = (AjvModule as any).default || AjvModule;
 const ajv = new Ajv();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const DEFAULT_MODELS_PATH = join(__dirname, "default-models.json");
 
 // Schema for OpenRouter routing preferences
 const OpenRouterRoutingSchema = Type.Object({
@@ -345,11 +350,19 @@ export class ModelRegistry {
 
 	private loadCustomModels(modelsJsonPath: string): CustomModelsResult {
 		if (!existsSync(modelsJsonPath)) {
+			// If user's models.json doesn't exist, try to load default models
+			if (existsSync(DEFAULT_MODELS_PATH)) {
+				return this.loadModelsFromFile(DEFAULT_MODELS_PATH);
+			}
 			return emptyCustomModelsResult();
 		}
 
+		return this.loadModelsFromFile(modelsJsonPath);
+	}
+
+	private loadModelsFromFile(filePath: string): CustomModelsResult {
 		try {
-			const content = readFileSync(modelsJsonPath, "utf-8");
+			const content = readFileSync(filePath, "utf-8");
 			const config: ModelsConfig = JSON.parse(content);
 
 			// Validate schema
@@ -358,7 +371,7 @@ export class ModelRegistry {
 				const errors =
 					validate.errors?.map((e: any) => `  - ${e.instancePath || "root"}: ${e.message}`).join("\n") ||
 					"Unknown schema error";
-				return emptyCustomModelsResult(`Invalid models.json schema:\n${errors}\n\nFile: ${modelsJsonPath}`);
+				return emptyCustomModelsResult(`Invalid models.json schema:\n${errors}\n\nFile: ${filePath}`);
 			}
 
 			// Additional validation
@@ -390,10 +403,10 @@ export class ModelRegistry {
 			return { models: this.parseModels(config), overrides, modelOverrides, error: undefined };
 		} catch (error) {
 			if (error instanceof SyntaxError) {
-				return emptyCustomModelsResult(`Failed to parse models.json: ${error.message}\n\nFile: ${modelsJsonPath}`);
+				return emptyCustomModelsResult(`Failed to parse models.json: ${error.message}\n\nFile: ${filePath}`);
 			}
 			return emptyCustomModelsResult(
-				`Failed to load models.json: ${error instanceof Error ? error.message : error}\n\nFile: ${modelsJsonPath}`,
+				`Failed to load models.json: ${error instanceof Error ? error.message : error}\n\nFile: ${filePath}`,
 			);
 		}
 	}

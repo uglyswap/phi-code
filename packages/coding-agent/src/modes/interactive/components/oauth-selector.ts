@@ -1,6 +1,6 @@
-import type { OAuthProviderInterface } from "@mariozechner/pi-ai";
-import { getOAuthProviders } from "@mariozechner/pi-ai/oauth";
-import { Container, getEditorKeybindings, Spacer, TruncatedText } from "@mariozechner/pi-tui";
+import type { OAuthProviderInterface } from "phi-code-ai";
+import { getOAuthProviders } from "phi-code-ai/oauth";
+import { Container, getEditorKeybindings, Spacer, TruncatedText } from "phi-code-tui";
 import type { AuthStorage } from "../../../core/auth-storage.js";
 import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";

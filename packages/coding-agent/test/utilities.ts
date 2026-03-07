@@ -5,9 +5,9 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { Agent } from "@mariozechner/pi-agent-core";
-import { getModel, type OAuthCredentials, type OAuthProvider } from "@mariozechner/pi-ai";
-import { getOAuthApiKey } from "@mariozechner/pi-ai/oauth";
+import { Agent } from "phi-code-agent";
+import { getModel, type OAuthCredentials, type OAuthProvider } from "phi-code-ai";
+import { getOAuthApiKey } from "phi-code-ai/oauth";
 import { AgentSession } from "../src/core/agent-session.js";
 import { AuthStorage } from "../src/core/auth-storage.js";
 import { createExtensionRuntime } from "../src/core/extensions/loader.js";
