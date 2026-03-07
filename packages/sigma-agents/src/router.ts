@@ -72,8 +72,8 @@ export class SmartRouter {
     try {
       const content = await readFile(configPath, 'utf8');
       return JSON.parse(content);
-    } catch (error) {
-      console.warn(`Could not load routing config from ${configPath}:`, error);
+    } catch {
+      // File doesn't exist yet — use defaults silently
       return SmartRouter.defaultConfig();
     }
   }

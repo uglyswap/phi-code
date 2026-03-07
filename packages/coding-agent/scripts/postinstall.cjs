@@ -58,6 +58,16 @@ for (const pkg of sigmaPackages) {
   createLink(srcPkg, destLink, pkg);
 }
 
+// 3. Create default settings.json with quietStartup if it doesn't exist
+const settingsPath = join(agentDir, "settings.json");
+if (!existsSync(settingsPath)) {
+  try {
+    const defaults = { quietStartup: true };
+    require("fs").writeFileSync(settingsPath, JSON.stringify(defaults, null, 2), "utf-8");
+    console.log(`  Φ Created settings.json (quietStartup: true)`);
+  } catch { /* skip */ }
+}
+
 function createLink(src, dest, name) {
   try {
     // Remove existing (symlink or directory)

@@ -1,32 +1,32 @@
 {
-	"name": "sigma-agents",
-	"version": "0.1.6",
-	"description": "Intelligent sub-agent system with model routing for Phi Code",
-	"main": "dist/index.js",
-	"types": "dist/index.d.ts",
-	"scripts": {
-		"build": "tsc",
-		"clean": "rm -rf dist"
-	},
-	"dependencies": {},
-	"devDependencies": {
-		"typescript": "^5.4.0"
-	},
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/uglyswap/phi-code.git"
-	},
-	"homepage": "https://github.com/uglyswap/phi-code",
-	"keywords": [
-		"agents",
-		"routing",
-		"typescript",
-		"phi-code"
-	],
-	"license": "MIT",
-	"files": [
-		"dist",
-		"src",
-		"README.md"
-	]
+  "name": "sigma-agents",
+  "version": "0.1.7",
+  "description": "Intelligent sub-agent system with model routing for Phi Code",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/uglyswap/phi-code.git"
+  },
+  "homepage": "https://github.com/uglyswap/phi-code",
+  "keywords": [
+    "agents",
+    "routing",
+    "typescript",
+    "phi-code"
+  ],
+  "license": "MIT",
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ]
 }
