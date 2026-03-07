@@ -106,6 +106,18 @@ That's it! Phi Code will auto-configure with powerful Alibaba Coding Plan models
 - **Automated Testing**: Generate comprehensive test suites
 - **Deployment Automation**: From code to production
 
+### 🧩 **Phi Extensions** 
+Phi Code includes a comprehensive set of TypeScript extensions that enhance the coding experience:
+
+- **🧠 Memory Extension**: Persistent memory with search, write, and read capabilities
+- **🎯 Smart Router**: Intelligent model routing based on task analysis  
+- **📋 Orchestrator**: High-level project planning and task breakdown
+- **🧩 Skill Loader**: Dynamic loading of specialized coding skills
+- **🌐 Web Search**: Internet search integration with Brave API and DuckDuckGo fallback
+- **🏆 Benchmark**: Integrated AI model performance testing and comparison
+
+*See [packages/coding-agent/extensions/phi/README.md](packages/coding-agent/extensions/phi/README.md) for detailed documentation.*
+
 ### 🌏 **Alibaba Coding Plan Integration**
 Built-in access to powerful Chinese AI models:
 - **Qwen 3.5 Plus** - Advanced reasoning and code understanding
