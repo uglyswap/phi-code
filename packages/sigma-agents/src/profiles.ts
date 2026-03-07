@@ -61,7 +61,7 @@ export class ModelProfiler {
           return speedOrder[b.speed] - speedOrder[a.speed];
         }
         
-        return a.cost - b.cost; // Coût plus bas = mieux
+        return 0; // Equal priority
       });
     
     return candidates[0] || null;
