@@ -10,10 +10,10 @@
  */
 
 import type { ExtensionAPI } from "phi-code";
-import { writeFile, mkdir, copyFile, readdir, access } from "node:fs/promises";
+import { writeFile, mkdir, copyFile, readdir, access, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -616,18 +616,86 @@ _Edit this file to customize Phi Code's behavior for your project._
 				ctx.ui.notify("🔍 Probing local model servers...", "info");
 				await detectLocalProviders(providers);
 
-				const available = providers.filter(p => p.available);
+				let available = providers.filter(p => p.available);
 
+				// If no providers found, offer interactive API key setup
 				if (available.length === 0) {
+					ctx.ui.notify("⚠️ No API keys detected. Let's set one up!\n", "info");
+					ctx.ui.notify("**Available providers:**", "info");
 					const cloudProviders = providers.filter(p => !p.local);
-					ctx.ui.notify("❌ No providers found. Options:\n\n" +
-						"**Cloud providers** (set API key):\n" +
-						cloudProviders.map(p => `  export ${p.envVar}="your-key"  # ${p.name}`).join("\n") +
-						"\n\n**Local providers** (start the server):\n" +
-						"  • Ollama: `ollama serve` (default port 11434)\n" +
-						"  • LM Studio: Start server in app (default port 1234)\n" +
-						"\n💡 Options: Alibaba Coding Plan (cloud), OpenAI, Anthropic, or Ollama/LM Studio (local)", "error");
-					return;
+					cloudProviders.forEach((p, i) => {
+						ctx.ui.notify(`  ${i + 1}. ${p.name}`, "info");
+					});
+					ctx.ui.notify(`  ${cloudProviders.length + 1}. Ollama (local)`, "info");
+					ctx.ui.notify(`  ${cloudProviders.length + 2}. LM Studio (local)\n`, "info");
+
+					const providerChoice = await ctx.ui.input(
+						"Choose provider (number)",
+						`1-${cloudProviders.length + 2}`
+					);
+					const choiceNum = parseInt(providerChoice ?? "0");
+
+					if (choiceNum >= 1 && choiceNum <= cloudProviders.length) {
+						// Cloud provider — ask for API key
+						const chosen = cloudProviders[choiceNum - 1];
+						ctx.ui.notify(`\n🔑 **${chosen.name}** selected.`, "info");
+
+						const apiKey = await ctx.ui.input(
+							`Enter your ${chosen.name} API key`,
+							"sk-..."
+						);
+
+						if (!apiKey || apiKey.trim().length < 5) {
+							ctx.ui.notify("❌ Invalid API key. Cancelled.", "error");
+							return;
+						}
+
+						// Save to models.json for persistence
+						const modelsJsonPath = join(agentDir, "models.json");
+						let modelsConfig: any = { providers: {} };
+						try {
+							const existing = await readFile(modelsJsonPath, "utf-8");
+							modelsConfig = JSON.parse(existing);
+						} catch { /* file doesn't exist yet */ }
+
+						// Build provider config with correct provider ID
+						const providerId = chosen.name.toLowerCase().replace(/\s+/g, "-");
+						modelsConfig.providers[providerId] = {
+							baseUrl: chosen.baseUrl,
+							api: "openai-completions",
+							apiKey: apiKey.trim(),
+							models: chosen.models.map((id: string) => ({
+								id,
+								name: id,
+								reasoning: true,
+								input: ["text"],
+								contextWindow: 131072,
+								maxTokens: 16384,
+							})),
+						};
+
+						await writeFile(modelsJsonPath, JSON.stringify(modelsConfig, null, 2), "utf-8");
+
+						// Also set in current session
+						process.env[chosen.envVar] = apiKey.trim();
+						chosen.available = true;
+
+						ctx.ui.notify(`\n✅ API key saved to \`~/.phi/agent/models.json\``, "info");
+						ctx.ui.notify(`   ${chosen.models.length} models configured.`, "info");
+						ctx.ui.notify(`   ⚠️ **Restart phi** for models to load.\n`, "warning");
+						ctx.ui.notify("Run `phi` again, then `/phi-init` to complete setup.", "info");
+						return;
+
+					} else if (choiceNum === cloudProviders.length + 1 || choiceNum === cloudProviders.length + 2) {
+						const localName = choiceNum === cloudProviders.length + 1 ? "Ollama" : "LM Studio";
+						const port = choiceNum === cloudProviders.length + 1 ? 11434 : 1234;
+						ctx.ui.notify(`\n💡 **${localName}** selected. Make sure it's running on port ${port}.`, "info");
+						ctx.ui.notify(`Then restart phi and run /phi-init again.`, "info");
+						return;
+					} else {
+						ctx.ui.notify("❌ Invalid choice. Cancelled.", "error");
+						return;
+					}
 				}
 
 				ctx.ui.notify(`✅ Found ${available.length} provider(s):`, "info");
@@ -786,7 +854,7 @@ For persistence, set environment variables:
 
 			if (action === "set") {
 				const provider = parts[1]?.toLowerCase();
-				const key = parts[2];
+				const key = parts.slice(2).join(" ").trim();
 
 				if (!provider || !key) {
 					ctx.ui.notify("Usage: /api-key set <provider> <key>\nExample: /api-key set alibaba sk-sp-xxx", "warning");
@@ -801,13 +869,37 @@ For persistence, set environment variables:
 
 				// Set in current process environment
 				process.env[info.envVar] = key;
-				// Also set common aliases
 				if (provider === "alibaba") {
 					process.env.DASHSCOPE_API_KEY = key;
 				}
 
+				// Persist to models.json
+				const modelsJsonPath = join(homedir(), ".phi", "agent", "models.json");
+				let modelsConfig: any = { providers: {} };
+				try {
+					const existing = readFileSync(modelsJsonPath, "utf-8");
+					modelsConfig = JSON.parse(existing);
+				} catch { /* file doesn't exist yet */ }
+
+				// Find provider config from detectProviders
+				const providerDefs = detectProviders();
+				const providerDef = providerDefs.find(p => p.envVar === info.envVar);
+				if (providerDef) {
+					const providerId = providerDef.name.toLowerCase().replace(/\s+/g, "-");
+					modelsConfig.providers[providerId] = {
+						baseUrl: providerDef.baseUrl,
+						api: "openai-completions",
+						apiKey: key,
+						models: providerDef.models.map((id: string) => ({
+							id, name: id, reasoning: true, input: ["text"],
+							contextWindow: 131072, maxTokens: 16384,
+						})),
+					};
+					writeFileSync(modelsJsonPath, JSON.stringify(modelsConfig, null, 2), "utf-8");
+				}
+
 				const masked = key.substring(0, 6) + "..." + key.substring(key.length - 4);
-				ctx.ui.notify(`✅ **${info.name}** API key set: ${masked}\n\n⚠️ Active for this session only. For persistence:\n  • Windows: \`setx ${info.envVar} "${key.substring(0, 6)}..."\`\n  • Linux/Mac: Add \`export ${info.envVar}="..."\` to ~/.bashrc`, "info");
+				ctx.ui.notify(`✅ **${info.name}** API key saved: ${masked}\n\n📁 Saved to \`~/.phi/agent/models.json\` (persistent)\n⚠️ **Restart phi** for the new models to load.`, "info");
 				return;
 			}
 
