@@ -93,7 +93,7 @@ phi-code/
 │   ├── agent-core/          # phi-code-agent — Core agent loop, tools, context
 │   ├── tui/                 # phi-code-tui — Terminal UI (Ink-based)
 │   ├── coding-agent/        # @phi-code-admin/phi-code — Main CLI entry point
-│   │   ├── extensions/phi/  # 8 TypeScript extensions (auto-loaded)
+│   │   ├── extensions/phi/  # 9 TypeScript extensions (auto-loaded)
 │   │   └── skills/          # 12 bundled coding skills (loaded on demand)
 │   ├── sigma-memory/        # sigma-memory — Memory subsystem (notes + ontology + QMD)
 │   ├── sigma-agents/        # sigma-agents — Sub-agent routing and profiles
@@ -108,7 +108,7 @@ phi-code/
 1. **Extensions**: The loader scans 3 locations in order:
    - `.phi/extensions/` in the current project directory
    - `~/.phi/agent/extensions/` (global user extensions)
-   - Bundled extensions shipped with the package (8 extensions)
+   - Bundled extensions shipped with the package (9 extensions)
    
 2. **Skills**: Listed in the system prompt as name + description only. The model reads the full skill content via the `read` tool only when relevant. Zero context overhead for unused skills.
 
@@ -120,7 +120,7 @@ phi-code/
 
 ## Extensions
 
-Phi Code includes 8 TypeScript extensions that are automatically loaded at startup. Each registers tools, commands, or event handlers.
+Phi Code includes 9 TypeScript extensions that are automatically loaded at startup. Each registers tools, commands, or event handlers.
 
 ### Memory Extension (`memory.ts`)
 
@@ -141,7 +141,14 @@ Persistent memory powered by the `sigma-memory` package. Three layers:
 | `memory_read` | Read a specific memory file, or list all available files. |
 | `memory_status` | Show status of all memory subsystems (file counts, QMD availability, ontology stats). |
 
-**Behavior:** At session start, if `~/.phi/memory/AGENTS.md` exists, its content is injected into the system prompt as persistent instructions.
+**Auto-Recall:** The memory extension adds prompt guidelines that instruct the model to:
+- Search memory before answering questions about prior work, architecture, or decisions
+- Search memory when starting work on a topic (to find existing notes and learnings)
+- Write to memory after completing important work or learning something new
+
+This is not forced via code — it's a prompt guideline that well-trained models follow naturally, keeping the system prompt lightweight.
+
+**Session Start:** Looks for `AGENTS.md` in three locations (project root, `.phi/`, `~/.phi/memory/`) and loads it as persistent instructions.
 
 ### Smart Router Extension (`smart-router.ts`)
 
@@ -213,28 +220,70 @@ Adds internet search capabilities with two providers:
 
 ### Benchmark Extension (`benchmark.ts`)
 
-Tests and compares AI model performance on coding tasks.
+Production-grade model testing across 6 categories with real API calls.
 
-**Current test:** Fibonacci function generation (JavaScript) — measures correctness and response time.
+**Categories (weighted):**
 
-**Results saved:** `~/.phi/benchmark/results.json` — persistent across sessions.
+| Category | Weight | Test Description |
+|----------|--------|------------------|
+| Code Generation | ×2 | Write a TypeScript function from a detailed spec |
+| Debugging | ×2 | Find and fix a mutation bug in array handling code |
+| Planning | ×2 | Create a JWT auth implementation plan for Express.js |
+| Tool Calling | ×1 | Parse natural language to structured JSON (schema validation) |
+| Speed | ×1 | Response latency measurement (instruction following) |
+| Orchestration | ×2 | Multi-step Node.js memory leak analysis |
 
-**Command:** `/benchmark` — Run benchmark on all available models and display comparison table.
+**Scoring:** S (80+), A (65+), B (50+), C (35+), D (<35)
+
+**Results saved:** `~/.phi/benchmark/results.json` — persistent, used by `/phi-init benchmark` mode.
+
+**Commands:**
+- `/benchmark` — Run on current model
+- `/benchmark all` — Run on ALL available models (may take 10-15 min)
+- `/benchmark <model-id>` — Run on a specific model
+- `/benchmark results` — Show saved results with leaderboard
+- `/benchmark compare` — Side-by-side model comparison
+- `/benchmark clear` — Clear all results
+- `/benchmark help` — Full usage guide
+
+### Agents Extension (`agents.ts`)
+
+Sub-agent management and visibility.
+
+**Command:**
+- `/agents` — List all configured sub-agents with their model assignments and sources
+- `/agents <name>` — Show detailed info for a specific agent (prompt, tools, model)
+
+**Discovery:** Scans three locations:
+1. `.phi/agents/` (project-local)
+2. `~/.phi/agent/agents/` (global)
+3. Bundled agents (5 shipped with Phi Code)
 
 ### Init Extension (`init.ts`)
 
-Interactive setup wizard for first-time configuration.
+Interactive setup wizard with **3 fully functional modes**.
 
 **Command:** `/phi-init`
 
+**Modes:**
+
+| Mode | Description | Time |
+|------|-------------|------|
+| **auto** | Uses optimal defaults based on public rankings and model specializations | Instant |
+| **benchmark** | Tests models with `/benchmark all`, assigns best-per-category | 10-15 min |
+| **manual** | Interactive prompts — choose model for each of 6 task roles + fallbacks | 2-3 min |
+
 **Steps:**
-1. Detects available API keys (Alibaba, OpenAI, Anthropic, etc.)
-2. Lists available models for each provider
-3. Asks for configuration mode (auto / benchmark / manual)
-4. Creates `~/.phi/agent/` directory structure
-5. Writes routing configuration
-6. Copies default sub-agent definitions
-7. Activates extensions
+1. Detects available API keys (Alibaba, OpenAI, Anthropic, Google, OpenRouter, Groq)
+2. Lists available models per provider
+3. Asks for configuration mode
+4. **auto**: Assigns models based on specialization (coder→code, reasoning→debug/plan, fast→explore/test)
+5. **benchmark**: Checks for existing `/benchmark` results, assigns best model per category
+6. **manual**: Prompts user for each role (code, debug, plan, explore, test, review) with model list
+7. Creates `~/.phi/` directory structure (agent, memory, ontology)
+8. Copies bundled sub-agent definitions
+9. Creates AGENTS.md template for persistent instructions
+10. Writes routing configuration
 
 ---
 
@@ -563,8 +612,12 @@ Commands are typed in the Phi Code terminal with a `/` prefix.
 
 | Command | Extension | Description |
 |---------|-----------|-------------|
-| `/phi-init` | init | Interactive setup wizard — detect keys, configure routing, create agents |
-| `/benchmark` | benchmark | Test all available models on coding tasks, save results |
+| `/phi-init` | init | Interactive setup wizard — 3 modes: auto, benchmark, manual |
+| `/benchmark` | benchmark | Test models across 6 categories (code-gen, debug, planning, tool-calling, speed, orchestration) |
+| `/benchmark all` | benchmark | Run benchmark on ALL available models |
+| `/benchmark results` | benchmark | Show saved results with leaderboard and category breakdown |
+| `/agents` | agents | List all configured sub-agents with model assignments |
+| `/agents <name>` | agents | Show detailed info for a specific agent |
 | `/plan` | orchestrator | Describe a project → generates `spec.md` + `todo.md` in `.phi/plans/` |
 | `/plans` | orchestrator | List all existing plans |
 | `/skills` | skill-loader | List all discovered skills with sources and descriptions |

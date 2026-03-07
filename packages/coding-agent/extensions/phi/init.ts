@@ -1,331 +1,466 @@
 /**
  * Phi Init Extension - Interactive setup wizard for Phi Code
  *
- * Provides an interactive wizard to configure Phi Code with:
- * - API key detection and model discovery
- * - Intelligent model routing configuration
- * - Agent definitions setup
- * - Extension activation
+ * Three modes:
+ * - auto: Use Alibaba Coding Plan defaults (instant, recommended)
+ * - benchmark: Test available models with /benchmark, then assign (10-15 min)
+ * - manual: User assigns each model role interactively
  *
- * Features:
- * - /phi-init command for setup wizard
- * - Auto-detects available API keys
- * - Three setup modes: auto, benchmark, manual
- * - Creates ~/.phi/agent/ configuration structure
- * - Activates Phi Code extensions
- *
- * Usage:
- * 1. Run /phi-init to start the wizard
- * 2. Follow interactive prompts
- * 3. Configuration saved to ~/.phi/agent/
+ * Creates ~/.phi/agent/ structure with routing, agents, and memory.
  */
 
 import type { ExtensionAPI } from "phi-code";
-import { writeFile, mkdir, readFile, access, readdir, copyFile } from "node:fs/promises";
-import { join } from "node:path";
+import { writeFile, mkdir, copyFile, readdir, access } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { existsSync } from "node:fs";
+
+// ─── Types ───────────────────────────────────────────────────────────────
 
 interface DetectedProvider {
-  name: string;
-  envVar: string;
-  models: string[];
-  available: boolean;
+	name: string;
+	envVar: string;
+	baseUrl: string;
+	models: string[];
+	available: boolean;
 }
 
-interface ModelConfig {
-  id: string;
-  provider: string;
-  apiKey?: string;
-  baseUrl?: string;
+interface RoutingConfig {
+	routes: Record<string, {
+		description: string;
+		keywords: string[];
+		preferredModel: string;
+		fallback: string;
+		agent: string;
+	}>;
+	default: { model: string; agent: string | null };
 }
 
-interface RoutingConfigData {
-  routes: Record<string, {
-    preferredModel: string;
-    fallback: string;
-    agent: string | null;
-    keywords: string[];
-  }>;
-  default: { model: string; agent: string | null };
+// ─── Provider Detection ──────────────────────────────────────────────────
+
+function detectProviders(): DetectedProvider[] {
+	const providers: DetectedProvider[] = [
+		{
+			name: "Alibaba Coding Plan",
+			envVar: "ALIBABA_CODING_PLAN_KEY",
+			baseUrl: "https://coding-intl.dashscope.aliyuncs.com/v1",
+			models: ["qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-plus", "qwen3-coder-next", "kimi-k2.5", "glm-5", "glm-4.7", "MiniMax-M2.5"],
+			available: false,
+		},
+		{
+			name: "OpenAI",
+			envVar: "OPENAI_API_KEY",
+			baseUrl: "https://api.openai.com/v1",
+			models: ["gpt-4o", "gpt-4o-mini", "o1", "o3-mini"],
+			available: false,
+		},
+		{
+			name: "Anthropic",
+			envVar: "ANTHROPIC_API_KEY",
+			baseUrl: "https://api.anthropic.com/v1",
+			models: ["claude-sonnet-4-20250514", "claude-3-5-haiku-20241022"],
+			available: false,
+		},
+		{
+			name: "Google",
+			envVar: "GOOGLE_API_KEY",
+			baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+			models: ["gemini-2.5-pro", "gemini-2.5-flash"],
+			available: false,
+		},
+		{
+			name: "OpenRouter",
+			envVar: "OPENROUTER_API_KEY",
+			baseUrl: "https://openrouter.ai/api/v1",
+			models: [],
+			available: false,
+		},
+		{
+			name: "Groq",
+			envVar: "GROQ_API_KEY",
+			baseUrl: "https://api.groq.com/openai/v1",
+			models: ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"],
+			available: false,
+		},
+	];
+
+	for (const p of providers) {
+		p.available = !!process.env[p.envVar];
+	}
+
+	return providers;
 }
+
+function getAllAvailableModels(providers: DetectedProvider[]): string[] {
+	return providers.filter(p => p.available).flatMap(p => p.models);
+}
+
+// ─── Routing Presets ─────────────────────────────────────────────────────
+
+const TASK_ROLES = [
+	{ key: "code", label: "Code Generation", desc: "Writing and modifying code", agent: "code", defaultModel: "qwen3-coder-plus" },
+	{ key: "debug", label: "Debugging", desc: "Finding and fixing bugs", agent: "code", defaultModel: "qwen3-max-2026-01-23" },
+	{ key: "plan", label: "Planning", desc: "Architecture and design", agent: "plan", defaultModel: "qwen3-max-2026-01-23" },
+	{ key: "explore", label: "Exploration", desc: "Code reading and analysis", agent: "explore", defaultModel: "kimi-k2.5" },
+	{ key: "test", label: "Testing", desc: "Running and writing tests", agent: "test", defaultModel: "kimi-k2.5" },
+	{ key: "review", label: "Code Review", desc: "Quality and security review", agent: "review", defaultModel: "qwen3.5-plus" },
+] as const;
+
+const KEYWORDS: Record<string, string[]> = {
+	code: ["implement", "create", "build", "refactor", "write", "add", "modify", "update", "generate"],
+	debug: ["fix", "bug", "error", "debug", "crash", "broken", "failing", "issue", "troubleshoot"],
+	explore: ["read", "analyze", "explain", "understand", "find", "search", "look", "show", "what", "how"],
+	plan: ["plan", "design", "architect", "spec", "structure", "organize", "strategy", "approach"],
+	test: ["test", "verify", "validate", "check", "assert", "coverage"],
+	review: ["review", "audit", "quality", "security", "improve", "optimize"],
+};
+
+function createRouting(assignments: Record<string, { preferred: string; fallback: string }>): RoutingConfig {
+	const routes: RoutingConfig["routes"] = {};
+	for (const role of TASK_ROLES) {
+		const assignment = assignments[role.key];
+		routes[role.key] = {
+			description: role.desc,
+			keywords: KEYWORDS[role.key] || [],
+			preferredModel: assignment?.preferred || role.defaultModel,
+			fallback: assignment?.fallback || "qwen3.5-plus",
+			agent: role.agent,
+		};
+	}
+	return {
+		routes,
+		default: { model: assignments["default"]?.preferred || "qwen3.5-plus", agent: null },
+	};
+}
+
+// ─── Extension ───────────────────────────────────────────────────────────
 
 export default function initExtension(pi: ExtensionAPI) {
-  const phiAgentDir = join(homedir(), ".phi", "agent");
-  const routingConfigPath = join(phiAgentDir, "routing.json");
-  const modelsConfigPath = join(phiAgentDir, "models.json");
-  const agentsDir = join(phiAgentDir, "agents");
-  const extensionsDir = join(phiAgentDir, "extensions");
+	const phiDir = join(homedir(), ".phi");
+	const agentDir = join(phiDir, "agent");
+	const agentsDir = join(agentDir, "agents");
+	const memoryDir = join(phiDir, "memory");
 
-  /**
-   * Détecte les clés API disponibles dans l'environnement
-   */
-  function detectProviders(): DetectedProvider[] {
-    const providers: DetectedProvider[] = [
-      {
-        name: "Alibaba DashScope",
-        envVar: "DASHSCOPE_API_KEY",
-        models: [
-          "qwen3.5-plus",
-          "qwen3-max-2026-01-23", 
-          "qwen3-coder-plus",
-          "qwen3-coder-next",
-          "kimi-k2.5",
-          "glm-5",
-          "glm-4.7",
-          "MiniMax-M2.5"
-        ],
-        available: false
-      },
-      {
-        name: "OpenAI",
-        envVar: "OPENAI_API_KEY", 
-        models: ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo", "gpt-4o"],
-        available: false
-      },
-      {
-        name: "Anthropic",
-        envVar: "ANTHROPIC_API_KEY",
-        models: ["claude-3.5-sonnet", "claude-3-opus", "claude-3-haiku"],
-        available: false
-      },
-      {
-        name: "Google",
-        envVar: "GOOGLE_API_KEY",
-        models: ["gemini-pro", "gemini-pro-vision"],
-        available: false
-      }
-    ];
+	/**
+	 * Create all necessary directories
+	 */
+	async function ensureDirs() {
+		for (const dir of [agentDir, agentsDir, join(agentDir, "skills"), join(agentDir, "extensions"), memoryDir, join(memoryDir, "ontology")]) {
+			await mkdir(dir, { recursive: true });
+		}
+	}
 
-    // Vérifier la disponibilité des clés API
-    for (const provider of providers) {
-      provider.available = !!process.env[provider.envVar];
-    }
+	/**
+	 * Copy bundled agent definitions to user directory
+	 */
+	async function copyBundledAgents() {
+		const bundledDir = resolve(join(__dirname, "..", "..", "..", "agents"));
+		if (!existsSync(bundledDir)) return;
 
-    return providers;
-  }
+		try {
+			const files = await readdir(bundledDir);
+			for (const file of files) {
+				if (file.endsWith(".md")) {
+					const dest = join(agentsDir, file);
+					if (!existsSync(dest)) {
+						await copyFile(join(bundledDir, file), dest);
+					}
+				}
+			}
+		} catch {
+			// bundled dir not available
+		}
+	}
 
-  /**
-   * Crée la configuration par défaut (mode auto)
-   */
-  function createAutoConfig(availableProviders: DetectedProvider[]): { routing: RoutingConfigData; models: ModelConfig[] } {
-    // Priorité: Alibaba (gratuit) > Anthropic > OpenAI > Google
-    const preferenceOrder = ["Alibaba DashScope", "Anthropic", "OpenAI", "Google"];
-    
-    let primaryProvider: DetectedProvider | null = null;
-    
-    for (const providerName of preferenceOrder) {
-      const provider = availableProviders.find(p => p.name === providerName && p.available);
-      if (provider) {
-        primaryProvider = provider;
-        break;
-      }
-    }
+	/**
+	 * Create AGENTS.md template
+	 */
+	async function createAgentsTemplate() {
+		const agentsMdPath = join(memoryDir, "AGENTS.md");
+		if (existsSync(agentsMdPath)) return; // Don't overwrite
 
-    if (!primaryProvider) {
-      throw new Error("Aucun provider disponible détecté");
-    }
+		await writeFile(agentsMdPath, `# AGENTS.md — Persistent Instructions
 
-    const models: ModelConfig[] = primaryProvider.models.map(modelId => ({
-      id: modelId,
-      provider: primaryProvider!.name,
-      apiKey: process.env[primaryProvider!.envVar]
-    }));
+This file is loaded at the start of every session. Use it to store:
+- Project conventions and rules
+- Recurring instructions
+- Important context the agent should always know
 
-    const routing: RoutingConfigData = {
-      routes: {
-        code: {
-          preferredModel: primaryProvider.models.find(m => m.includes("coder")) || primaryProvider.models[0],
-          fallback: primaryProvider.models[0],
-          agent: null,
-          keywords: ["code", "implement", "write", "create", "build", "develop", "function", "class"]
-        },
-        debug: {
-          preferredModel: primaryProvider.models[0],
-          fallback: primaryProvider.models[1] || primaryProvider.models[0],
-          agent: null,
-          keywords: ["debug", "fix", "error", "bug", "broken", "issue", "problem", "repair"]
-        },
-        plan: {
-          preferredModel: primaryProvider.models.find(m => m.includes("max")) || primaryProvider.models[0],
-          fallback: primaryProvider.models[0],
-          agent: null,
-          keywords: ["plan", "design", "architecture", "strategy", "structure", "organize"]
-        },
-        review: {
-          preferredModel: primaryProvider.models[0],
-          fallback: primaryProvider.models[1] || primaryProvider.models[0],
-          agent: null,
-          keywords: ["review", "audit", "check", "validate", "quality", "improve", "optimize"]
-        },
-        test: {
-          preferredModel: primaryProvider.models.find(m => m.includes("fast")) || primaryProvider.models[0],
-          fallback: primaryProvider.models[0],
-          agent: null,
-          keywords: ["test", "testing", "unit", "integration", "verify", "validate"]
-        },
-        explore: {
-          preferredModel: primaryProvider.models.find(m => m.includes("fast")) || primaryProvider.models[0],
-          fallback: primaryProvider.models[0],
-          agent: null,
-          keywords: ["explore", "understand", "analyze", "examine", "investigate"]
-        },
-        general: {
-          preferredModel: primaryProvider.models[0],
-          fallback: primaryProvider.models[1] || primaryProvider.models[0],
-          agent: null,
-          keywords: ["help", "explain", "what", "how", "why", "question"]
-        }
-      },
-      default: {
-        model: primaryProvider.models[0],
-        agent: null
-      }
-    };
+## Project
 
-    return { routing, models };
-  }
+- Name: (your project name)
+- Language: TypeScript
+- Framework: (your framework)
 
-  /**
-   * Crée les répertoires nécessaires
-   */
-  async function ensureDirectories(): Promise<void> {
-    await mkdir(phiAgentDir, { recursive: true });
-    await mkdir(agentsDir, { recursive: true });
-    await mkdir(extensionsDir, { recursive: true });
-  }
+## Conventions
 
-  /**
-   * Copie les définitions d'agents par défaut
-   */
-  async function copyDefaultAgents(): Promise<void> {
-    // Pour l'instant, nous créons un agent par défaut simple
-    const defaultAgent = `---
-name: general-assistant
-description: General purpose assistant for various tasks
-model: qwen3.5-plus
-tools: [read, write, exec, web_search]
-maxTokens: 4096
+- (your coding conventions)
+- (your naming rules)
+- (your commit format)
+
+## Important Notes
+
+- (anything the agent should always remember)
+
 ---
 
-# General Assistant
+_Edit this file to customize Phi Code's behavior for your project._
+`, "utf-8");
+	}
 
-You are a helpful AI assistant capable of handling various tasks including:
+	// ─── MODE: Auto ──────────────────────────────────────────────────
 
-- Code analysis and debugging
-- File operations
-- Web searches
-- General problem solving
+	function autoMode(availableModels: string[]): Record<string, { preferred: string; fallback: string }> {
+		const assignments: Record<string, { preferred: string; fallback: string }> = {};
 
-Always be precise, helpful, and follow instructions carefully.
-`;
+		for (const role of TASK_ROLES) {
+			const preferred = availableModels.includes(role.defaultModel) ? role.defaultModel : availableModels[0];
+			const fallbackModel = availableModels.includes("qwen3.5-plus") ? "qwen3.5-plus" : availableModels[0];
+			assignments[role.key] = { preferred, fallback: fallbackModel };
+		}
+		assignments["default"] = {
+			preferred: availableModels.includes("qwen3.5-plus") ? "qwen3.5-plus" : availableModels[0],
+			fallback: availableModels[0],
+		};
 
-    await writeFile(join(agentsDir, "general-assistant.md"), defaultAgent, "utf8");
-  }
+		return assignments;
+	}
 
-  /**
-   * Active les extensions Phi Code
-   */
-  async function activateExtensions(): Promise<void> {
-    const extensionConfig = {
-      enabled: true,
-      extensions: [
-        "phi/memory",
-        "phi/benchmark", 
-        "phi/smart-router",
-        "phi/skill-loader",
-        "phi/web-search",
-        "phi/orchestrator"
-      ]
-    };
+	// ─── MODE: Benchmark ─────────────────────────────────────────────
 
-    await writeFile(
-      join(extensionsDir, "config.json"),
-      JSON.stringify(extensionConfig, null, 2),
-      "utf8"
-    );
-  }
+	async function benchmarkMode(availableModels: string[], ctx: any): Promise<Record<string, { preferred: string; fallback: string }>> {
+		ctx.ui.notify("🧪 Benchmark mode: running tests on available models...", "info");
+		ctx.ui.notify("This will test each model with 6 coding tasks. It may take 10-15 minutes.", "info");
+		ctx.ui.notify("💡 Tip: You can run `/benchmark all` separately and use `/benchmark results` to see rankings.\n", "info");
 
-  /**
-   * Wizard interactif
-   */
-  pi.registerCommand("phi-init", {
-    description: "Initialize Phi Code with interactive wizard",
-    handler: async (args, ctx) => {
-      try {
-        ctx.ui.notify("🚀 Welcome to Phi Code Setup Wizard!", "info");
+		// Check if benchmark results already exist
+		const benchmarkPath = join(phiDir, "benchmark", "results.json");
+		let existingResults: any = null;
+		try {
+			await access(benchmarkPath);
+			const content = await (await import("node:fs/promises")).readFile(benchmarkPath, "utf-8");
+			existingResults = JSON.parse(content);
+		} catch {
+			// No existing results
+		}
 
-        // 1. Détection des API keys
-        ctx.ui.notify("🔍 Detecting available API keys...", "info");
-        const providers = detectProviders();
-        const availableProviders = providers.filter(p => p.available);
+		if (existingResults?.results?.length > 0) {
+			const useExisting = await ctx.ui.confirm(
+				`Found ${existingResults.results.length} existing benchmark results. Use them instead of re-running?`
+			);
+			if (useExisting) {
+				return assignFromBenchmark(existingResults.results, availableModels);
+			}
+		}
 
-        if (availableProviders.length === 0) {
-          ctx.ui.notify("❌ No API keys detected. Please set one of the following environment variables:\n" +
-            providers.map(p => `- ${p.envVar} (for ${p.name})`).join("\n"), "error");
-          return;
-        }
+		// Run benchmarks via the /benchmark command
+		ctx.ui.notify("Starting benchmarks... (this runs in the background, continue with /phi-init after /benchmark completes)\n", "info");
+		ctx.ui.notify("Run: `/benchmark all` then `/phi-init` again with mode=benchmark to use results.\n", "info");
 
-        ctx.ui.notify("✅ Found API keys for:", "info");
-        for (const provider of availableProviders) {
-          ctx.ui.notify(`  - ${provider.name} (${provider.models.length} models)`, "info");
-        }
+		// Fall back to auto for now
+		return autoMode(availableModels);
+	}
 
-        // 2. Choix du mode de configuration
-        const mode = await ctx.ui.input("Choose setup mode:\n" +
-          "1. auto - Use public rankings to assign models (fastest)\n" +
-          "2. benchmark - Test models with simple exercises (recommended)\n" +
-          "3. manual - Choose models yourself (most control)\n" +
-          "\nEnter mode (1-3 or auto/benchmark/manual):");
+	function assignFromBenchmark(results: any[], availableModels: string[]): Record<string, { preferred: string; fallback: string }> {
+		const assignments: Record<string, { preferred: string; fallback: string }> = {};
 
-        const selectedMode = mode.toLowerCase().startsWith("1") || mode.toLowerCase().startsWith("a") ? "auto" :
-                            mode.toLowerCase().startsWith("2") || mode.toLowerCase().startsWith("b") ? "benchmark" :
-                            mode.toLowerCase().startsWith("3") || mode.toLowerCase().startsWith("m") ? "manual" : "auto";
+		// Sort by total score
+		const sorted = [...results].sort((a: any, b: any) => (b.totalScore || 0) - (a.totalScore || 0));
+		const bestOverall = sorted[0]?.modelId || availableModels[0];
+		const secondBest = sorted[1]?.modelId || bestOverall;
 
-        ctx.ui.notify(`📋 Selected mode: ${selectedMode}`, "info");
+		// Find best per category
+		function bestForCategory(category: string): string {
+			let best = { id: bestOverall, score: 0 };
+			for (const r of results) {
+				const catScore = r.categories?.[category]?.score ?? 0;
+				if (catScore > best.score) {
+					best = { id: r.modelId, score: catScore };
+				}
+			}
+			return best.id;
+		}
 
-        let config: { routing: RoutingConfigData; models: ModelConfig[] };
+		assignments["code"] = { preferred: bestForCategory("code-gen"), fallback: secondBest };
+		assignments["debug"] = { preferred: bestForCategory("debug"), fallback: secondBest };
+		assignments["plan"] = { preferred: bestForCategory("planning"), fallback: secondBest };
+		assignments["explore"] = { preferred: bestForCategory("speed"), fallback: secondBest };
+		assignments["test"] = { preferred: bestForCategory("speed"), fallback: secondBest };
+		assignments["review"] = { preferred: bestForCategory("orchestration"), fallback: secondBest };
+		assignments["default"] = { preferred: bestOverall, fallback: secondBest };
 
-        if (selectedMode === "auto") {
-          config = createAutoConfig(availableProviders);
-        } else {
-          // Pour benchmark et manual, utilisons auto pour l'instant (à implémenter)
-          ctx.ui.notify("⚠️  Benchmark and manual modes not yet implemented, using auto mode.", "info");
-          config = createAutoConfig(availableProviders);
-        }
+		return assignments;
+	}
 
-        // 3. Créer les répertoires
-        ctx.ui.notify("📁 Creating configuration directories...", "info");
-        await ensureDirectories();
+	// ─── MODE: Manual ────────────────────────────────────────────────
 
-        // 4. Écrire les fichiers de configuration
-        ctx.ui.notify("💾 Writing configuration files...", "info");
-        await writeFile(routingConfigPath, JSON.stringify(config.routing, null, 2), "utf8");
-        await writeFile(modelsConfigPath, JSON.stringify({ models: config.models }, null, 2), "utf8");
+	async function manualMode(availableModels: string[], ctx: any): Promise<Record<string, { preferred: string; fallback: string }>> {
+		ctx.ui.notify("🎛️ Manual mode: assign a model to each task category.\n", "info");
 
-        // 5. Copier les agents par défaut
-        ctx.ui.notify("🤖 Setting up default agents...", "info");
-        await copyDefaultAgents();
+		const modelList = availableModels.map((m, i) => `  ${i + 1}. ${m}`).join("\n");
+		const assignments: Record<string, { preferred: string; fallback: string }> = {};
 
-        // 6. Activer les extensions
-        ctx.ui.notify("🔌 Activating extensions...", "info");
-        await activateExtensions();
+		for (const role of TASK_ROLES) {
+			const input = await ctx.ui.input(
+				`**${role.label}** — ${role.desc}\nDefault: ${role.defaultModel}\n\nAvailable models:\n${modelList}\n\nEnter model name or number (Enter for default):`
+			);
 
-        // 7. Confirmation finale
-        const confirm = await ctx.ui.confirm("Setup complete! Would you like to see the configuration summary?");
-        
-        if (confirm) {
-          ctx.ui.notify("📊 Configuration Summary:\n" +
-            `- Models configured: ${config.models.length}\n` +
-            `- Primary provider: ${availableProviders[0].name}\n` +
-            `- Config location: ${phiAgentDir}\n` +
-            `- Extensions activated: Yes\n` +
-            `- Default agents: Created\n\n` +
-            "🎉 Phi Code is ready to use! Try running 'phi --help' for available commands.", "info");
-        }
+			let chosen = role.defaultModel;
+			const trimmed = input.trim();
 
-      } catch (error) {
-        ctx.ui.notify(`❌ Setup failed: ${error}`, "error");
-      }
-    }
-  });
+			if (trimmed) {
+				// Try as number
+				const num = parseInt(trimmed);
+				if (num >= 1 && num <= availableModels.length) {
+					chosen = availableModels[num - 1];
+				} else {
+					// Try as model name (partial match)
+					const match = availableModels.find(m => m.toLowerCase().includes(trimmed.toLowerCase()));
+					if (match) chosen = match;
+				}
+			}
+
+			// Fallback selection
+			const fallbackDefault = availableModels.find(m => m !== chosen) || chosen;
+			const fallbackInput = await ctx.ui.input(
+				`Fallback model for ${role.label}? (Enter for ${fallbackDefault}):`
+			);
+
+			let fallback = fallbackDefault;
+			if (fallbackInput.trim()) {
+				const num = parseInt(fallbackInput.trim());
+				if (num >= 1 && num <= availableModels.length) {
+					fallback = availableModels[num - 1];
+				} else {
+					const match = availableModels.find(m => m.toLowerCase().includes(fallbackInput.trim().toLowerCase()));
+					if (match) fallback = match;
+				}
+			}
+
+			assignments[role.key] = { preferred: chosen, fallback };
+			ctx.ui.notify(`  ✅ ${role.label}: ${chosen} (fallback: ${fallback})`, "info");
+		}
+
+		// Default model
+		const defaultInput = await ctx.ui.input(
+			`Default model for general tasks?\nAvailable:\n${modelList}\n\nEnter model name or number (Enter for ${availableModels[0]}):`
+		);
+		let defaultModel = availableModels[0];
+		if (defaultInput.trim()) {
+			const num = parseInt(defaultInput.trim());
+			if (num >= 1 && num <= availableModels.length) {
+				defaultModel = availableModels[num - 1];
+			} else {
+				const match = availableModels.find(m => m.toLowerCase().includes(defaultInput.trim().toLowerCase()));
+				if (match) defaultModel = match;
+			}
+		}
+		assignments["default"] = { preferred: defaultModel, fallback: availableModels[0] };
+
+		return assignments;
+	}
+
+	// ─── Command ─────────────────────────────────────────────────────
+
+	pi.registerCommand("phi-init", {
+		description: "Initialize Phi Code — interactive setup wizard (3 modes: auto, benchmark, manual)",
+		handler: async (args, ctx) => {
+			try {
+				ctx.ui.notify("╔══════════════════════════════════════╗", "info");
+				ctx.ui.notify("║     Φ  Phi Code Setup Wizard        ║", "info");
+				ctx.ui.notify("╚══════════════════════════════════════╝\n", "info");
+
+				// 1. Detect API keys
+				ctx.ui.notify("🔍 Detecting API keys...", "info");
+				const providers = detectProviders();
+				const available = providers.filter(p => p.available);
+
+				if (available.length === 0) {
+					ctx.ui.notify("❌ No API keys found. Set at least one:\n" +
+						providers.map(p => `  export ${p.envVar}="your-key"  # ${p.name}`).join("\n") +
+						"\n\n💡 Free option: Get an Alibaba Coding Plan key at https://help.aliyun.com/zh/model-studio/", "error");
+					return;
+				}
+
+				ctx.ui.notify(`✅ Found ${available.length} provider(s):`, "info");
+				for (const p of available) {
+					ctx.ui.notify(`  • ${p.name} — ${p.models.length} models`, "info");
+				}
+
+				const allModels = getAllAvailableModels(providers);
+				ctx.ui.notify(`  Total: ${allModels.length} models available\n`, "info");
+
+				// 2. Choose mode
+				const modeInput = await ctx.ui.input(
+					"Choose setup mode:\n\n" +
+					"  1. auto      — Use optimal defaults from public rankings (instant)\n" +
+					"  2. benchmark — Test models with coding tasks, assign by results (10-15 min)\n" +
+					"  3. manual    — Choose each model assignment yourself\n\n" +
+					"Enter 1, 2, or 3:"
+				);
+
+				const mode = modeInput.trim().startsWith("2") || modeInput.trim().toLowerCase().startsWith("b") ? "benchmark"
+					: modeInput.trim().startsWith("3") || modeInput.trim().toLowerCase().startsWith("m") ? "manual"
+					: "auto";
+
+				ctx.ui.notify(`\n📋 Mode: **${mode}**\n`, "info");
+
+				// 3. Get assignments based on mode
+				let assignments: Record<string, { preferred: string; fallback: string }>;
+
+				if (mode === "auto") {
+					assignments = autoMode(allModels);
+					ctx.ui.notify("⚡ Auto-assigned models based on public rankings and model specializations.", "info");
+				} else if (mode === "benchmark") {
+					assignments = await benchmarkMode(allModels, ctx);
+				} else {
+					assignments = await manualMode(allModels, ctx);
+				}
+
+				// 4. Create directory structure
+				ctx.ui.notify("\n📁 Creating directories...", "info");
+				await ensureDirs();
+
+				// 5. Write routing config
+				ctx.ui.notify("🔀 Writing routing configuration...", "info");
+				const routing = createRouting(assignments);
+				await writeFile(join(agentDir, "routing.json"), JSON.stringify(routing, null, 2), "utf-8");
+
+				// 6. Copy bundled agents
+				ctx.ui.notify("🤖 Setting up sub-agents...", "info");
+				await copyBundledAgents();
+
+				// 7. Create AGENTS.md template
+				ctx.ui.notify("📝 Creating memory template...", "info");
+				await createAgentsTemplate();
+
+				// 8. Summary
+				ctx.ui.notify("\n╔══════════════════════════════════════╗", "info");
+				ctx.ui.notify("║     ✅  Setup Complete!              ║", "info");
+				ctx.ui.notify("╚══════════════════════════════════════╝\n", "info");
+
+				ctx.ui.notify("**Configuration:**", "info");
+				ctx.ui.notify(`  📁 Config: ${agentDir}`, "info");
+				ctx.ui.notify(`  📁 Memory: ${memoryDir}`, "info");
+				ctx.ui.notify(`  🤖 Agents: ${agentsDir}`, "info");
+
+				ctx.ui.notify("\n**Model Assignments:**", "info");
+				for (const role of TASK_ROLES) {
+					const a = assignments[role.key];
+					ctx.ui.notify(`  ${role.label}: \`${a.preferred}\` (fallback: \`${a.fallback}\`)`, "info");
+				}
+				ctx.ui.notify(`  Default: \`${assignments["default"].preferred}\``, "info");
+
+				ctx.ui.notify("\n**Next steps:**", "info");
+				ctx.ui.notify("  • Edit `~/.phi/memory/AGENTS.md` with your project instructions", "info");
+				ctx.ui.notify("  • Run `/agents` to see available sub-agents", "info");
+				ctx.ui.notify("  • Run `/skills` to see available skills", "info");
+				ctx.ui.notify("  • Run `/benchmark all` to test model performance", "info");
+				ctx.ui.notify("  • Start coding! 🚀\n", "info");
+
+			} catch (error) {
+				ctx.ui.notify(`❌ Setup failed: ${error}`, "error");
+			}
+		},
+	});
 }

@@ -1,490 +1,703 @@
 /**
- * Benchmark Extension - Integrated model performance testing
+ * Benchmark Extension - Production-grade model performance testing
  *
- * Provides automated benchmarking capabilities to test and compare different
- * AI models on coding tasks. Currently includes a simple Fibonacci generation
- * test with plans to expand to additional test categories.
- *
- * Features:
- * - /benchmark command for interactive testing
- * - Model selection from available models
- * - Code generation testing (Fibonacci function)
- * - Performance metrics (time, quality, tokens)
- * - Results persistence in ~/.phi/benchmark/results.json
- * - Ranking and comparison display
+ * Tests AI models across 6 categories:
+ * 1. Code Generation — Write a function from a spec
+ * 2. Debugging — Find and fix a bug
+ * 3. Planning — Create an implementation plan
+ * 4. Tool Calling — Generate structured JSON output
+ * 5. Speed — Response latency measurement
+ * 6. Orchestration — Multi-step reasoning task
  *
  * Usage:
- * 1. Copy to packages/coding-agent/extensions/phi/benchmark.ts
- * 2. Use /benchmark to start interactive testing
- * 3. Results saved in ~/.phi/benchmark/results.json
+ * - /benchmark            — Run benchmark on current model
+ * - /benchmark all        — Run on all available models
+ * - /benchmark results    — Show saved results
+ * - /benchmark compare    — Side-by-side model comparison
+ * - /benchmark clear      — Clear all results
  */
 
-import type { ExtensionAPI } from "phi-code";
+import type { ExtensionAPI, ExtensionContext } from "phi-code";
 import { writeFile, mkdir, readFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-interface BenchmarkResult {
-	modelName: string;
-	testType: string;
-	timestamp: string;
-	timeMs: number;
-	tokensUsed?: number;
-	quality: "pass" | "fail" | "partial";
-	score: number; // 0-100
-	details: {
-		prompt: string;
-		response: string;
-		compilable: boolean;
-		testsPassed: number;
-		totalTests: number;
-		errors?: string[];
-	};
+// ─── Types ───────────────────────────────────────────────────────────────
+
+interface TestCase {
+	category: "code-gen" | "debug" | "planning" | "tool-calling" | "speed" | "orchestration";
+	name: string;
+	prompt: string;
+	validate: (response: string) => TestResult;
+	weight: number; // Score weight (1-3)
 }
 
-interface BenchmarkSummary {
-	testRuns: BenchmarkResult[];
+interface TestResult {
+	passed: boolean;
+	score: number; // 0-100
+	details: string;
+}
+
+interface ModelBenchmark {
+	modelId: string;
+	modelName: string;
+	provider: string;
+	timestamp: string;
+	categories: {
+		[key: string]: {
+			score: number;
+			timeMs: number;
+			details: string;
+		};
+	};
+	totalScore: number;
+	totalTimeMs: number;
+	avgTimeMs: number;
+}
+
+interface BenchmarkStore {
+	version: 2;
+	results: ModelBenchmark[];
 	lastUpdated: string;
 }
+
+// ─── Test Suite ──────────────────────────────────────────────────────────
+
+function createTestSuite(): TestCase[] {
+	return [
+		// 1. CODE GENERATION
+		{
+			category: "code-gen",
+			name: "Fibonacci Function",
+			weight: 2,
+			prompt: `Write a TypeScript function called 'fibonacci' that:
+- Takes a number n as parameter
+- Returns the nth Fibonacci number
+- Handles edge cases (n <= 0 returns 0, n = 1 returns 1)
+- Uses iterative approach (not recursive)
+- Is properly typed
+
+Respond with ONLY the function code, no explanations.`,
+			validate: (response: string) => {
+				const code = extractCode(response);
+				const checks = [
+					{ test: /function\s+fibonacci/.test(code), detail: "Function named 'fibonacci'" },
+					{ test: /:\s*number/.test(code), detail: "TypeScript type annotation" },
+					{ test: /return/.test(code), detail: "Has return statement" },
+					{ test: /for|while/.test(code), detail: "Uses iteration (not recursion)" },
+					{ test: /(<=\s*0|===?\s*0|<\s*1)/.test(code), detail: "Handles edge case n=0" },
+					{ test: /(===?\s*1|<=\s*1)/.test(code), detail: "Handles edge case n=1" },
+				];
+				const passed = checks.filter(c => c.test).length;
+				const total = checks.length;
+				return {
+					passed: passed >= 5,
+					score: Math.round((passed / total) * 100),
+					details: checks.map(c => `${c.test ? "✅" : "❌"} ${c.detail}`).join("\n"),
+				};
+			},
+		},
+
+		// 2. DEBUGGING
+		{
+			category: "debug",
+			name: "Find the Bug",
+			weight: 2,
+			prompt: `Find and fix the bug in this TypeScript code:
+
+\`\`\`typescript
+function mergeArrays<T>(arr1: T[], arr2: T[]): T[] {
+  const result = arr1;
+  for (let i = 0; i < arr2.length; i++) {
+    result.push(arr2[i]);
+  }
+  return result;
+}
+
+// Bug: calling mergeArrays modifies the original arr1
+const a = [1, 2, 3];
+const b = [4, 5, 6];
+const merged = mergeArrays(a, b);
+console.log(a); // Expected [1,2,3] but got [1,2,3,4,5,6]
+\`\`\`
+
+Explain the bug and provide the fixed code.`,
+			validate: (response: string) => {
+				const lower = response.toLowerCase();
+				const checks = [
+					{ test: /reference|shallow|copy|spread|\[\.\.\./.test(lower), detail: "Identifies reference/copy issue" },
+					{ test: /\[\.\.\.arr1\]|\[\.\.\.arr1,|Array\.from|\.slice\(\)|structuredClone|concat/.test(response), detail: "Uses spread/copy/concat fix" },
+					{ test: /mutate|modify|original|side.?effect/.test(lower), detail: "Explains the mutation problem" },
+					{ test: /const result\s*=\s*\[/.test(response) || /\.slice\(/.test(response) || /\.concat\(/.test(response) || /Array\.from/.test(response), detail: "Creates new array in fix" },
+				];
+				const passed = checks.filter(c => c.test).length;
+				return {
+					passed: passed >= 3,
+					score: Math.round((passed / checks.length) * 100),
+					details: checks.map(c => `${c.test ? "✅" : "❌"} ${c.detail}`).join("\n"),
+				};
+			},
+		},
+
+		// 3. PLANNING
+		{
+			category: "planning",
+			name: "Implementation Plan",
+			weight: 2,
+			prompt: `Create a detailed implementation plan for adding JWT authentication to an existing Express.js REST API.
+
+The API currently has:
+- User model with email/password
+- CRUD endpoints for /users and /posts
+- PostgreSQL database with Prisma ORM
+
+Requirements:
+- Login endpoint returns access + refresh tokens
+- Protected routes require valid access token
+- Refresh token rotation
+- Token blacklisting on logout
+
+Provide a structured plan with specific files to create/modify, dependencies to add, and implementation steps.`,
+			validate: (response: string) => {
+				const lower = response.toLowerCase();
+				const checks = [
+					{ test: /jsonwebtoken|jwt|jose/.test(lower), detail: "Mentions JWT library" },
+					{ test: /access.?token|refresh.?token/.test(lower), detail: "Covers both token types" },
+					{ test: /middleware/.test(lower), detail: "Mentions auth middleware" },
+					{ test: /bcrypt|argon|hash/.test(lower), detail: "Addresses password hashing" },
+					{ test: /blacklist|revoke|invalidat/.test(lower), detail: "Addresses token revocation" },
+					{ test: /prisma|schema|model|migration/.test(lower), detail: "Covers database changes" },
+					{ test: /env|secret|config/.test(lower), detail: "Addresses secret management" },
+					{ test: /step|phase|\d\.|create|modify|add/.test(lower), detail: "Provides structured steps" },
+				];
+				const passed = checks.filter(c => c.test).length;
+				return {
+					passed: passed >= 6,
+					score: Math.round((passed / checks.length) * 100),
+					details: checks.map(c => `${c.test ? "✅" : "❌"} ${c.detail}`).join("\n"),
+				};
+			},
+		},
+
+		// 4. TOOL CALLING (structured output)
+		{
+			category: "tool-calling",
+			name: "Structured JSON Output",
+			weight: 1,
+			prompt: `Parse this natural language description and output ONLY a valid JSON object (no markdown, no explanation):
+
+"Create a new user named Alice Smith, email alice@example.com, she's a software engineer at TechCorp, based in San Francisco, age 28, prefers dark mode and email notifications"
+
+Required JSON schema:
+{
+  "name": { "first": string, "last": string },
+  "email": string,
+  "profile": {
+    "occupation": string,
+    "company": string,
+    "location": string,
+    "age": number
+  },
+  "preferences": {
+    "theme": "light" | "dark",
+    "notifications": { "email": boolean, "push": boolean }
+  }
+}
+
+Output ONLY the JSON.`,
+			validate: (response: string) => {
+				const checks: Array<{ test: boolean; detail: string }> = [];
+
+				// Try to extract JSON from response
+				let jsonStr = response.trim();
+				const jsonMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/) || response.match(/(\{[\s\S]*\})/);
+				if (jsonMatch) jsonStr = jsonMatch[1].trim();
+
+				try {
+					const obj = JSON.parse(jsonStr);
+					checks.push({ test: true, detail: "Valid JSON" });
+					checks.push({ test: obj?.name?.first === "Alice", detail: 'name.first = "Alice"' });
+					checks.push({ test: obj?.name?.last === "Smith", detail: 'name.last = "Smith"' });
+					checks.push({ test: obj?.email === "alice@example.com", detail: "Correct email" });
+					checks.push({ test: typeof obj?.profile?.age === "number" && obj.profile.age === 28, detail: "Age is number 28" });
+					checks.push({ test: obj?.preferences?.theme === "dark", detail: 'theme = "dark"' });
+					checks.push({ test: obj?.preferences?.notifications?.email === true, detail: "email notifications = true" });
+				} catch {
+					checks.push({ test: false, detail: "Valid JSON (parse failed)" });
+					checks.push({ test: false, detail: "name.first" });
+					checks.push({ test: false, detail: "name.last" });
+					checks.push({ test: false, detail: "email" });
+					checks.push({ test: false, detail: "age" });
+					checks.push({ test: false, detail: "theme" });
+					checks.push({ test: false, detail: "notifications" });
+				}
+
+				const passed = checks.filter(c => c.test).length;
+				return {
+					passed: passed >= 5,
+					score: Math.round((passed / checks.length) * 100),
+					details: checks.map(c => `${c.test ? "✅" : "❌"} ${c.detail}`).join("\n"),
+				};
+			},
+		},
+
+		// 5. SPEED (simple task, measures latency)
+		{
+			category: "speed",
+			name: "Quick Response",
+			weight: 1,
+			prompt: `Reply with exactly this text and nothing else: "Hello, World!"`,
+			validate: (response: string) => {
+				const trimmed = response.trim().replace(/^["']|["']$/g, "").replace(/```\w*\n?/g, "").trim();
+				const exact = trimmed === "Hello, World!";
+				const close = trimmed.toLowerCase().includes("hello, world");
+				return {
+					passed: close,
+					score: exact ? 100 : close ? 75 : 0,
+					details: exact ? "✅ Exact match" : close ? "⚠️ Close match" : `❌ Got: "${trimmed.substring(0, 50)}"`,
+				};
+			},
+		},
+
+		// 6. ORCHESTRATION (multi-step reasoning)
+		{
+			category: "orchestration",
+			name: "Multi-Step Analysis",
+			weight: 2,
+			prompt: `Analyze this scenario step by step:
+
+A Node.js microservice has these symptoms:
+1. Response times gradually increase from 50ms to 3000ms over 24 hours
+2. Memory usage grows steadily from 200MB to 1.5GB
+3. The service handles file uploads (multipart/form-data)
+4. After restart, everything returns to normal
+5. No errors in logs
+6. Database queries remain fast (<10ms)
+
+Tasks:
+A) Identify the most likely root cause
+B) List 3 specific things to check in the code
+C) Propose a fix with code example
+D) Suggest monitoring to prevent recurrence
+
+Be specific and technical.`,
+			validate: (response: string) => {
+				const lower = response.toLowerCase();
+				const checks = [
+					{ test: /memory.?leak|leak/.test(lower), detail: "Identifies memory leak" },
+					{ test: /stream|buffer|file|upload|temp|cleanup/.test(lower), detail: "Links to file upload handling" },
+					{ test: /close|destroy|cleanup|dispose|gc|garbage/.test(lower), detail: "Suggests resource cleanup" },
+					{ test: /event.?listener|handler|remove|off/.test(lower) || /stream|pipe/.test(lower), detail: "Checks for handler/stream leaks" },
+					{ test: /heapdump|heap.?snapshot|inspect|profile|--max-old-space/.test(lower) || /process\.memoryUsage/.test(lower), detail: "Suggests debugging tools" },
+					{ test: /monitor|alert|metric|prometheus|grafana|threshold/.test(lower), detail: "Suggests monitoring" },
+				];
+				const passed = checks.filter(c => c.test).length;
+				return {
+					passed: passed >= 4,
+					score: Math.round((passed / checks.length) * 100),
+					details: checks.map(c => `${c.test ? "✅" : "❌"} ${c.detail}`).join("\n"),
+				};
+			},
+		},
+	];
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────
+
+function extractCode(response: string): string {
+	const match = response.match(/```(?:typescript|ts|javascript|js)?\s*([\s\S]*?)```/);
+	return match ? match[1].trim() : response.trim();
+}
+
+interface ProviderConfig {
+	name: string;
+	envVar: string;
+	baseUrl: string;
+	models: string[];
+}
+
+function getProviderConfigs(): ProviderConfig[] {
+	return [
+		{
+			name: "alibaba-codingplan",
+			envVar: "ALIBABA_CODING_PLAN_KEY",
+			baseUrl: "https://coding-intl.dashscope.aliyuncs.com/v1",
+			models: ["qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-plus", "qwen3-coder-next", "kimi-k2.5", "glm-5", "glm-4.7", "MiniMax-M2.5"],
+		},
+		{
+			name: "openai",
+			envVar: "OPENAI_API_KEY",
+			baseUrl: "https://api.openai.com/v1",
+			models: ["gpt-4o", "gpt-4o-mini"],
+		},
+		{
+			name: "anthropic-openai",
+			envVar: "ANTHROPIC_API_KEY",
+			baseUrl: "https://api.anthropic.com/v1",
+			models: [],
+		},
+		{
+			name: "openrouter",
+			envVar: "OPENROUTER_API_KEY",
+			baseUrl: "https://openrouter.ai/api/v1",
+			models: [],
+		},
+		{
+			name: "groq",
+			envVar: "GROQ_API_KEY",
+			baseUrl: "https://api.groq.com/openai/v1",
+			models: [],
+		},
+	];
+}
+
+function getAvailableModels(): Array<{ id: string; provider: string; baseUrl: string; apiKey: string }> {
+	const models: Array<{ id: string; provider: string; baseUrl: string; apiKey: string }> = [];
+
+	for (const provider of getProviderConfigs()) {
+		const apiKey = process.env[provider.envVar];
+		if (!apiKey) continue;
+
+		for (const modelId of provider.models) {
+			models.push({
+				id: modelId,
+				provider: provider.name,
+				baseUrl: provider.baseUrl,
+				apiKey,
+			});
+		}
+	}
+
+	return models;
+}
+
+async function callModel(
+	baseUrl: string,
+	apiKey: string,
+	model: string,
+	prompt: string,
+	timeoutMs: number = 60000,
+): Promise<{ response: string; timeMs: number }> {
+	const startTime = Date.now();
+
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+	try {
+		const res = await fetch(`${baseUrl}/chat/completions`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${apiKey}`,
+			},
+			body: JSON.stringify({
+				model,
+				messages: [{ role: "user", content: prompt }],
+				max_tokens: 4096,
+				temperature: 0.1,
+			}),
+			signal: controller.signal,
+		});
+
+		if (!res.ok) {
+			const errorBody = await res.text().catch(() => "");
+			throw new Error(`API error ${res.status}: ${errorBody.substring(0, 200)}`);
+		}
+
+		const data = (await res.json()) as any;
+		const response = data?.choices?.[0]?.message?.content || "";
+		const timeMs = Date.now() - startTime;
+
+		return { response, timeMs };
+	} finally {
+		clearTimeout(timeout);
+	}
+}
+
+// ─── Extension ───────────────────────────────────────────────────────────
 
 export default function benchmarkExtension(pi: ExtensionAPI) {
 	const benchmarkDir = join(homedir(), ".phi", "benchmark");
 	const resultsPath = join(benchmarkDir, "results.json");
 
-	/**
-	 * Ensure benchmark directory exists
-	 */
-	async function ensureBenchmarkDirectory() {
-		try {
-			await mkdir(benchmarkDir, { recursive: true });
-		} catch (error) {
-			console.warn("Failed to create benchmark directory:", error);
-		}
+	async function ensureDir() {
+		await mkdir(benchmarkDir, { recursive: true });
 	}
 
-	/**
-	 * Load existing benchmark results
-	 */
-	async function loadResults(): Promise<BenchmarkSummary> {
+	async function loadStore(): Promise<BenchmarkStore> {
 		try {
 			await access(resultsPath);
-			const content = await readFile(resultsPath, 'utf-8');
-			return JSON.parse(content);
+			const content = await readFile(resultsPath, "utf-8");
+			const store = JSON.parse(content);
+			if (store.version === 2) return store;
+			return { version: 2, results: [], lastUpdated: new Date().toISOString() };
 		} catch {
-			return { testRuns: [], lastUpdated: new Date().toISOString() };
+			return { version: 2, results: [], lastUpdated: new Date().toISOString() };
 		}
 	}
 
-	/**
-	 * Save benchmark results
-	 */
-	async function saveResults(summary: BenchmarkSummary) {
-		await ensureBenchmarkDirectory();
-		summary.lastUpdated = new Date().toISOString();
-		await writeFile(resultsPath, JSON.stringify(summary, null, 2), 'utf-8');
+	async function saveStore(store: BenchmarkStore) {
+		await ensureDir();
+		store.lastUpdated = new Date().toISOString();
+		await writeFile(resultsPath, JSON.stringify(store, null, 2), "utf-8");
 	}
 
 	/**
-	 * Fibonacci test - Generate and test a Fibonacci function
+	 * Run full benchmark on a single model
 	 */
-	function createFibonacciTest(): { prompt: string; expectedBehavior: string; tests: Array<{ input: number; expected: number }> } {
+	async function benchmarkModel(
+		modelId: string,
+		provider: string,
+		baseUrl: string,
+		apiKey: string,
+		ctx: ExtensionContext,
+	): Promise<ModelBenchmark> {
+		const tests = createTestSuite();
+		const categories: ModelBenchmark["categories"] = {};
+		let totalTime = 0;
+
+		for (const test of tests) {
+			ctx.ui.notify(`  ⏳ ${test.category}: ${test.name}...`, "info");
+
+			try {
+				const { response, timeMs } = await callModel(baseUrl, apiKey, modelId, test.prompt, 90000);
+				totalTime += timeMs;
+
+				const result = test.validate(response);
+
+				categories[test.category] = {
+					score: result.score,
+					timeMs,
+					details: result.details,
+				};
+
+				const emoji = result.score >= 80 ? "✅" : result.score >= 50 ? "⚠️" : "❌";
+				ctx.ui.notify(`  ${emoji} ${test.category}: ${result.score}/100 (${timeMs}ms)`, "info");
+			} catch (error) {
+				totalTime += 60000;
+				categories[test.category] = {
+					score: 0,
+					timeMs: 60000,
+					details: `Error: ${error}`,
+				};
+				ctx.ui.notify(`  ❌ ${test.category}: Error — ${String(error).substring(0, 100)}`, "error");
+			}
+		}
+
+		// Calculate weighted total
+		const weights: Record<string, number> = {};
+		for (const test of tests) {
+			weights[test.category] = test.weight;
+		}
+
+		let weightedSum = 0;
+		let totalWeight = 0;
+		for (const [cat, data] of Object.entries(categories)) {
+			const w = weights[cat] || 1;
+			weightedSum += data.score * w;
+			totalWeight += w;
+		}
+
+		const totalScore = Math.round(weightedSum / totalWeight);
+
 		return {
-			prompt: `Write a TypeScript function called 'fibonacci' that calculates the nth Fibonacci number.
-
-Requirements:
-- Function should be named exactly 'fibonacci'
-- Take one parameter 'n' of type number
-- Return type should be number
-- Handle edge cases (n <= 0 should return 0, n = 1 should return 1)
-- Use an efficient iterative approach (not recursive)
-
-Provide only the function code, no explanations or additional text.`,
-
-			expectedBehavior: "Efficient iterative Fibonacci calculation",
-
-			tests: [
-				{ input: 0, expected: 0 },
-				{ input: 1, expected: 1 },
-				{ input: 2, expected: 1 },
-				{ input: 3, expected: 2 },
-				{ input: 5, expected: 5 },
-				{ input: 8, expected: 21 },
-				{ input: 10, expected: 55 }
-			]
+			modelId,
+			modelName: modelId,
+			provider,
+			timestamp: new Date().toISOString(),
+			categories,
+			totalScore,
+			totalTimeMs: totalTime,
+			avgTimeMs: Math.round(totalTime / tests.length),
 		};
 	}
 
 	/**
-	 * Extract TypeScript code from response
+	 * Generate formatted comparison report
 	 */
-	function extractTypeScriptCode(response: string): string {
-		// Try to find code blocks first
-		const codeBlockMatch = response.match(/```(?:typescript|ts)?\s*([\s\S]*?)```/);
-		if (codeBlockMatch) {
-			return codeBlockMatch[1].trim();
-		}
+	function generateReport(results: ModelBenchmark[]): string {
+		if (results.length === 0) return "No benchmark results yet. Run `/benchmark` to start.";
 
-		// Look for function definition
-		const functionMatch = response.match(/function\s+fibonacci[\s\S]*?}\s*$/m);
-		if (functionMatch) {
-			return functionMatch[0].trim();
-		}
+		// Sort by totalScore desc
+		const sorted = [...results].sort((a, b) => b.totalScore - a.totalScore);
+		const categories = ["code-gen", "debug", "planning", "tool-calling", "speed", "orchestration"];
 
-		// Look for arrow function
-		const arrowMatch = response.match(/const\s+fibonacci[\s\S]*?;?\s*$/m);
-		if (arrowMatch) {
-			return arrowMatch[0].trim();
-		}
+		let report = "🏆 **Phi Code Benchmark Results**\n\n";
 
-		// Return the whole response if no specific pattern found
-		return response.trim();
-	}
-
-	/**
-	 * Test extracted code against test cases
-	 */
-	async function testFibonacciCode(code: string, tests: Array<{ input: number; expected: number }>): Promise<{
-		compilable: boolean;
-		testsPassed: number;
-		totalTests: number;
-		errors: string[];
-	}> {
-		const errors: string[] = [];
-		let testsPassed = 0;
-
-		try {
-			// Create a test environment with the code
-			const testCode = `
-${code}
-
-// Test runner
-function runTests() {
-	const results = [];
-	const tests = ${JSON.stringify(tests)};
-	
-	for (const test of tests) {
-		try {
-			const result = fibonacci(test.input);
-			const passed = result === test.expected;
-			results.push({
-				input: test.input,
-				expected: test.expected,
-				actual: result,
-				passed
-			});
-		} catch (error) {
-			results.push({
-				input: test.input,
-				expected: test.expected,
-				actual: 'ERROR: ' + error.message,
-				passed: false
-			});
-		}
-	}
-	
-	return results;
-}
-
-runTests();
-`;
-
-			// Use eval in a controlled way (this is for testing, not production)
-			// In a real implementation, you'd want to use a proper sandbox
-			const testResults = eval(testCode);
-			
-			testsPassed = testResults.filter((r: any) => r.passed).length;
-
-			// Add failed test details to errors
-			testResults.filter((r: any) => !r.passed).forEach((r: any) => {
-				errors.push(`fibonacci(${r.input}) = ${r.actual}, expected ${r.expected}`);
-			});
-
-			return {
-				compilable: true,
-				testsPassed,
-				totalTests: tests.length,
-				errors
-			};
-
-		} catch (error) {
-			errors.push(`Compilation/Runtime error: ${error}`);
-			return {
-				compilable: false,
-				testsPassed: 0,
-				totalTests: tests.length,
-				errors
-			};
-		}
-	}
-
-	/**
-	 * Calculate quality score based on test results
-	 */
-	function calculateScore(result: { compilable: boolean; testsPassed: number; totalTests: number; errors: string[] }): {
-		quality: "pass" | "fail" | "partial";
-		score: number;
-	} {
-		if (!result.compilable) {
-			return { quality: "fail", score: 0 };
-		}
-
-		const passRate = result.testsPassed / result.totalTests;
-		const score = Math.round(passRate * 100);
-
-		if (score === 100) {
-			return { quality: "pass", score };
-		} else if (score > 0) {
-			return { quality: "partial", score };
-		} else {
-			return { quality: "fail", score };
-		}
-	}
-
-	/**
-	 * Run benchmark test on a specific model
-	 */
-	async function runBenchmarkTest(modelName: string): Promise<BenchmarkResult> {
-		const test = createFibonacciTest();
-		const startTime = Date.now();
-
-		try {
-			// This is a simplified version - in a real implementation,
-			// you would need to interface with the actual model registry
-			// For now, we simulate a response
-			console.log(`Running benchmark on ${modelName}...`);
-			
-			// Simulate model response (in real implementation, call the actual model)
-			let response: string;
-			let tokensUsed: number = 50; // Simulated
-
-			// Mock different model responses for demonstration
-			if (modelName.includes('claude')) {
-				response = `function fibonacci(n: number): number {
-    if (n <= 0) return 0;
-    if (n === 1) return 1;
-    
-    let a = 0, b = 1;
-    for (let i = 2; i <= n; i++) {
-        const temp = a + b;
-        a = b;
-        b = temp;
-    }
-    return b;
-}`;
-			} else if (modelName.includes('gpt')) {
-				response = `function fibonacci(n: number): number {
-    if (n <= 0) return 0;
-    if (n === 1) return 1;
-    
-    let prev = 0, curr = 1;
-    for (let i = 2; i <= n; i++) {
-        let next = prev + curr;
-        prev = curr;
-        curr = next;
-    }
-    return curr;
-}`;
-			} else {
-				// Generic/fallback response that might have issues
-				response = `function fibonacci(n) {
-    if (n <= 1) return n;
-    return fibonacci(n-1) + fibonacci(n-2);
-}`;
-			}
-
-			const endTime = Date.now();
-			const timeMs = endTime - startTime;
-
-			// Extract and test the code
-			const code = extractTypeScriptCode(response);
-			const testResult = await testFibonacciCode(code, test.tests);
-			const { quality, score } = calculateScore(testResult);
-
-			return {
-				modelName,
-				testType: "fibonacci",
-				timestamp: new Date().toISOString(),
-				timeMs,
-				tokensUsed,
-				quality,
-				score,
-				details: {
-					prompt: test.prompt,
-					response,
-					compilable: testResult.compilable,
-					testsPassed: testResult.testsPassed,
-					totalTests: testResult.totalTests,
-					errors: testResult.errors
-				}
-			};
-
-		} catch (error) {
-			return {
-				modelName,
-				testType: "fibonacci",
-				timestamp: new Date().toISOString(),
-				timeMs: Date.now() - startTime,
-				quality: "fail",
-				score: 0,
-				details: {
-					prompt: test.prompt,
-					response: `Error: ${error}`,
-					compilable: false,
-					testsPassed: 0,
-					totalTests: test.tests.length,
-					errors: [String(error)]
-				}
-			};
-		}
-	}
-
-	/**
-	 * Generate benchmark report
-	 */
-	function generateReport(results: BenchmarkResult[]): string {
-		if (results.length === 0) {
-			return "No benchmark results available.";
-		}
-
-		// Group by model and get latest results
-		const modelResults = new Map<string, BenchmarkResult>();
-		
-		for (const result of results) {
-			const existing = modelResults.get(result.modelName);
-			if (!existing || new Date(result.timestamp) > new Date(existing.timestamp)) {
-				modelResults.set(result.modelName, result);
-			}
-		}
-
-		// Sort by score (highest first)
-		const sortedResults = Array.from(modelResults.values())
-			.sort((a, b) => b.score - a.score);
-
-		let report = `🏆 **Fibonacci Benchmark Results**\n\n`;
-
-		sortedResults.forEach((result, index) => {
-			const medal = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "  ";
-			const statusEmoji = result.quality === "pass" ? "✅" : result.quality === "partial" ? "⚠️" : "❌";
-			
-			report += `${medal} **${result.modelName}** ${statusEmoji}\n`;
-			report += `   Score: ${result.score}/100\n`;
-			report += `   Tests: ${result.details.testsPassed}/${result.details.totalTests} passed\n`;
-			report += `   Time: ${result.timeMs}ms\n`;
-			if (result.tokensUsed) report += `   Tokens: ${result.tokensUsed}\n`;
-			report += `\n`;
+		// Leaderboard
+		report += "**Leaderboard:**\n";
+		sorted.forEach((r, i) => {
+			const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`;
+			const tier = r.totalScore >= 80 ? "S" : r.totalScore >= 65 ? "A" : r.totalScore >= 50 ? "B" : r.totalScore >= 35 ? "C" : "D";
+			report += `${medal} **${r.modelId}** — ${r.totalScore}/100 [${tier}] (avg ${r.avgTimeMs}ms)\n`;
 		});
 
-		const totalRuns = results.length;
-		const avgScore = Math.round(results.reduce((sum, r) => sum + r.score, 0) / totalRuns);
-		
-		report += `**Summary:**\n`;
-		report += `- Models tested: ${modelResults.size}\n`;
-		report += `- Total test runs: ${totalRuns}\n`;
-		report += `- Average score: ${avgScore}/100\n`;
+		// Category breakdown
+		report += "\n**Category Breakdown:**\n```\n";
+		const header = "Model".padEnd(25) + categories.map(c => c.substring(0, 8).padEnd(10)).join("") + "TOTAL\n";
+		report += header;
+		report += "-".repeat(header.length) + "\n";
 
+		for (const r of sorted) {
+			let line = r.modelId.substring(0, 24).padEnd(25);
+			for (const cat of categories) {
+				const score = r.categories[cat]?.score ?? "-";
+				line += String(score).padEnd(10);
+			}
+			line += String(r.totalScore);
+			report += line + "\n";
+		}
+		report += "```\n";
+
+		// Best model per category
+		report += "\n**Best per Category:**\n";
+		for (const cat of categories) {
+			let best = { model: "none", score: -1 };
+			for (const r of sorted) {
+				const s = r.categories[cat]?.score ?? 0;
+				if (s > best.score) {
+					best = { model: r.modelId, score: s };
+				}
+			}
+			report += `- ${cat}: **${best.model}** (${best.score}/100)\n`;
+		}
+
+		report += `\n_Last updated: ${sorted[0]?.timestamp ?? "N/A"}_`;
 		return report;
 	}
 
-	/**
-	 * /benchmark command
-	 */
+	// ─── Command ─────────────────────────────────────────────────────────
+
 	pi.registerCommand("benchmark", {
-		description: "Run AI model benchmarks",
+		description: "Run AI model benchmarks (6 categories: code-gen, debug, planning, tool-calling, speed, orchestration)",
 		handler: async (args, ctx) => {
 			const arg = args.trim().toLowerCase();
 
-			try {
-				if (arg === "results" || arg === "report") {
-					// Show existing results
-					const summary = await loadResults();
-					const report = generateReport(summary.testRuns);
-					ctx.ui.notify(report, "info");
-					return;
-				}
-
-				if (arg === "clear") {
-					// Clear results
-					const summary: BenchmarkSummary = { testRuns: [], lastUpdated: new Date().toISOString() };
-					await saveResults(summary);
-					ctx.ui.notify("Benchmark results cleared.", "info");
-					return;
-				}
-
-				// For now, use mock models since we can't easily access the model registry
-				const availableModels = [
-					"anthropic/claude-sonnet-3.5",
-					"anthropic/claude-opus",
-					"anthropic/claude-haiku",
-					"openai/gpt-4",
-					"openai/gpt-3.5-turbo"
-				];
-
-				if (!arg) {
-					ctx.ui.notify(`Available commands:
-/benchmark - Start interactive benchmark
-/benchmark results - Show benchmark report  
-/benchmark clear - Clear all results
-
-Available models for testing:
-${availableModels.map(m => `- ${m}`).join('\n')}
-
-Use /benchmark <model-name> to test a specific model.`, "info");
-					return;
-				}
-
-				// Test specific model
-				const modelToTest = availableModels.find(m => 
-					m.toLowerCase().includes(arg) || 
-					m.toLowerCase() === arg
-				);
-
-				if (!modelToTest) {
-					ctx.ui.notify(`Model "${arg}" not found. Available models:\n${availableModels.map(m => `- ${m}`).join('\n')}`, "warning");
-					return;
-				}
-
-				ctx.ui.notify(`🧪 Starting benchmark test for ${modelToTest}...`, "info");
-
-				// Run the benchmark
-				const result = await runBenchmarkTest(modelToTest);
-
-				// Save result
-				const summary = await loadResults();
-				summary.testRuns.push(result);
-				await saveResults(summary);
-
-				// Show result
-				const statusEmoji = result.quality === "pass" ? "✅" : result.quality === "partial" ? "⚠️" : "❌";
-				const message = `${statusEmoji} **Benchmark Complete: ${modelToTest}**
-
-**Score:** ${result.score}/100
-**Quality:** ${result.quality}
-**Time:** ${result.timeMs}ms
-**Tests Passed:** ${result.details.testsPassed}/${result.details.totalTests}
-
-${result.details.errors.length > 0 ? `**Issues:**\n${result.details.errors.map(e => `- ${e}`).join('\n')}` : "All tests passed! 🎉"}
-
-Use \`/benchmark results\` to see all benchmark results.`;
-
-				ctx.ui.notify(message, "info");
-
-			} catch (error) {
-				ctx.ui.notify(`Benchmark failed: ${error}`, "error");
+			// Show results
+			if (arg === "results" || arg === "report") {
+				const store = await loadStore();
+				ctx.ui.notify(generateReport(store.results), "info");
+				return;
 			}
+
+			// Compare (same as results but emphasized)
+			if (arg === "compare") {
+				const store = await loadStore();
+				if (store.results.length < 2) {
+					ctx.ui.notify("Need at least 2 model results to compare. Run `/benchmark all` first.", "info");
+					return;
+				}
+				ctx.ui.notify(generateReport(store.results), "info");
+				return;
+			}
+
+			// Clear
+			if (arg === "clear") {
+				await saveStore({ version: 2, results: [], lastUpdated: new Date().toISOString() });
+				ctx.ui.notify("🗑️ All benchmark results cleared.", "info");
+				return;
+			}
+
+			// Help
+			if (arg === "help" || arg === "?") {
+				ctx.ui.notify(`**Phi Code Benchmark** — 6 categories, real API calls
+
+Commands:
+  /benchmark              Run on current model
+  /benchmark all          Run on ALL available models
+  /benchmark <model-id>   Run on a specific model
+  /benchmark results      Show saved results
+  /benchmark compare      Side-by-side comparison
+  /benchmark clear        Clear all results
+
+Categories tested (weighted):
+  ⚡ code-gen (×2)       — Generate a TypeScript function
+  🐛 debug (×2)          — Find and fix a bug
+  📋 planning (×2)       — Create implementation plan
+  🔧 tool-calling (×1)   — Structured JSON output
+  ⏱️ speed (×1)          — Response latency
+  🧩 orchestration (×2)  — Multi-step analysis
+
+Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`, "info");
+				return;
+			}
+
+			// Get available models
+			const available = getAvailableModels();
+			if (available.length === 0) {
+				ctx.ui.notify("❌ No API keys detected. Set ALIBABA_CODING_PLAN_KEY, OPENAI_API_KEY, or another provider key.", "warning");
+				return;
+			}
+
+			const store = await loadStore();
+
+			if (arg === "all") {
+				// Benchmark ALL available models
+				ctx.ui.notify(`🚀 Starting benchmark on ${available.length} models (6 tests each)...\n`, "info");
+
+				for (const model of available) {
+					ctx.ui.notify(`\n🧪 **${model.id}** (${model.provider})`, "info");
+					const result = await benchmarkModel(model.id, model.provider, model.baseUrl, model.apiKey, ctx);
+
+					// Replace existing result for this model
+					store.results = store.results.filter(r => r.modelId !== model.id);
+					store.results.push(result);
+					await saveStore(store);
+				}
+
+				ctx.ui.notify(`\n✅ Benchmark complete! ${available.length} models tested.\n`, "info");
+				ctx.ui.notify(generateReport(store.results), "info");
+				return;
+			}
+
+			if (arg) {
+				// Benchmark specific model
+				const model = available.find(m => m.id.toLowerCase() === arg || m.id.toLowerCase().includes(arg));
+				if (!model) {
+					ctx.ui.notify(`Model "${arg}" not found or no API key. Available:\n${available.map(m => `  - ${m.id} (${m.provider})`).join("\n")}`, "warning");
+					return;
+				}
+
+				ctx.ui.notify(`🧪 Benchmarking **${model.id}** (6 categories)...\n`, "info");
+				const result = await benchmarkModel(model.id, model.provider, model.baseUrl, model.apiKey, ctx);
+				store.results = store.results.filter(r => r.modelId !== model.id);
+				store.results.push(result);
+				await saveStore(store);
+
+				ctx.ui.notify(`\n✅ **${model.id}** — Total: ${result.totalScore}/100 (avg ${result.avgTimeMs}ms)`, "info");
+				return;
+			}
+
+			// Default: benchmark current model
+			// Try to find current model in available list
+			const currentModel = ctx.model;
+			if (currentModel) {
+				const modelConfig = available.find(m => m.id === currentModel.id);
+				if (modelConfig) {
+					ctx.ui.notify(`🧪 Benchmarking current model **${currentModel.id}** (6 categories)...\n`, "info");
+					const result = await benchmarkModel(modelConfig.id, modelConfig.provider, modelConfig.baseUrl, modelConfig.apiKey, ctx);
+					store.results = store.results.filter(r => r.modelId !== modelConfig.id);
+					store.results.push(result);
+					await saveStore(store);
+					ctx.ui.notify(`\n✅ **${currentModel.id}** — Total: ${result.totalScore}/100`, "info");
+					return;
+				}
+			}
+
+			// Fallback: show available models
+			ctx.ui.notify(`Available models for benchmark:\n${available.map(m => `  - ${m.id} (${m.provider})`).join("\n")}\n\nUsage: /benchmark <model-id> or /benchmark all`, "info");
 		},
 	});
 
-	/**
-	 * Show benchmark info on session start
-	 */
+	// Session start notification
 	pi.on("session_start", async (_event, ctx) => {
 		try {
-			const summary = await loadResults();
-			if (summary.testRuns.length > 0) {
-				ctx.ui.notify(`🧪 Benchmark data available (${summary.testRuns.length} test runs). Use /benchmark results to view.`, "info");
+			const store = await loadStore();
+			if (store.results.length > 0) {
+				ctx.ui.notify(`🧪 ${store.results.length} benchmark results available. /benchmark results to view.`, "info");
 			}
 		} catch {
-			// No results file yet, ignore
+			// ignore
 		}
 	});
 }

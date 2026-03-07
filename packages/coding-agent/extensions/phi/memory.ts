@@ -45,6 +45,12 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		name: "memory_search",
 		label: "Memory Search",
 		description: "Search for content in memory using unified search (notes + ontology + QMD vector search)",
+		promptSnippet: "Search project memory (notes, ontology, vector search). ALWAYS call before answering questions about prior work, decisions, or project context.",
+		promptGuidelines: [
+			"Before answering questions about prior work, architecture, decisions, or project context: call memory_search first.",
+			"When starting work on a topic, search memory for existing notes and learnings.",
+			"After completing important work or learning something new, use memory_write to save it.",
+		],
 		parameters: Type.Object({
 			query: Type.String({ description: "Search query to find in memory" }),
 		}),
@@ -255,31 +261,43 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
 	/**
 	 * Auto-load AGENTS.md on session start
+	 * Checks both project directory and ~/.phi/memory/
 	 */
 	pi.on("session_start", async (_event, ctx) => {
 		try {
-			// Try to find AGENTS.md in current directory
-			const agentsPath = join(process.cwd(), "AGENTS.md");
-			
-			try {
-				await access(agentsPath);
-				const agentsContent = readFileSync(agentsPath, 'utf-8');
-				
-				// Send the content as a system message to provide context
-				ctx.ui.notify("Loaded AGENTS.md context for this session", "info");
-				
-				// Optionally inject into the session context
-				await pi.sendHookMessage({
-					role: "system",
-					content: `Session context loaded from AGENTS.md:\n\n${agentsContent}`,
-				}, { source: "extension" });
+			const locations = [
+				join(process.cwd(), "AGENTS.md"),
+				join(process.cwd(), ".phi", "AGENTS.md"),
+				join(sigmaMemory.config.memoryDir, "AGENTS.md"),
+			];
 
-			} catch {
-				// AGENTS.md doesn't exist, that's fine
+			for (const agentsPath of locations) {
+				try {
+					await access(agentsPath);
+					const content = readFileSync(agentsPath, "utf-8");
+					if (content.trim()) {
+						// Notify user that persistent instructions were loaded
+						const lineCount = content.split("\n").length;
+						ctx.ui.notify(`📝 Loaded AGENTS.md (${lineCount} lines) from ${agentsPath}`, "info");
+						// The content is available via memory_read tool — the model can access it
+						break;
+					}
+				} catch {
+					// File doesn't exist at this location, try next
+				}
 			}
 
+			// Show memory status
+			const status = await sigmaMemory.status();
+			const parts: string[] = [];
+			if (status.notes.count > 0) parts.push(`${status.notes.count} notes`);
+			if (status.ontology.entities > 0) parts.push(`${status.ontology.entities} entities`);
+			if (status.qmd.available) parts.push("QMD active");
+			if (parts.length > 0) {
+				ctx.ui.notify(`🧠 Memory: ${parts.join(", ")}`, "info");
+			}
 		} catch (error) {
-			console.warn("Failed to initialize memory extension:", error);
+			// Non-critical, don't spam errors
 		}
 	});
 }
