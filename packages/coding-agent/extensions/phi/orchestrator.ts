@@ -226,12 +226,8 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	): Promise<{ results: TaskResult[]; progressFile: string }> {
 		const progressFile = todoFile.replace("todo-", "progress-");
 		const progressPath = join(plansDir, progressFile);
-		let progress = `# Progress: ${todoFile}\n\n`;
-		progress += `**Started:** ${new Date().toLocaleString()}\n`;
-		progress += `**Tasks:** ${tasks.length}\n**Mode:** in-session (single turn)\n\n`;
-		await writeFile(progressPath, progress, "utf-8");
+		const totalTasks = tasks.length;
 
-		// Shared context for sub-agents
 		const sharedContext = {
 			projectTitle: projectContext?.title || "Project",
 			projectDescription: projectContext?.description || "",
@@ -239,100 +235,49 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			completedTasks: [] as Array<{ index: number; title: string; agent: string; output: string }>,
 		};
 
-		// Build dependency graph
-		const completed = new Set<number>();
-		const failed = new Set<number>();
-		const results: TaskResult[] = [];
-
-		// Check which tasks can run (all dependencies completed successfully)
-		function getReadyTasks(): number[] {
-			const ready: number[] = [];
-			for (let i = 0; i < tasks.length; i++) {
-				const taskNum = i + 1;
-				if (completed.has(taskNum) || failed.has(taskNum)) continue;
-
-				const deps = tasks[i].dependencies || [];
-				const allDepsMet = deps.every(d => completed.has(d));
-				const anyDepFailed = deps.some(d => failed.has(d));
-
-				if (anyDepFailed) {
-					// Skip tasks whose dependencies failed
-					failed.add(taskNum);
-					results.push({
-						taskIndex: taskNum,
-						title: tasks[i].title,
-						agent: tasks[i].agent || "code",
-						status: "skipped",
-						output: `Skipped: dependency #${deps.find(d => failed.has(d))} failed`,
-						durationMs: 0,
-					});
-					notify(`⏭️ Task ${taskNum}: **${tasks[i].title}** — skipped (dependency failed)`, "warning");
-				} else if (allDepsMet) {
-					ready.push(i);
-				}
-			}
-			return ready;
-		}
-
-		const totalTasks = tasks.length;
-
-		notify(`🚀 Executing ${totalTasks} tasks in-session (no subprocess overhead)...`, "info");
+		notify(`🚀 Executing ${totalTasks} tasks in-session...`, "info");
 
 		// Build a single comprehensive prompt with ALL tasks
-		// The LLM executes them sequentially in the current session
-		let megaPrompt = `# 📋 Project Plan: ${sharedContext.projectTitle}\n\n`;
+		let megaPrompt = `# 📋 Project: ${sharedContext.projectTitle}\n\n`;
 		megaPrompt += `${sharedContext.projectDescription}\n\n`;
 		if (sharedContext.specSummary) {
 			megaPrompt += `## Spec\n${sharedContext.specSummary}\n\n`;
 		}
 		megaPrompt += `## Tasks (execute ALL in order)\n\n`;
 
+		const results: TaskResult[] = [];
+
 		for (let i = 0; i < tasks.length; i++) {
 			const task = tasks[i];
 			const { taskPrompt } = executeTaskInSession(task, sharedContext);
 			megaPrompt += `---\n\n${taskPrompt}\n\n`;
-
-			// Mark all tasks as completed for the progress file
 			results.push({
-				taskIndex: i + 1,
-				title: task.title,
-				agent: task.agent || "code",
-				status: "success",
-				output: "(executed in-session)",
-				durationMs: 0,
+				taskIndex: i + 1, title: task.title,
+				agent: task.agent || "code", status: "success",
+				output: "(in-session)", durationMs: 0,
 			});
 		}
 
 		megaPrompt += `---\n\n## ⚠️ Instructions\n\n`;
 		megaPrompt += `Execute ALL ${totalTasks} tasks above **sequentially**. For each task:\n`;
 		megaPrompt += `1. Create/edit the required files using your tools\n`;
-		megaPrompt += `2. Report what you did with a brief summary\n`;
+		megaPrompt += `2. Report what you did briefly\n`;
 		megaPrompt += `3. Move to the next task\n\n`;
-		megaPrompt += `Do NOT skip any task. Complete the entire project in this single turn.\n`;
+		megaPrompt += `Do NOT skip any task. Complete the entire project.\n`;
 
-		// Write progress
-		progress += `## Execution Mode: in-session\n\n`;
-		progress += `All ${totalTasks} tasks sent as a single prompt to the current session.\n\n`;
+		// Write progress file
+		let progress = `# Progress: ${todoFile}\n\n`;
+		progress += `**Started:** ${new Date().toLocaleString()}\n`;
+		progress += `**Tasks:** ${totalTasks} | **Mode:** in-session\n\n`;
 		for (const r of results) {
 			progress += `- Task ${r.taskIndex}: ${r.title} [${r.agent}]\n`;
 		}
-		progress += `\n---\n\n## Summary\n\n`;
-		progress += `- **Mode:** in-session (single turn)\n`;
-		progress += `- **Tasks:** ${totalTasks}\n`;
-		progress += `- **Status:** sent to LLM\n`;
 		await writeFile(progressPath, progress, "utf-8");
 
-		// Send the mega-prompt as a user message — LLM handles everything
+		// Send the mega-prompt — LLM handles everything in current session
 		pi.sendUserMessage(megaPrompt);
 
-		const statusParts = [`📋 ${totalTasks} tasks sent`];
-
-		notify(
-			`\n🏁 **Execution complete!** (${wave - 1} waves)\n` +
-			statusParts.join(" | ") + ` | ⏱️ ${(totalTime / 1000).toFixed(1)}s\n` +
-			`Progress: \`${progressFile}\``,
-			failedCount === 0 ? "info" : "warning"
-		);
+		notify(`📋 ${totalTasks} tasks sent to LLM. Progress: \`${progressFile}\``, "info");
 
 		return { results, progressFile };
 	}
@@ -472,34 +417,21 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 					{ title: p.title, description: p.description, specSummary },
 				);
 
-				const succeeded = results.filter(r => r.status === "success").length;
-				const failed = results.filter(r => r.status === "error").length;
-				const totalTime = results.reduce((sum, r) => sum + r.durationMs, 0);
+				const summary = `**🏁 Project "${p.title}" — ${p.tasks.length} tasks sent!**
 
-				const summary = `**🏁 Project "${p.title}" — Complete!**
-
-**Plan files:** \`${specFile}\`, \`${todoFile}\`
+**Plan:** \`${specFile}\`, \`${todoFile}\`
 **Progress:** \`${progressFile}\`
 
-**Results:**
-- ✅ Succeeded: ${succeeded}/${results.length}
-- ❌ Failed: ${failed}
-- ⏱️ Total time: ${(totalTime / 1000).toFixed(1)}s
+**Tasks queued:**
+${results.map(r => `📋 Task ${r.taskIndex}: ${r.title} [${r.agent}]`).join("\n")}
 
-**Task details:**
-${results.map(r => {
-	const icon = r.status === "success" ? "✅" : "❌";
-	return `${icon} Task ${r.taskIndex}: ${r.title} [${r.agent}] (${(r.durationMs / 1000).toFixed(1)}s)`;
-}).join("\n")}
-
-All files in \`.phi/plans/\``;
+The LLM is now executing all tasks in-session.`;
 
 				return {
 					content: [{ type: "text", text: summary }],
 					details: {
 						specFile, todoFile, progressFile,
-						taskCount: p.tasks.length, succeeded, failed,
-						totalTimeMs: totalTime, title: p.title,
+						taskCount: p.tasks.length,
 					},
 				};
 			} catch (error) {
