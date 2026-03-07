@@ -591,7 +591,7 @@ All files in \`.phi/plans/\``;
 				return;
 			}
 
-			ctx.sendUserMessage(
+			pi.sendUserMessage(
 				`Analyze this project and call the orchestrate tool. It will create the plan AND execute all tasks automatically with parallel sub-agents.
 
 ## Project

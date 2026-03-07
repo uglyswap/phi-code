@@ -590,7 +590,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 
 		// Trigger benchmark via sendUserMessage — this runs /benchmark all
 		// which saves results to the same results.json path
-		ctx.sendUserMessage("/benchmark all");
+		pi.sendUserMessage("/benchmark all");
 		ctx.ui.notify("⏳ Benchmarks started. Once complete, run `/phi-init` again and select benchmark mode to use the results.\n", "info");
 		ctx.ui.notify("💡 The benchmark runs in the background. You'll see live results in the terminal.\n", "info");
 
