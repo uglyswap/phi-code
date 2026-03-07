@@ -246,6 +246,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 
 		if (existingResults?.results?.length > 0) {
 			const useExisting = await ctx.ui.confirm(
+				"Use existing benchmarks?",
 				`Found ${existingResults.results.length} existing benchmark results. Use them instead of re-running?`
 			);
 			if (useExisting) {
@@ -298,15 +299,18 @@ _Edit this file to customize Phi Code's behavior for your project._
 		ctx.ui.notify("🎛️ Manual mode: assign a model to each task category.\n", "info");
 
 		const modelList = availableModels.map((m, i) => `  ${i + 1}. ${m}`).join("\n");
+		ctx.ui.notify(`Available models:\n${modelList}\n`, "info");
 		const assignments: Record<string, { preferred: string; fallback: string }> = {};
 
 		for (const role of TASK_ROLES) {
+			ctx.ui.notify(`\n**${role.label}** — ${role.desc}\nDefault: ${role.defaultModel}`, "info");
 			const input = await ctx.ui.input(
-				`**${role.label}** — ${role.desc}\nDefault: ${role.defaultModel}\n\nAvailable models:\n${modelList}\n\nEnter model name or number (Enter for default):`
+				`${role.label}`,
+				`Model name or # (default: ${role.defaultModel})`
 			);
 
 			let chosen = role.defaultModel;
-			const trimmed = input.trim();
+			const trimmed = (input ?? "").trim();
 
 			if (trimmed) {
 				// Try as number
@@ -323,16 +327,17 @@ _Edit this file to customize Phi Code's behavior for your project._
 			// Fallback selection
 			const fallbackDefault = availableModels.find(m => m !== chosen) || chosen;
 			const fallbackInput = await ctx.ui.input(
-				`Fallback model for ${role.label}? (Enter for ${fallbackDefault}):`
+				`Fallback for ${role.label}`,
+				`Fallback model (default: ${fallbackDefault})`
 			);
 
 			let fallback = fallbackDefault;
-			if (fallbackInput.trim()) {
-				const num = parseInt(fallbackInput.trim());
+			if ((fallbackInput ?? "").trim()) {
+				const num = parseInt((fallbackInput ?? "").trim());
 				if (num >= 1 && num <= availableModels.length) {
 					fallback = availableModels[num - 1];
 				} else {
-					const match = availableModels.find(m => m.toLowerCase().includes(fallbackInput.trim().toLowerCase()));
+					const match = availableModels.find(m => m.toLowerCase().includes((fallbackInput ?? "").trim().toLowerCase()));
 					if (match) fallback = match;
 				}
 			}
@@ -343,15 +348,16 @@ _Edit this file to customize Phi Code's behavior for your project._
 
 		// Default model
 		const defaultInput = await ctx.ui.input(
-			`Default model for general tasks?\nAvailable:\n${modelList}\n\nEnter model name or number (Enter for ${availableModels[0]}):`
+			"Default model",
+			`Model for general tasks (default: ${availableModels[0]})`
 		);
 		let defaultModel = availableModels[0];
-		if (defaultInput.trim()) {
-			const num = parseInt(defaultInput.trim());
+		if ((defaultInput ?? "").trim()) {
+			const num = parseInt((defaultInput ?? "").trim());
 			if (num >= 1 && num <= availableModels.length) {
 				defaultModel = availableModels[num - 1];
 			} else {
-				const match = availableModels.find(m => m.toLowerCase().includes(defaultInput.trim().toLowerCase()));
+				const match = availableModels.find(m => m.toLowerCase().includes((defaultInput ?? "").trim().toLowerCase()));
 				if (match) defaultModel = match;
 			}
 		}
@@ -391,16 +397,19 @@ _Edit this file to customize Phi Code's behavior for your project._
 				ctx.ui.notify(`  Total: ${allModels.length} models available\n`, "info");
 
 				// 2. Choose mode
+				ctx.ui.notify("Choose setup mode:\n" +
+					"  1. auto      — Use optimal defaults (instant)\n" +
+					"  2. benchmark — Test models first, assign by results (10-15 min)\n" +
+					"  3. manual    — Choose each model yourself\n", "info");
+
 				const modeInput = await ctx.ui.input(
-					"Choose setup mode:\n\n" +
-					"  1. auto      — Use optimal defaults from public rankings (instant)\n" +
-					"  2. benchmark — Test models with coding tasks, assign by results (10-15 min)\n" +
-					"  3. manual    — Choose each model assignment yourself\n\n" +
-					"Enter 1, 2, or 3:"
+					"Setup mode",
+					"1=auto, 2=benchmark, 3=manual"
 				);
 
-				const mode = modeInput.trim().startsWith("2") || modeInput.trim().toLowerCase().startsWith("b") ? "benchmark"
-					: modeInput.trim().startsWith("3") || modeInput.trim().toLowerCase().startsWith("m") ? "manual"
+				const modeStr = (modeInput ?? "").trim().toLowerCase();
+				const mode = modeStr.startsWith("2") || modeStr.startsWith("b") ? "benchmark"
+					: modeStr.startsWith("3") || modeStr.startsWith("m") ? "manual"
 					: "auto";
 
 				ctx.ui.notify(`\n📋 Mode: **${mode}**\n`, "info");
