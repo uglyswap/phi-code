@@ -372,8 +372,8 @@ export class InteractiveMode {
 		// Add header container as first child
 		this.ui.addChild(this.headerContainer);
 
-		// Add header with keybindings from config (unless silenced)
-		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
+		// Always show the gradient logo
+		{
 			// Gradient colors: yellow → orange → pink → magenta
 			const gradientColors = [
 				[255, 230, 0],   // yellow
@@ -417,32 +417,36 @@ export class InteractiveMode {
 			const phiLabel = applyGradient("Φ " + APP_NAME.toUpperCase());
 			const logo = asciiLogo + "\n  " + phiLabel + theme.fg("dim", ` v${this.version}`) + theme.fg("dim", " — The Ultimate Coding Agent");
 
-			// Build startup instructions using keybinding hint helpers
-			const kb = this.keybindings;
-			const hint = (action: AppAction, desc: string) => appKeyHint(kb, action, desc);
+			// Show keyboard shortcuts only when not quiet
+			let headerContent = logo;
+			if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
+				const kb = this.keybindings;
+				const hint = (action: AppAction, desc: string) => appKeyHint(kb, action, desc);
 
-			const instructions = [
-				hint("interrupt", "to interrupt"),
-				hint("clear", "to clear"),
-				rawKeyHint(`${appKey(kb, "clear")} twice`, "to exit"),
-				hint("exit", "to exit (empty)"),
-				hint("suspend", "to suspend"),
-				keyHint("deleteToLineEnd", "to delete to end"),
-				hint("cycleThinkingLevel", "to cycle thinking level"),
-				rawKeyHint(`${appKey(kb, "cycleModelForward")}/${appKey(kb, "cycleModelBackward")}`, "to cycle models"),
-				hint("selectModel", "to select model"),
-				hint("expandTools", "to expand tools"),
-				hint("toggleThinking", "to expand thinking"),
-				hint("externalEditor", "for external editor"),
-				rawKeyHint("/", "for commands"),
-				rawKeyHint("!", "to run bash"),
-				rawKeyHint("!!", "to run bash (no context)"),
-				hint("followUp", "to queue follow-up"),
-				hint("dequeue", "to edit all queued messages"),
-				hint("pasteImage", "to paste image"),
-				rawKeyHint("drop files", "to attach"),
-			].join("\n");
-			this.builtInHeader = new Text(`${logo}\n${instructions}`, 1, 0);
+				const instructions = [
+					hint("interrupt", "to interrupt"),
+					hint("clear", "to clear"),
+					rawKeyHint(`${appKey(kb, "clear")} twice`, "to exit"),
+					hint("exit", "to exit (empty)"),
+					hint("suspend", "to suspend"),
+					keyHint("deleteToLineEnd", "to delete to end"),
+					hint("cycleThinkingLevel", "to cycle thinking level"),
+					rawKeyHint(`${appKey(kb, "cycleModelForward")}/${appKey(kb, "cycleModelBackward")}`, "to cycle models"),
+					hint("selectModel", "to select model"),
+					hint("expandTools", "to expand tools"),
+					hint("toggleThinking", "to expand thinking"),
+					hint("externalEditor", "for external editor"),
+					rawKeyHint("/", "for commands"),
+					rawKeyHint("!", "to run bash"),
+					rawKeyHint("!!", "to run bash (no context)"),
+					hint("followUp", "to queue follow-up"),
+					hint("dequeue", "to edit all queued messages"),
+					hint("pasteImage", "to paste image"),
+					rawKeyHint("drop files", "to attach"),
+				].join("\n");
+				headerContent = `${logo}\n${instructions}`;
+			}
+			this.builtInHeader = new Text(headerContent, 1, 0);
 
 			// Setup UI layout
 			this.headerContainer.addChild(new Spacer(1));
@@ -466,18 +470,6 @@ export class InteractiveMode {
 					this.headerContainer.addChild(new Spacer(1));
 				}
 				this.headerContainer.addChild(new DynamicBorder());
-			}
-		} else {
-			// Minimal header when silenced
-			this.builtInHeader = new Text("", 0, 0);
-			this.headerContainer.addChild(this.builtInHeader);
-			if (this.changelogMarkdown) {
-				// Still show changelog notification even in silent mode
-				this.headerContainer.addChild(new Spacer(1));
-				const versionMatch = this.changelogMarkdown.match(/##\s+\[?(\d+\.\d+\.\d+)\]?/);
-				const latestVersion = versionMatch ? versionMatch[1] : this.version;
-				const condensedText = `Updated to v${latestVersion}. Use ${theme.bold("/changelog")} to view full changelog.`;
-				this.headerContainer.addChild(new Text(condensedText, 1, 0));
 			}
 		}
 
