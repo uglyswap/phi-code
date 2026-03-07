@@ -1,4 +1,4 @@
-import { SubAgentConfig } from './types';
+import { SubAgentConfig } from './types.js';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
