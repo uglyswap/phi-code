@@ -477,7 +477,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			const specFile = `spec-${ts}.md`;
 			await writeFile(join(plansDir, specFile), `# ${description}\n\n**Created:** ${new Date().toLocaleString()}\n`, "utf-8");
 
-			ctx.ui.notify(`📋 Executing project with agent workflow...`, "info");
+			ctx.ui.notify(`📋 Launching orchestrator...`, "info");
 
 			// Build a single comprehensive prompt with all agent phases
 			const prompt = `# Project: ${description}
@@ -505,7 +505,8 @@ Check code quality. Fix any issues. Ensure everything is polished.
 - Announce each phase as you start it (e.g. "## Phase 1 — Exploring...")
 - Do NOT stop after planning — implement everything`;
 
-			ctx.ui.pasteToEditor(prompt);
+			// Send after handler returns (agent goes idle after command completes)
+			setTimeout(() => pi.sendUserMessage(prompt), 200);
 		},
 	});
 
