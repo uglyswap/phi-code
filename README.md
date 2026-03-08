@@ -95,7 +95,7 @@ phi-code/
 │   ├── coding-agent/        # @phi-code-admin/phi-code — Main CLI entry point
 │   │   ├── extensions/phi/  # 8 TypeScript extensions (auto-loaded)
 │   │   └── skills/          # 12 bundled coding skills (loaded on demand)
-│   ├── sigma-memory/        # sigma-memory — Memory subsystem (notes + ontology + QMD)
+│   ├── sigma-memory/        # sigma-memory — Memory subsystem (notes + ontology + vectors)
 │   ├── sigma-agents/        # sigma-agents — Sub-agent routing and profiles
 │   └── sigma-skills/        # sigma-skills — Skill scanner and loader
 ├── agents/                  # 5 sub-agent definitions (.md with YAML frontmatter)
@@ -124,31 +124,40 @@ Phi Code includes 8 TypeScript extensions that are automatically loaded at start
 
 ### Memory Extension (`memory.ts`)
 
-Persistent memory powered by the `sigma-memory` package. Three layers:
+Persistent memory with three automatic layers — zero configuration needed.
 
-| Layer | Storage | Use case |
-|-------|---------|----------|
-| **Notes** | Markdown files in `~/.phi/memory/` | Daily notes, learnings, decisions |
-| **Ontology** | JSONL graph in `~/.phi/memory/ontology/graph.jsonl` | Entities, relations, project architecture |
-| **QMD** | SQLite + GGUF vectors (if QMD binary available) | Semantic search across all documents |
+| Layer | Storage | Auto-populated | Use case |
+|-------|---------|----------------|----------|
+| **Notes** | Markdown files in `~/.phi/memory/notes/` | ✅ via prompt guidelines | Daily notes, learnings, decisions, error documentation |
+| **Ontology** | JSONL graph in `~/.phi/memory/ontology/graph.jsonl` | ✅ via prompt guidelines | Entities, relations, project architecture mapping |
+| **Vectors** | SQLite + local embeddings in `~/.phi/memory/vectors.db` | ✅ auto-indexed on write | Semantic search across all documents |
 
-**Tools registered:**
+**8 tools registered:**
 
 | Tool | Description |
 |------|-------------|
-| `memory_search` | Unified search across notes, ontology, and QMD. Returns ranked results from all three layers. |
-| `memory_write` | Write content to a memory file. Defaults to today's date if no filename given. |
+| `memory_search` | Unified search across notes, ontology, and vector store. Semantic + keyword. |
+| `memory_write` | Write content to a memory file. Auto-indexes in vector store. |
 | `memory_read` | Read a specific memory file, or list all available files. |
-| `memory_status` | Show status of all memory subsystems (file counts, QMD availability, ontology stats). |
+| `memory_status` | Show status of all memory subsystems (notes, ontology, vectors). |
+| `ontology_add` | Add entities (Project, Service, Database...) and relations (uses, depends-on...) to the knowledge graph. |
+| `ontology_query` | Query the graph: find entities, get relations, BFS pathfinding, stats, full export. |
 
-**Auto-Recall:** The memory extension adds prompt guidelines that instruct the model to:
-- Search memory before answering questions about prior work, architecture, or decisions
-- Search memory when starting work on a topic (to find existing notes and learnings)
-- Write to memory after completing important work or learning something new
+**Embedded vector search** (no external binary needed):
+- **Storage:** `sql.js` (SQLite via WebAssembly — pure JS, cross-platform)
+- **Embeddings:** `@huggingface/transformers` with `all-MiniLM-L6-v2` (384 dims, ~23MB auto-download on first use)
+- **Chunking:** paragraphs → sentences if >500 chars → 100 char overlap
+- **Search:** cosine similarity computed in JS (Float32Array)
 
-This is not forced via code — it's a prompt guideline that well-trained models follow naturally, keeping the system prompt lightweight.
+**Self-improving:** Prompt guidelines instruct the model to:
+- Search memory before answering questions about prior work or decisions
+- Write learnings and decisions to memory after completing work
+- **Document errors, corrections, and fixes** (self-improvement)
+- Build the ontology graph while exploring codebases
 
-**Session Start:** Looks for `AGENTS.md` in three locations (project root, `.phi/`, `~/.phi/memory/`) and loads it as persistent instructions.
+Everything works out of the box at installation. No API keys, no external services, no configuration.
+
+**Session Start:** Loads `AGENTS.md` from project root, `.phi/`, or `~/.phi/memory/` as persistent instructions.
 
 ### Smart Router Extension (`smart-router.ts`)
 
@@ -485,14 +494,16 @@ Each line is a JSON object — either an entity or a relation:
 
 **Operations:** add entity, add relation, query by kind, BFS pathfinding between entities, stats, export.
 
-### QMD (Vector Search)
+### Vector Search (Embedded)
 
-Optional integration with [QMD](https://github.com/tobilu/qmd) for semantic search across all documents.
+Built-in semantic search — no external binary, no API keys, no configuration.
 
-- Requires the `qmd` binary to be installed separately
-- Uses SQLite + GGUF local embeddings (no API needed)
-- Searches notes, ontology, and any indexed documents
-- Falls back gracefully if QMD is not available
+- **Storage:** `sql.js` (SQLite compiled to WebAssembly — runs everywhere)
+- **Embeddings:** `@huggingface/transformers` with `all-MiniLM-L6-v2` (384 dimensions)
+- **Model download:** ~23MB, automatic on first use, cached locally
+- **Database:** `~/.phi/memory/vectors.db` (auto-created)
+- **Auto-indexing:** Every `memory_write` call automatically indexes the content
+- **Chunking:** Paragraphs → sentences (if >500 chars) → 100 char overlap
 
 ### Unified Search
 
@@ -500,9 +511,9 @@ Optional integration with [QMD](https://github.com/tobilu/qmd) for semantic sear
 
 ```
 memory_search("authentication flow")
-→ Notes results (grep match in notes/auth.md)
+→ Notes results (keyword match in notes/*.md)
 → Ontology results (entities matching "auth")
-→ QMD results (semantic similarity across all documents)
+→ Vector results (semantic similarity — finds related content even without exact keywords)
 ```
 
 ---
@@ -761,7 +772,7 @@ node packages/coding-agent/dist/cli.js
 | `packages/ai` | `phi-code-ai` | Provider abstraction layer (20+ providers) |
 | `packages/agent-core` | `phi-code-agent` | Core agent: tools, context, extension API |
 | `packages/coding-agent` | `@phi-code-admin/phi-code` | CLI entry point, extensions, skills |
-| `packages/sigma-memory` | `sigma-memory` | Memory subsystem (notes + ontology + QMD) |
+| `packages/sigma-memory` | `sigma-memory` | Memory subsystem (notes + ontology + embedded vector search) |
 | `packages/sigma-agents` | `sigma-agents` | Sub-agent routing and model profiles |
 | `packages/sigma-skills` | `sigma-skills` | Skill scanner and loader |
 
