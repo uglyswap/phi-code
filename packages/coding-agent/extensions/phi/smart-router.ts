@@ -77,6 +77,11 @@ export default function smartRouterExtension(pi: ExtensionAPI) {
 			return { action: "continue" };
 		}
 
+		// Do NOT route during orchestration — the orchestrator manages models
+		if ((globalThis as any).__phiOrchestrationActive) {
+			return { action: "continue" };
+		}
+
 		const recommendation = router.getRecommendation(event.text);
 
 		if (recommendation.category !== "general") {
