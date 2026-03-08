@@ -462,10 +462,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 					ctx.ui.notify(`  ${status} ${p.name}${tag}${modelCount}`, "info");
 				}
 
-				// If no cloud providers have keys, prompt for setup
-				if (cloudConfigured.length === 0) {
-					ctx.ui.notify("\n⚠️ No cloud API keys configured.\n", "warning");
-				}
+				// No warning needed — the wizard itself handles configuration
 
 				// Always offer to add a provider via select menu
 				const providerOptions = [
