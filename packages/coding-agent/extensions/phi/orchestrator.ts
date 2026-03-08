@@ -467,7 +467,6 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
 	let phaseQueue: OrchestratorPhase[] = [];
 	let orchestrationActive = false;
-	let idlePollTimer: ReturnType<typeof setInterval> | null = null;
 	let activeAgentPrompt: string | null = null;
 	let activeAgentTools: string[] | null = null;
 	let savedTools: string[] | null = null;
@@ -629,32 +628,9 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			activateAgent(phase, ctx);
 			const agentName = phase.agent?.name || phase.key;
 			ctx.ui.notify(`\n${phase.label} → \`${modelId}\` (agent: ${agentName})`, "info");
-			// Wait for agent to be idle, then send the phase instruction
-			waitForIdleThenSend(phase.instruction, ctx);
+			// Small delay to let the model switch settle, then send instruction
+			setTimeout(() => pi.sendUserMessage(phase.instruction), 500);
 		});
-	}
-
-	/**
-	 * Reliable phase sending: poll isIdle() then sendUserMessage.
-	 * Retries up to 240 attempts (120 seconds).
-	 */
-	function waitForIdleThenSend(message: string, ctx: any) {
-		let attempts = 0;
-		const timer = setInterval(() => {
-			attempts++;
-			if (attempts > 240) {
-				clearInterval(timer);
-				ctx.ui.notify("⚠️ Orchestrator timeout — agent never became idle.", "warning");
-				setOrchestrationActive(false);
-				phasePending = false;
-				deactivateAgent();
-				return;
-			}
-			if (ctx.isIdle()) {
-				clearInterval(timer);
-				setTimeout(() => pi.sendUserMessage(message), 300);
-			}
-		}, 500);
 	}
 
 	// ─── System Prompt Injection — Agent personas ────────────────────
@@ -667,42 +643,20 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		return { systemPrompt: activeAgentPrompt };
 	});
 
-	// ─── Output Event — Phase Chaining ───────────────────────────────
-	// Fires on each output chunk. We use it to detect when a phase completes.
-	// The key fix: only start ONE idle-check timer per phase, not one per chunk.
+	// ─── Agent End Event — Phase Chaining ────────────────────────────
+	// "agent_end" fires when the full agent loop completes (all tool calls
+	// resolved, response fully generated). This is the ONLY reliable signal
+	// that a phase has finished.
+	//
+	// Previous approach used "output" event which DOES NOT EXIST in Pi.
+	// That's why phases 2-5 never executed.
 
-	pi.on("output", async (_event, ctx) => {
+	pi.on("agent_end", async (_event, ctx) => {
 		if (!orchestrationActive || !phasePending) return;
-		if (phaseQueue.length === 0 && phasePending) {
-			// Last phase in progress — wait for it to finish, then complete
-		}
 
-		// Debounce: clear any existing timer, start fresh
-		if (idlePollTimer) {
-			clearInterval(idlePollTimer);
-			idlePollTimer = null;
-		}
-
-		// After output, wait a bit then check if the agent is truly idle
-		// Use a longer initial delay (2 seconds) to let tool calls complete
-		idlePollTimer = setTimeout(() => {
-			let attempts = 0;
-			idlePollTimer = setInterval(() => {
-				attempts++;
-				if (attempts > 60) { // 30 seconds after last output
-					clearInterval(idlePollTimer!);
-					idlePollTimer = null;
-					// Don't timeout — the phase might still have tool calls
-					return;
-				}
-				if (ctx.isIdle()) {
-					clearInterval(idlePollTimer!);
-					idlePollTimer = null;
-					phasePending = false;
-					sendNextPhase(ctx);
-				}
-			}, 500) as any;
-		}, 2000) as any;
+		// Phase complete — chain to next
+		phasePending = false;
+		sendNextPhase(ctx);
 	});
 
 	// ─── /plan Command — Full workflow ───────────────────────────────
