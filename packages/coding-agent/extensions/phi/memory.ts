@@ -212,6 +212,134 @@ export default function memoryExtension(pi: ExtensionAPI) {
 	});
 
 	/**
+	 * Ontology tool - Add entities and relations to the knowledge graph
+	 */
+	pi.registerTool({
+		name: "ontology_add",
+		label: "Ontology Add",
+		description: "Add an entity or relation to the project knowledge graph. Entities represent things (projects, files, services, people). Relations connect them.",
+		promptGuidelines: [
+			"When discovering project architecture (services, databases, APIs), add entities and relations to the ontology.",
+			"When learning about how components connect, add relations (e.g. 'api-server' → 'uses' → 'postgres-db').",
+		],
+		parameters: Type.Object({
+			type: Type.Union([Type.Literal("entity"), Type.Literal("relation")], { description: "What to add: 'entity' or 'relation'" }),
+			// Entity fields
+			entityType: Type.Optional(Type.String({ description: "Entity type (e.g. Project, Service, Database, File, Person, Tool)" })),
+			name: Type.Optional(Type.String({ description: "Entity name (e.g. 'my-api', 'postgres-db')" })),
+			properties: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Key-value properties (e.g. {language: 'TypeScript', port: '3000'})" })),
+			// Relation fields
+			from: Type.Optional(Type.String({ description: "Source entity ID" })),
+			to: Type.Optional(Type.String({ description: "Target entity ID" })),
+			relationType: Type.Optional(Type.String({ description: "Relation type (e.g. 'uses', 'depends-on', 'deployed-on', 'created-by')" })),
+		}),
+
+		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+			const p = params as any;
+			try {
+				if (p.type === "entity") {
+					if (!p.entityType || !p.name) {
+						return { content: [{ type: "text", text: "Entity requires 'entityType' and 'name'" }], isError: true };
+					}
+					const id = sigmaMemory.ontology.addEntity({
+						type: p.entityType,
+						name: p.name,
+						properties: p.properties || {},
+					});
+					return {
+						content: [{ type: "text", text: `Entity added: **${p.name}** (${p.entityType}) — ID: \`${id}\`` }],
+						details: { id, type: p.entityType, name: p.name },
+					};
+				} else if (p.type === "relation") {
+					if (!p.from || !p.to || !p.relationType) {
+						return { content: [{ type: "text", text: "Relation requires 'from', 'to', and 'relationType'" }], isError: true };
+					}
+					const id = sigmaMemory.ontology.addRelation({
+						from: p.from,
+						to: p.to,
+						type: p.relationType,
+						properties: p.properties || {},
+					});
+					return {
+						content: [{ type: "text", text: `Relation added: \`${p.from}\` → **${p.relationType}** → \`${p.to}\` — ID: \`${id}\`` }],
+						details: { id, from: p.from, to: p.to, type: p.relationType },
+					};
+				}
+				return { content: [{ type: "text", text: "Type must be 'entity' or 'relation'" }], isError: true };
+			} catch (error) {
+				return { content: [{ type: "text", text: `Ontology error: ${error}` }], isError: true };
+			}
+		},
+	});
+
+	/**
+	 * Ontology query tool - Query the knowledge graph
+	 */
+	pi.registerTool({
+		name: "ontology_query",
+		label: "Ontology Query",
+		description: "Query the project knowledge graph. Find entities by type/name, get relations, find paths between entities, or get stats.",
+		parameters: Type.Object({
+			action: Type.Union([
+				Type.Literal("find"),
+				Type.Literal("relations"),
+				Type.Literal("path"),
+				Type.Literal("stats"),
+				Type.Literal("graph"),
+			], { description: "Query action: find (entities), relations (of entity), path (between entities), stats, graph (full export)" }),
+			entityType: Type.Optional(Type.String({ description: "Filter by entity type (for 'find' action)" })),
+			name: Type.Optional(Type.String({ description: "Filter by name (partial match, for 'find' action)" })),
+			entityId: Type.Optional(Type.String({ description: "Entity ID (for 'relations' action)" })),
+			fromId: Type.Optional(Type.String({ description: "Source entity ID (for 'path' action)" })),
+			toId: Type.Optional(Type.String({ description: "Target entity ID (for 'path' action)" })),
+		}),
+
+		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+			const p = params as any;
+			try {
+				switch (p.action) {
+					case "find": {
+						const results = sigmaMemory.ontology.findEntity({ type: p.entityType, name: p.name });
+						if (results.length === 0) return { content: [{ type: "text", text: "No entities found." }] };
+						const text = results.map(e => `- **${e.name}** (${e.type}) ID:\`${e.id}\` ${JSON.stringify(e.properties)}`).join("\n");
+						return { content: [{ type: "text", text: `Found ${results.length} entities:\n${text}` }] };
+					}
+					case "relations": {
+						if (!p.entityId) return { content: [{ type: "text", text: "'entityId' required" }], isError: true };
+						const rels = sigmaMemory.ontology.findRelations(p.entityId);
+						if (rels.length === 0) return { content: [{ type: "text", text: "No relations found." }] };
+						const text = rels.map(r => `- \`${r.from}\` → **${r.type}** → \`${r.to}\``).join("\n");
+						return { content: [{ type: "text", text: `Found ${rels.length} relations:\n${text}` }] };
+					}
+					case "path": {
+						if (!p.fromId || !p.toId) return { content: [{ type: "text", text: "'fromId' and 'toId' required" }], isError: true };
+						const path = sigmaMemory.ontology.queryPath(p.fromId, p.toId);
+						if (!path) return { content: [{ type: "text", text: "No path found between these entities." }] };
+						const text = path.map(s => `${s.entity.name}${s.relation ? ` → [${s.relation.type}]` : ""}`).join(" → ");
+						return { content: [{ type: "text", text: `Path: ${text}` }] };
+					}
+					case "stats": {
+						const stats = sigmaMemory.ontology.stats();
+						const graph = sigmaMemory.ontology.getGraph();
+						let text = `**Ontology Stats:**\n- Entities: ${graph.entities.length}\n- Relations: ${graph.relations.length}\n`;
+						text += `\nBy type:\n`;
+						for (const [type, count] of Object.entries(stats.entitiesByType)) text += `  - ${type}: ${count}\n`;
+						return { content: [{ type: "text", text }] };
+					}
+					case "graph": {
+						const graph = sigmaMemory.ontology.export();
+						return { content: [{ type: "text", text: JSON.stringify(graph, null, 2) }] };
+					}
+					default:
+						return { content: [{ type: "text", text: "Action must be: find, relations, path, stats, graph" }], isError: true };
+				}
+			} catch (error) {
+				return { content: [{ type: "text", text: `Ontology query error: ${error}` }], isError: true };
+			}
+		},
+	});
+
+	/**
 	 * Memory status tool - Get status of all memory subsystems
 	 */
 	pi.registerTool({
