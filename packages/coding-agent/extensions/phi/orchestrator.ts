@@ -450,23 +450,61 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
 	// ─── Orchestration State ─────────────────────────────────────────
 
+	interface AgentDef {
+		name: string;
+		tools: string[];
+		systemPrompt: string;
+	}
+
 	interface OrchestratorPhase {
 		key: string;
 		label: string;
 		model: string;
 		fallback: string;
+		agent: AgentDef | null;
 		instruction: string;
 	}
 
 	let phaseQueue: OrchestratorPhase[] = [];
 	let orchestrationActive = false;
 	let idlePollTimer: ReturnType<typeof setInterval> | null = null;
+	let activeAgentPrompt: string | null = null;
+	let activeAgentTools: string[] | null = null;
+	let savedTools: string[] | null = null;
 
 	/**
-	 * Load routing config and build phase queue with model assignments.
+	 * Parse agent .md file with YAML frontmatter
+	 */
+	function loadAgentDef(name: string): AgentDef | null {
+		const dirs = [
+			join(process.cwd(), ".phi", "agents"),
+			join(homedir(), ".phi", "agent", "agents"),
+		];
+		for (const dir of dirs) {
+			const filePath = join(dir, `${name}.md`);
+			try {
+				const content = readFileSync(filePath, "utf-8");
+				const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+				if (!fmMatch) continue;
+				const fields: Record<string, string> = {};
+				for (const line of fmMatch[1].split("\n")) {
+					const m = line.match(/^(\w+):\s*(.*)$/);
+					if (m) fields[m[1]] = m[2].trim();
+				}
+				return {
+					name: fields.name || name,
+					tools: (fields.tools || "").split(",").map(t => t.trim()).filter(Boolean),
+					systemPrompt: fmMatch[2].trim(),
+				};
+			} catch { continue; }
+		}
+		return null;
+	}
+
+	/**
+	 * Load routing config and build phase queue with model assignments + agent definitions.
 	 */
 	function buildPhases(description: string): OrchestratorPhase[] {
-		// Read routing.json for model assignments
 		const routingPath = join(homedir(), ".phi", "agent", "routing.json");
 		let routing: any = { routes: {}, default: { model: "default" } };
 		try {
@@ -490,22 +528,27 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		return [
 			{
 				key: "explore", label: "🔍 Phase 1 — EXPLORE", model: explore.preferred, fallback: explore.fallback,
+				agent: loadAgentDef("explore"),
 				instruction: `Analyze the project requirements and existing codebase. Identify what exists, what's needed, and any constraints.\n\n**Project:** ${description}\n\nList files, read key ones, check dependencies. Return a structured summary.`,
 			},
 			{
 				key: "plan", label: "📐 Phase 2 — PLAN", model: plan.preferred, fallback: plan.fallback,
+				agent: loadAgentDef("plan"),
 				instruction: `Design the architecture for this project. Define file structure, tech choices, and implementation approach.\n\n**Project:** ${description}\n\nBe specific: list every file to create with its purpose.`,
 			},
 			{
 				key: "code", label: "💻 Phase 3 — CODE", model: code.preferred, fallback: code.fallback,
+				agent: loadAgentDef("code"),
 				instruction: `Implement the COMPLETE project. Create ALL files with production-quality code.\n\n**Project:** ${description}\n\n**Rules:**\n- Create every file needed\n- No placeholders, no TODOs, no stubs\n- Every function must be fully implemented\n- Follow the architecture from the previous planning phase`,
 			},
 			{
 				key: "test", label: "🧪 Phase 4 — TEST", model: test.preferred, fallback: test.fallback,
+				agent: loadAgentDef("test"),
 				instruction: `Test the implementation. Run the code, check for errors, verify it works.\n\n**Project:** ${description}\n\nFix any errors you find. Ensure the project runs correctly.`,
 			},
 			{
 				key: "review", label: "🔍 Phase 5 — REVIEW", model: review.preferred, fallback: review.fallback,
+				agent: loadAgentDef("review"),
 				instruction: `Review the code quality, security, and performance. Fix any issues.\n\n**Project:** ${description}\n\nCheck: error handling, edge cases, code style, documentation.`,
 			},
 		];
@@ -513,7 +556,6 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
 	/**
 	 * Switch model for the current phase.
-	 * Tries preferred model first, then fallback.
 	 */
 	async function switchModelForPhase(phase: OrchestratorPhase, ctx: any): Promise<string> {
 		const available = ctx.modelRegistry?.getAvailable?.() || [];
@@ -529,46 +571,89 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	}
 
 	/**
+	 * Activate agent for a phase: set system prompt + restrict tools.
+	 */
+	function activateAgent(phase: OrchestratorPhase, ctx: any) {
+		if (phase.agent) {
+			// Save current tools for restoration
+			if (!savedTools) {
+				savedTools = pi.getActiveTools();
+			}
+			// Set agent's system prompt (will be injected via before_agent_start)
+			activeAgentPrompt = phase.agent.systemPrompt;
+			// Restrict tools to agent's allowed tools
+			if (phase.agent.tools.length > 0) {
+				activeAgentTools = phase.agent.tools;
+				pi.setActiveTools(phase.agent.tools);
+			}
+		} else {
+			activeAgentPrompt = null;
+			activeAgentTools = null;
+		}
+	}
+
+	/**
+	 * Deactivate agent: restore tools, clear prompt override.
+	 */
+	function deactivateAgent() {
+		activeAgentPrompt = null;
+		activeAgentTools = null;
+		if (savedTools) {
+			pi.setActiveTools(savedTools);
+			savedTools = null;
+		}
+	}
+
+	/**
 	 * Send the next phase in the queue.
-	 * Called after the agent goes idle (previous phase complete).
 	 */
 	function sendNextPhase(ctx: any) {
 		if (phaseQueue.length === 0) {
-			// All phases done
 			orchestrationActive = false;
+			deactivateAgent();
 			ctx.ui.notify(`\n✅ **All 5 phases complete!**`, "info");
 			return;
 		}
 
 		const phase = phaseQueue.shift()!;
 
-		// Switch model and send
 		switchModelForPhase(phase, ctx).then((modelId) => {
-			ctx.ui.notify(`\n${phase.label} → \`${modelId}\``, "info");
+			activateAgent(phase, ctx);
+			const agentName = phase.agent?.name || phase.key;
+			ctx.ui.notify(`\n${phase.label} → \`${modelId}\` (agent: ${agentName})`, "info");
 			setTimeout(() => pi.sendUserMessage(phase.instruction), 200);
 		});
 	}
+
+	// ─── System Prompt Injection — Agent personas ────────────────────
+
+	pi.on("before_agent_start", async (event, _ctx) => {
+		if (!orchestrationActive || !activeAgentPrompt) {
+			return { };
+		}
+		// Replace system prompt with the active agent's prompt
+		return { systemPrompt: activeAgentPrompt };
+	});
 
 	// ─── Output Event — Phase Chaining ───────────────────────────────
 
 	pi.on("output", async (_event, ctx) => {
 		if (!orchestrationActive || phaseQueue.length === 0) return;
 
-		// Debounce: clear any existing poll timer
 		if (idlePollTimer) {
 			clearInterval(idlePollTimer);
 			idlePollTimer = null;
 		}
 
-		// Poll for idle state (agent finishes tool calls + response)
 		let attempts = 0;
 		idlePollTimer = setInterval(() => {
 			attempts++;
-			if (attempts > 120) { // 60 seconds max
+			if (attempts > 120) {
 				clearInterval(idlePollTimer!);
 				idlePollTimer = null;
 				ctx.ui.notify("⚠️ Orchestrator timeout — phase took too long.", "warning");
 				orchestrationActive = false;
+				deactivateAgent();
 				return;
 			}
 			if (ctx.isIdle()) {
@@ -605,23 +690,27 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			const specFile = `spec-${ts}.md`;
 			await writeFile(join(plansDir, specFile), `# ${description}\n\n**Created:** ${new Date().toLocaleString()}\n`, "utf-8");
 
-			// Build phases with model assignments from routing.json
+			// Build phases with model assignments + agent definitions
 			const phases = buildPhases(description);
 			phaseQueue = phases.slice(1); // Queue phases 2-5
 			orchestrationActive = true;
 			const firstPhase = phases[0];
 
-			ctx.ui.notify(`📋 **Orchestrator started** — 5 phases with model routing\n`, "info");
+			ctx.ui.notify(`📋 **Orchestrator started** — 5 phases with model routing + agent roles\n`, "info");
 
 			// Show the plan
 			for (const p of phases) {
-				ctx.ui.notify(`  ${p.label} → \`${p.model}\``, "info");
+				const agentName = p.agent?.name || p.key;
+				const toolCount = p.agent?.tools.length || 0;
+				ctx.ui.notify(`  ${p.label} → \`${p.model}\` (agent: ${agentName}, ${toolCount} tools)`, "info");
 			}
 			ctx.ui.notify("", "info");
 
-			// Switch model and send first phase after handler returns
+			// Switch model and activate agent for first phase
 			const modelId = await switchModelForPhase(firstPhase, ctx);
-			ctx.ui.notify(`${firstPhase.label} → \`${modelId}\``, "info");
+			activateAgent(firstPhase, ctx);
+			const agentName = firstPhase.agent?.name || firstPhase.key;
+			ctx.ui.notify(`${firstPhase.label} → \`${modelId}\` (agent: ${agentName})`, "info");
 			setTimeout(() => pi.sendUserMessage(firstPhase.instruction), 200);
 		},
 	});
