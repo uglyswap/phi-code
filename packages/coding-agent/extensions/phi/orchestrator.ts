@@ -438,67 +438,49 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	// ─── /plan Command — Full workflow ───────────────────────────────
 
 	pi.registerCommand("plan", {
-		description: "Plan AND execute a project: creates spec + todo, then runs each task with isolated sub-agents",
+		description: "Plan AND execute a project — describe what to build and the LLM does it all",
 		handler: async (args, ctx) => {
 			const description = args.trim();
 
 			if (!description) {
 				ctx.ui.notify(`**Usage:** \`/plan <project description>\`
 
-**Full workflow in one command:**
-1. LLM analyzes your description
-2. Creates spec.md + todo.md
-3. Executes each task with an isolated sub-agent
-4. Each agent has its own context, model, and system prompt
-5. Results saved to progress.md
-
 **Examples:**
   /plan Build a REST API for user authentication with JWT
+  /plan Create a cyberpunk Pong browser game
   /plan Add test coverage to the payment module
-  /plan Refactor the frontend to use TypeScript
 
 **Other commands:**
-  /run   — Re-execute an existing plan
-  /plans — List all plans and status`, "info");
+  /plans — List all plans`, "info");
 				return;
 			}
 
-			pi.sendUserMessage(
-				`Analyze this project and call the orchestrate tool. It will create the plan AND execute all tasks automatically with parallel sub-agents.
+			// Create plan files
+			await ensurePlansDir();
+			const ts = timestamp();
+			const specFile = `spec-${ts}.md`;
+			const todoFile = `todo-${ts}.md`;
+
+			const spec = `# Project Plan\n\n**Created:** ${new Date().toLocaleString()}\n\n## Description\n\n${description}\n`;
+			await writeFile(join(plansDir, specFile), spec, "utf-8");
+			await writeFile(join(plansDir, todoFile), `# Todo\n\n(LLM will execute directly)\n`, "utf-8");
+
+			ctx.ui.notify(`📋 Plan created: \`${specFile}\`\n🚀 Executing project now...`, "info");
+
+			// Paste the structured prompt into the editor so the user just presses Enter
+			// This avoids sendUserMessage which fails with "Agent is already processing"
+			const prompt = `Build this project completely. Create all necessary files, implement all features, test everything.
 
 ## Project
 ${description}
 
-## Instructions
+## Rules
+- Create ALL files needed for a complete, working project
+- Use best practices and clean code
+- Test that everything works (run the code if possible)
+- Report what you created when done`;
 
-1. **Analyze** the project: identify goals, requirements, technical constraints, and architecture decisions.
-
-2. **Decompose** into tasks. Each task will be executed by an isolated sub-agent that has:
-   - NO access to this conversation
-   - NO shared memory or context
-   - Its own model and system prompt
-   - Full tool access (read, write, edit, bash, grep, find, ls)
-
-3. **Write self-contained task descriptions** using this pattern:
-   - CONTEXT: What exists, relevant file paths, current state
-   - TASK: Exactly what to implement/analyze/test
-   - FORMAT: Expected output (files created, test results, etc.)
-   - CONSTRAINTS: Rules, conventions, things to avoid
-
-4. **Assign agents**: explore (read-only analysis), plan (design), code (implementation), test (write+run tests), review (quality audit)
-
-5. **Set dependencies** to maximize parallelism:
-   - Tasks without dependencies → same wave → run simultaneously
-   - Only add a dependency when a task truly needs another's output
-   - Typical flow: explore(wave 1) → plan(wave 2) → code(wave 3) → test(wave 4) → review(wave 5)
-   - But independent code tasks can run in parallel within the same wave
-
-6. **Call the orchestrate tool** with ALL fields in a SINGLE call:
-   - title, description, goals, requirements, constraints (project metadata)
-   - tasks (array of ALL task objects with title, description, agent, dependencies)
-   
-⚠️ CRITICAL: Include the \`tasks\` array in the SAME tool call as the project metadata. Do NOT make separate calls. All data must be in ONE orchestrate() invocation.`
-			);
+			ctx.ui.pasteToEditor(prompt);
 		},
 	});
 
