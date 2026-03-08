@@ -489,7 +489,10 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 				{ agent: "review", label: "🔍 Reviewing", instruction: `Review code quality, security, and performance. Fix any issues found.\n\nProject: ${description}` },
 			];
 
-			// Execute each phase sequentially using sendUserMessage + waitForIdle
+			// Execute each phase sequentially
+			// Wait for idle first (command handler may still be "processing")
+			await ctx.waitForIdle();
+
 			for (const phase of phases) {
 				const agentDef = agentDefs.get(phase.agent);
 				const systemPromptNote = agentDef?.systemPrompt
@@ -498,7 +501,12 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
 				ctx.ui.notify(`\n${phase.label} (agent: ${phase.agent})...`, "info");
 
-				pi.sendUserMessage(phase.instruction + systemPromptNote, { deliverAs: "followUp" });
+				// Send message — use followUp if agent is still streaming, direct otherwise
+				try {
+					pi.sendUserMessage(phase.instruction + systemPromptNote);
+				} catch {
+					pi.sendUserMessage(phase.instruction + systemPromptNote, { deliverAs: "followUp" });
+				}
 				await ctx.waitForIdle();
 			}
 
