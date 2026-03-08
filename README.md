@@ -72,7 +72,11 @@ phi
 # Then type: /phi-init
 ```
 
-The setup wizard detects your API keys, configures routing, and creates sub-agent definitions.
+The setup wizard lets you:
+- **Configure multiple providers** (Alibaba, OpenAI, Anthropic, Google, OpenRouter, Groq, Ollama, LM Studio)
+- **Choose auth method** per provider: API key or OAuth (`/login` for browser-based auth)
+- **Assign models to agents**: pick which model handles code, debug, plan, explore, test, review
+- **Mix providers**: use Claude for review, GPT-4 for planning, Kimi for code — all in one setup
 
 ### Requirements
 
@@ -204,16 +208,28 @@ For each phase, the orchestrator:
 1. **Switches model** via `pi.setModel()` (from `routing.json`)
 2. **Injects agent system prompt** via `before_agent_start` event handler
 3. **Restricts tools** via `setActiveTools()` (explore = read-only, code = full write access)
-4. **Sends task instruction** via `sendUserMessage()` (waits for idle first)
-5. **Detects completion** via debounced `output` event + `isIdle()` polling (2s delay, then 500ms checks)
+4. **Sends task instruction** via `sendUserMessage()`
+5. **Detects completion** via `agent_end` event (fires when the full agent loop completes — all tool calls resolved)
 6. **Chains to next phase** automatically — smart router disabled during orchestration
+
+**Inter-phase communication:** Phases communicate through files in `.phi/plans/`:
+
+| Phase | Reads | Writes |
+|-------|-------|--------|
+| EXPLORE | — | `brief-{ts}.md` (structured project brief), `explore-{ts}.md` (codebase analysis) |
+| PLAN | `brief-*.md`, `explore-*.md` | `todo-{ts}.md` (detailed task list with agent assignments) |
+| CODE | `brief-*.md`, `todo-*.md` | `progress-{ts}.md` (implementation report) |
+| TEST | `todo-*.md`, `progress-*.md` | `test-{ts}.md` (test results) |
+| REVIEW | All `*.md` files | `review-{ts}.md` (final quality report) |
+
+Phase 1 uses the **prompt-architect pattern** to create a structured project brief (Context → Objective → Requirements → Constraints) that guides all subsequent phases.
 
 **Commands:**
 - `/plan <description>` — Full workflow: 5 sequential agent phases with model switching
 - `/run` — Re-execute an existing plan
 - `/plans` — List all plans
 
-**Philosophy:** Plans are stored on disk, not in LLM context. This respects Pi's minimalist approach — the system prompt stays at ~200 tokens. The agent reads plan files via the `read` tool when needed.
+**Philosophy:** Plans are stored on disk, not in LLM context. Each phase reads relevant files from previous phases using the `read` tool — full context preservation without bloating the system prompt.
 
 ### Skill Loader Extension (`skill-loader.ts`)
 
@@ -221,7 +237,6 @@ Dynamically discovers and loads skills from three locations (in priority order):
 - `.phi/skills/` (project-local skills — highest priority, override others)
 - `~/.phi/agent/skills/` (global user skills)
 - Bundled skills (12 shipped with the package — lowest priority)
-- Bundled skills (12 shipped with the package)
 
 **How it works:**
 1. At session start, scans all skill directories
@@ -297,16 +312,13 @@ Interactive setup wizard.
 **Command:** `/phi-init`
 
 **Steps:**
-1. Detects available API keys (Alibaba, OpenAI, Anthropic, Google, OpenRouter, Groq)
-2. Auto-detects local endpoints (LM Studio on `:1234`, Ollama on `:11434`)
-3. Lists all available models per provider
-4. Interactive model assignment — choose a model for each of 6 agent roles (code, debug, plan, explore, test, review) + default + fallbacks
-5. Creates `~/.phi/` directory structure (agent, memory, ontology)
-6. Writes `routing.json` with model assignments
-7. Writes `models.json` with provider config
-8. Copies bundled sub-agent definitions
-9. Creates AGENTS.md template for persistent instructions
-10. Writes routing configuration
+1. **Detect providers**: Scans environment variables for API keys + probes local endpoints (Ollama `:11434`, LM Studio `:1234`)
+2. **Multi-provider loop**: Add as many providers as you want — Alibaba, then OpenAI, then Anthropic, etc. Each is saved to `models.json` without overwriting the others. Select "Done" when finished.
+3. **Auth choice**: For OpenAI, Anthropic, and Google — choose between API key (paste directly) or OAuth (use `/login` for browser-based authentication)
+4. **Model assignment**: All models from all configured providers are listed together. Assign one model per agent role (code, debug, plan, explore, test, review) + a default model + fallbacks.
+5. **Write config**: Creates `routing.json`, `models.json`, sub-agent definitions, AGENTS.md template, and directory structure.
+
+**Re-running `/phi-init`:** Skip the provider loop to go straight to model re-assignment. Existing providers are preserved.
 
 ---
 
