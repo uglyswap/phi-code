@@ -703,6 +703,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 				}
 			}, 500) as any;
 		}, 2000) as any;
+	});
 
 	// ─── /plan Command — Full workflow ───────────────────────────────
 
