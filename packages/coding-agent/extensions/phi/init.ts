@@ -464,76 +464,107 @@ _Edit this file to customize Phi Code's behavior for your project._
 
 				// No warning needed — the wizard itself handles configuration
 
-				// Always offer to add a provider via select menu
-				const providerOptions = [
-					"Skip (continue with current providers)",
-					...providers.map(p => {
-						const status = p.available ? "✅" : "⬜";
-						const tag = p.local ? " (local)" : "";
-						return `${status} ${p.name}${tag}`;
-					}),
-				];
-				const addProvider = await ctx.ui.select("Add or change a provider?", providerOptions);
+				// Provider configuration loop — add as many providers as needed
+				let addingProviders = true;
+				while (addingProviders) {
+					const providerOptions = [
+						"Done — continue with current providers",
+						...providers.map(p => {
+							const status = p.available ? "✅" : "⬜";
+							const tag = p.local ? " (local)" : "";
+							const modelCount = p.available ? ` (${p.models.length} models)` : "";
+							return `${status} ${p.name}${tag}${modelCount}`;
+						}),
+					];
+					const addProvider = await ctx.ui.select("Configure a provider (add multiple!):", providerOptions);
 
-				const choiceIdx = providerOptions.indexOf(addProvider ?? "");
-				if (choiceIdx > 0) { // 0 = Skip
+					const choiceIdx = providerOptions.indexOf(addProvider ?? "");
+					if (choiceIdx <= 0) { // 0 = Done, or cancelled
+						addingProviders = false;
+						break;
+					}
+
 					const chosen = providers[choiceIdx - 1];
 
 					if (chosen.local) {
 						const port = chosen.name === "Ollama" ? 11434 : 1234;
 						if (!chosen.available) {
 							ctx.ui.notify(`\n💡 **${chosen.name}** — make sure it's running on port ${port}.`, "info");
-							ctx.ui.notify("Then restart phi and run `/phi-init` again.", "info");
-							return;
+							ctx.ui.notify("Then restart phi and run `/phi-init` again.\n", "info");
+						} else {
+							ctx.ui.notify(`\n✅ **${chosen.name}** is running with ${chosen.models.length} model(s).\n`, "info");
 						}
-						ctx.ui.notify(`\n✅ **${chosen.name}** is running with ${chosen.models.length} model(s).`, "info");
 					} else {
-						// Cloud provider — ask for API key
-						ctx.ui.notify(`\n🔑 **${chosen.name}**`, "info");
-
-						const apiKey = await ctx.ui.input(
-							`Enter your ${chosen.name} API key`,
-							"Paste your key here"
+						// Cloud provider — choose auth method
+						const supportsOAuth = ["openai", "anthropic", "google"].includes(
+							chosen.name.toLowerCase().split(" ")[0]
 						);
 
-						if (!apiKey || apiKey.trim().length < 5) {
-							ctx.ui.notify("❌ Invalid API key. Skipped.", "error");
-						} else {
-							// Save to models.json
-							let modelsConfig: any = { providers: {} };
-							try {
-								const existing = await readFile(modelsJsonPath, "utf-8");
-								modelsConfig = JSON.parse(existing);
-							} catch { /* new file */ }
+						let authMethod = "api-key";
+						if (supportsOAuth) {
+							const authChoice = await ctx.ui.select(
+								`How to authenticate with ${chosen.name}?`,
+								["API Key (paste your key)", "OAuth (browser login via /login)"]
+							);
+							if (authChoice?.includes("OAuth")) {
+								authMethod = "oauth";
+							}
+						}
 
-							const providerId = chosen.name.toLowerCase().replace(/\s+/g, "-");
-							modelsConfig.providers[providerId] = {
-								baseUrl: chosen.baseUrl,
-								api: "openai-completions",
-								apiKey: apiKey.trim(),
-								models: await Promise.all(chosen.models.map(async (id: string) => {
-									const spec = await getModelSpec(id);
-									return {
-										id,
-										name: id,
-										reasoning: spec.reasoning,
-										input: ["text"],
-										contextWindow: spec.contextWindow,
-										maxTokens: spec.maxTokens,
-									};
-								})),
-							};
-
-							await writeFile(modelsJsonPath, JSON.stringify(modelsConfig, null, 2), "utf-8");
-							process.env[chosen.envVar] = apiKey.trim();
+						if (authMethod === "oauth") {
+							ctx.ui.notify(`\n🔐 **${chosen.name}** — Use \`/login\` after setup to authenticate via OAuth.`, "info");
+							ctx.ui.notify("OAuth opens a browser window for secure login.\n", "info");
+							// Mark as available for model assignment (auth will be done via /login)
 							chosen.available = true;
+						} else {
+							// API Key method
+							ctx.ui.notify(`\n🔑 **${chosen.name}**`, "info");
 
-							const masked = apiKey.trim().substring(0, 6) + "..." + apiKey.trim().slice(-4);
-							ctx.ui.notify(`✅ **${chosen.name}** saved (${masked})`, "info");
-							ctx.ui.notify(`   ${chosen.models.length} models configured in \`models.json\``, "info");
+							const apiKey = await ctx.ui.input(
+								`Enter your ${chosen.name} API key`,
+								"Paste your key here"
+							);
+
+							if (!apiKey || apiKey.trim().length < 5) {
+								ctx.ui.notify("❌ Invalid API key. Skipped.\n", "error");
+							} else {
+								// Save to models.json (merges with existing)
+								let modelsConfig: any = { providers: {} };
+								try {
+									const existing = await readFile(modelsJsonPath, "utf-8");
+									modelsConfig = JSON.parse(existing);
+									if (!modelsConfig.providers) modelsConfig.providers = {};
+								} catch { /* new file */ }
+
+								const providerId = chosen.name.toLowerCase().replace(/\s+/g, "-");
+								modelsConfig.providers[providerId] = {
+									baseUrl: chosen.baseUrl,
+									api: "openai-completions",
+									apiKey: apiKey.trim(),
+									models: await Promise.all(chosen.models.map(async (id: string) => {
+										const spec = await getModelSpec(id);
+										return {
+											id,
+											name: id,
+											reasoning: spec.reasoning,
+											input: ["text"],
+											contextWindow: spec.contextWindow,
+											maxTokens: spec.maxTokens,
+										};
+									})),
+								};
+
+								await writeFile(modelsJsonPath, JSON.stringify(modelsConfig, null, 2), "utf-8");
+								process.env[chosen.envVar] = apiKey.trim();
+								chosen.available = true;
+
+								const masked = apiKey.trim().substring(0, 6) + "..." + apiKey.trim().slice(-4);
+								ctx.ui.notify(`✅ **${chosen.name}** configured (${masked})`, "info");
+								ctx.ui.notify(`   ${chosen.models.length} models added to \`models.json\`\n`, "info");
+							}
 						}
 					}
-				}
+				} // end while (addingProviders)
 
 				// Re-check available after potential additions
 				available = providers.filter(p => p.available);
