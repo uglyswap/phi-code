@@ -503,6 +503,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
 	/**
 	 * Load routing config and build phase queue with model assignments + agent definitions.
+	 * Each phase now reads outputs from previous phases and writes structured outputs.
 	 */
 	function buildPhases(description: string): OrchestratorPhase[] {
 		const routingPath = join(homedir(), ".phi", "agent", "routing.json");
@@ -525,31 +526,195 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		const test = getModel("test");
 		const review = getModel("review");
 
+		const ts = timestamp();
+
 		return [
 			{
 				key: "explore", label: "🔍 Phase 1 — EXPLORE", model: explore.preferred, fallback: explore.fallback,
 				agent: loadAgentDef("explore"),
-				instruction: `Analyze the project requirements and existing codebase. Identify what exists, what's needed, and any constraints.\n\n**Project:** ${description}\n\nList files, read key ones, check dependencies. Return a structured summary.`,
+				instruction: `You are the EXPLORE agent. Analyze the project requirements and existing codebase.
+
+**Project Request:** ${description}
+
+**Your tasks:**
+1. List all existing files and read key ones
+2. Identify tech stack, patterns, and constraints
+3. Create a STRUCTURED PROJECT BRIEF in \`.phi/plans/brief-${ts}.md\`:
+   - Context: what exists now
+   - Objective: what needs to be built
+   - Requirements: specific features needed
+   - Tech decisions: frameworks, patterns to use
+   - Constraints: what to NOT break
+
+**Step 4:** Write your findings to \`.phi/plans/explore-${ts}.md\`
+
+**Format for the project brief:**
+\`\`\`markdown
+## Project Brief
+
+### Context
+[Analyze what the user is asking for]
+
+### Objective
+[Clear, specific goal]
+
+### Requirements
+[Bullet list of what must be built]
+
+### Tech Decisions
+[Frameworks, patterns, architecture choices]
+
+### Constraints
+- Production-quality code, no placeholders
+- Every function fully implemented
+- Follow existing patterns if codebase exists
+- [Any other specific constraints]
+\`\`\``,
 			},
 			{
 				key: "plan", label: "📐 Phase 2 — PLAN", model: plan.preferred, fallback: plan.fallback,
 				agent: loadAgentDef("plan"),
-				instruction: `Design the architecture for this project. Define file structure, tech choices, and implementation approach.\n\n**Project:** ${description}\n\nBe specific: list every file to create with its purpose.`,
+				instruction: `You are the PLAN agent. Design the architecture and create a detailed task list.
+
+**Project Request:** ${description}
+
+**Step 1:** Read \`.phi/plans/brief-*.md\` (created by the explore phase)
+**Step 2:** Read \`.phi/plans/explore-*.md\` to understand the codebase analysis
+**Step 3:** Design the architecture based on findings
+**Step 4:** Create a DETAILED TODO LIST in \`.phi/plans/todo-${ts}.md\`:
+   For each task:
+   - Task number and title
+   - Agent assignment (code/test)
+   - Files to create/modify
+   - Specific implementation details
+   - Dependencies on other tasks
+
+**Format for the todo list:**
+\`\`\`markdown
+# TODO: Project Tasks
+
+## Task 1: [Task Title] [agent-type]
+- [ ] Specific implementation details
+- [ ] Files to create: path/to/file.ext
+- [ ] Expected behavior
+- Dependencies: None
+
+## Task 2: [Task Title] [agent-type]
+- [ ] Implementation details
+- Dependencies: Task 1
+\`\`\``,
 			},
 			{
 				key: "code", label: "💻 Phase 3 — CODE", model: code.preferred, fallback: code.fallback,
 				agent: loadAgentDef("code"),
-				instruction: `Implement the COMPLETE project. Create ALL files with production-quality code.\n\n**Project:** ${description}\n\n**Rules:**\n- Create every file needed\n- No placeholders, no TODOs, no stubs\n- Every function must be fully implemented\n- Follow the architecture from the previous planning phase`,
+				instruction: `You are the CODE agent. Implement the complete project.
+
+**Project Request:** ${description}
+
+**Step 1:** Read \`.phi/plans/brief-*.md\` for project context
+**Step 2:** Read \`.phi/plans/todo-*.md\` to get your task list
+**Step 3:** Implement EVERY task from the todo list, in order
+**Step 4:** Write a progress report to \`.phi/plans/progress-${ts}.md\`
+
+**Rules:**
+- Create every file listed in the plan
+- No placeholders, no TODOs, no stubs
+- Every function must be fully implemented
+- Follow the architecture from the plan
+- Check off tasks in your progress report as you complete them
+
+**Progress report format:**
+\`\`\`markdown
+# Progress Report
+
+## Completed Tasks
+- [x] Task 1: Description - DONE
+- [x] Task 2: Description - DONE
+
+## Files Created
+- path/to/file1.ext - Purpose
+- path/to/file2.ext - Purpose
+
+## Implementation Notes
+[Any important decisions or changes made]
+\`\`\``,
 			},
 			{
 				key: "test", label: "🧪 Phase 4 — TEST", model: test.preferred, fallback: test.fallback,
 				agent: loadAgentDef("test"),
-				instruction: `Test the implementation. Run the code, check for errors, verify it works.\n\n**Project:** ${description}\n\nFix any errors you find. Ensure the project runs correctly.`,
+				instruction: `You are the TEST agent. Verify the implementation.
+
+**Project Request:** ${description}
+
+**Step 1:** Read \`.phi/plans/todo-*.md\` to know what was planned
+**Step 2:** Read \`.phi/plans/progress-*.md\` to see what was done
+**Step 3:** Run the code, check for errors, test key features
+**Step 4:** Fix any errors you find
+**Step 5:** Write test results to \`.phi/plans/test-${ts}.md\`
+
+**Test report format:**
+\`\`\`markdown
+# Test Report
+
+## Tests Executed
+- [ ] Feature 1: Description - PASS/FAIL
+- [ ] Feature 2: Description - PASS/FAIL
+
+## Errors Found & Fixed
+- Error: Description
+  - Fix: What was done
+
+## Manual Testing
+- Tested: What was manually verified
+- Result: Pass/Fail with details
+
+## Final Status
+✅ All tests pass / ❌ Issues remain
+\`\`\``,
 			},
 			{
 				key: "review", label: "🔍 Phase 5 — REVIEW", model: review.preferred, fallback: review.fallback,
 				agent: loadAgentDef("review"),
-				instruction: `Review the code quality, security, and performance. Fix any issues.\n\n**Project:** ${description}\n\nCheck: error handling, edge cases, code style, documentation.`,
+				instruction: `You are the REVIEW agent. Final quality review.
+
+**Project Request:** ${description}
+
+**Step 1:** Read all \`.phi/plans/*.md\` files
+**Step 2:** Review code quality, security, performance
+**Step 3:** Fix any issues found
+**Step 4:** Write final report to \`.phi/plans/review-${ts}.md\`
+
+**Review checklist:**
+- Code quality: naming, structure, readability
+- Security: input validation, error handling
+- Performance: efficiency, resource usage
+- Documentation: comments, README if needed
+- Completeness: all requirements met
+
+**Final report format:**
+\`\`\`markdown
+# Final Review
+
+## Code Quality ✅/❌
+- Structure: Good/Needs work
+- Naming: Clear/Unclear
+- Comments: Adequate/Missing
+
+## Security ✅/❌
+- Input validation: Present/Missing
+- Error handling: Robust/Weak
+
+## Performance ✅/❌
+- Efficiency: Good/Could improve
+- Resource usage: Optimal/Excessive
+
+## Completeness ✅/❌
+- All requirements met: Yes/No
+- All files created: Yes/No
+
+## Final Verdict
+✅ Project ready for production / ❌ Issues need resolution
+\`\`\``,
 			},
 		];
 	}
