@@ -80,13 +80,29 @@ export default function smartRouterExtension(pi: ExtensionAPI) {
 		const recommendation = router.getRecommendation(event.text);
 
 		if (recommendation.category !== "general") {
-			if (extConfig.notifyOnRecommendation) {
-				const resolved = resolveModel(recommendation.model, ctx);
-				const suffix = resolved !== recommendation.model ? ` (→ ${resolved})` : "";
-				const route = (router as any).config?.routes?.[recommendation.category];
-				const desc = route?.keywords?.slice(0, 3)?.join(", ") || recommendation.category;
+			// Find the recommended model in the registry
+			const available = ctx.modelRegistry?.getAvailable?.() || [];
+			const targetModel = available.find((m: any) => m.id === recommendation.model);
+			const fallbackRoute = (router as any).config?.routes?.[recommendation.category];
+			const fallbackModel = fallbackRoute?.fallback
+				? available.find((m: any) => m.id === fallbackRoute.fallback)
+				: undefined;
+
+			const modelToUse = targetModel || fallbackModel;
+
+			if (modelToUse && modelToUse.id !== ctx.model?.id) {
+				// Actually switch the model
+				const switched = await pi.setModel(modelToUse);
+				if (switched && extConfig.notifyOnRecommendation) {
+					ctx.ui.notify(
+						`🔀 ${recommendation.category} → \`${modelToUse.id}\`${modelToUse.id !== recommendation.model ? ` (fallback)` : ""}`,
+						"info"
+					);
+				}
+			} else if (extConfig.notifyOnRecommendation && !modelToUse) {
+				// Model not available — just notify
 				ctx.ui.notify(
-					`🔀 ${recommendation.category} → \`${recommendation.model}\`${suffix} (${desc})`,
+					`🔀 ${recommendation.category} → \`${recommendation.model}\` (not available, keeping current)`,
 					"info"
 				);
 			}
