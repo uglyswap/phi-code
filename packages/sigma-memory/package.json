@@ -1,17 +1,20 @@
 {
 	"name": "sigma-memory",
-	"version": "0.1.2",
-	"description": "Persistent memory for Phi Code \u2014 QMD vector search + Ontology graph + Markdown notes",
+	"version": "0.2.0",
+	"description": "Persistent memory for Phi Code — embedded vector search + Ontology graph + Markdown notes",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
 	"scripts": {
 		"build": "tsc",
 		"clean": "rm -rf dist"
 	},
-	"dependencies": {},
+	"dependencies": {
+		"@huggingface/transformers": "^3.8.1",
+		"sql.js": "^1.14.1"
+	},
 	"devDependencies": {
-		"typescript": "^5.4.0",
-		"@types/node": "^20.0.0"
+		"@types/node": "^20.0.0",
+		"typescript": "^5.4.0"
 	},
 	"repository": {
 		"type": "git",
@@ -21,6 +24,7 @@
 	"keywords": [
 		"memory",
 		"vector-search",
+		"embeddings",
 		"ontology",
 		"phi-code"
 	],

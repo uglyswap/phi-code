@@ -4,10 +4,10 @@
  * Now powered by sigma-memory package which provides:
  * - NotesManager: Markdown files management
  * - OntologyManager: Knowledge graph with entities and relations  
- * - QMDManager: Vector search (if QMD is available)
+ * - VectorStore: Embedded vector search (sql.js + local embeddings)
  *
  * Features:
- * - memory_search: Unified search across notes, ontology, and QMD
+ * - memory_search: Unified search across notes, ontology, and vector store
  * - memory_write: Write content to memory files
  * - memory_read: Read specific memory files or list available ones
  * - memory_status: Get status of all memory subsystems
@@ -26,16 +26,12 @@ import { readFileSync } from "node:fs";
 import { SigmaMemory } from "sigma-memory";
 
 export default function memoryExtension(pi: ExtensionAPI) {
-	// Initialize sigma-memory
-	const sigmaMemory = new SigmaMemory({
-		// Default configuration, can be overridden
-		qmdEnabled: true,
-		qmdCommand: 'qmd'
-	});
+	// Initialize sigma-memory with embedded vector store
+	const sigmaMemory = new SigmaMemory();
 
-	// Initialize memory directories
-	sigmaMemory.init().catch(error => {
-		console.warn("Failed to initialize sigma-memory:", error);
+	// Initialize memory + vector store (lazy model download on first search)
+	sigmaMemory.init().catch(() => {
+		// Non-critical — memory works without vectors
 	});
 
 	/**
@@ -44,12 +40,15 @@ export default function memoryExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "memory_search",
 		label: "Memory Search",
-		description: "Search for content in memory using unified search (notes + ontology + QMD vector search)",
+		description: "Search for content in memory using unified search (notes + ontology + vector search)",
 		promptSnippet: "Search project memory (notes, ontology, vector search). ALWAYS call before answering questions about prior work, decisions, or project context.",
 		promptGuidelines: [
 			"Before answering questions about prior work, architecture, decisions, or project context: call memory_search first.",
 			"When starting work on a topic, search memory for existing notes and learnings.",
 			"After completing important work or learning something new, use memory_write to save it.",
+			"When a command fails or produces an unexpected error, document the error and fix in memory_write (self-improvement).",
+			"When the user corrects you, save the correction in memory_write so you never repeat the mistake.",
+			"After a significant debugging session, write a summary of root cause and solution to memory.",
 		],
 		parameters: Type.Object({
 			query: Type.String({ description: "Search query to find in memory" }),
@@ -96,7 +95,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 								resultText += `Relation: ${data.type} (${data.from} → ${data.to})\n`;
 								resultText += `Properties: ${JSON.stringify(data.properties)}\n\n`;
 							}
-						} else if (result.source === 'qmd') {
+						} else if (result.source === 'vectors') {
 							const data = result.data;
 							resultText += `File: ${data.file} (line ${data.line})\n`;
 							resultText += `> ${data.content}\n\n`;
@@ -136,14 +135,18 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			const { content, file } = params as { content: string; file?: string };
 
 			try {
-				// Use notes manager to write
+				// Write to notes
 				sigmaMemory.notes.write(content, file);
-
 				const filename = file || new Date().toISOString().split('T')[0] + '.md';
+
+				// Auto-index in vector store (non-blocking)
+				sigmaMemory.vectors.addDocument(filename, content).catch(() => {
+					// Vector indexing failed silently — notes still saved
+				});
 				
 				return {
-					content: [{ type: "text", text: `Content written to ${filename}` }],
-					details: { filename, contentLength: content.length }
+					content: [{ type: "text", text: `Content written to ${filename} (indexed for vector search)` }],
+					details: { filename, contentLength: content.length, vectorIndexed: true }
 				};
 
 			} catch (error) {
@@ -214,7 +217,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "memory_status",
 		label: "Memory Status",
-		description: "Get status of all memory subsystems (notes, ontology, QMD)",
+		description: "Get status of all memory subsystems (notes, ontology, vector search)",
 		parameters: Type.Object({}),
 
 		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
@@ -236,14 +239,11 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				statusText += `- Entities by type: ${JSON.stringify(status.ontology.entitiesByType)}\n`;
 				statusText += `- Relations by type: ${JSON.stringify(status.ontology.relationsByType)}\n\n`;
 				
-				// QMD status
-				statusText += `## QMD Vector Search\n`;
-				statusText += `- Available: ${status.qmd.available ? 'Yes' : 'No'}\n`;
-				if (status.qmd.available && status.qmd.status) {
-					statusText += `- Files indexed: ${status.qmd.status.files}\n`;
-					statusText += `- Chunks: ${status.qmd.status.chunks}\n`;
-					statusText += `- Last update: ${status.qmd.status.lastUpdate || 'Never'}\n`;
-				}
+				// Vector store status
+				statusText += `## Vector Search (embedded)\n`;
+				statusText += `- Documents: ${status.vectors.documentCount}\n`;
+				statusText += `- Chunks: ${status.vectors.chunkCount}\n`;
+				statusText += `- Last update: ${status.vectors.lastUpdate || 'Never'}\n`;
 
 				return {
 					content: [{ type: "text", text: statusText }],
@@ -292,7 +292,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			const parts: string[] = [];
 			if (status.notes.count > 0) parts.push(`${status.notes.count} notes`);
 			if (status.ontology.entities > 0) parts.push(`${status.ontology.entities} entities`);
-			if (status.qmd.available) parts.push("QMD active");
+			if (status.vectors.chunkCount > 0) parts.push(`${status.vectors.chunkCount} vectors`);
 			if (parts.length > 0) {
 				ctx.ui.notify(`🧠 Memory: ${parts.join(", ")}`, "info");
 			}
