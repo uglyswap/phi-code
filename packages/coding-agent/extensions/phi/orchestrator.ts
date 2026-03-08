@@ -353,9 +353,9 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({
 			title: Type.String({ description: "Concise project title" }),
 			description: Type.String({ description: "Full project description: what to build, why, and any relevant context" }),
-			goals: Type.Array(Type.String(), { description: "Measurable project goals (what success looks like)" }),
-			requirements: Type.Array(Type.String(), { description: "Technical and functional requirements" }),
-			architecture: Type.Optional(Type.Array(Type.String(), { description: "Architecture decisions, tech stack choices, trade-offs" })),
+			goals: Type.Union([Type.Array(Type.String()), Type.String()], { description: "Measurable project goals (what success looks like)" }),
+			requirements: Type.Union([Type.Array(Type.String()), Type.String()], { description: "Technical and functional requirements" }),
+			architecture: Type.Optional(Type.Union([Type.Array(Type.String()), Type.String()], { description: "Architecture decisions, tech stack choices, trade-offs" })),
 			tasks: Type.Array(
 				Type.Object({
 					title: Type.String({ description: "Clear, action-oriented task title" }),
@@ -367,14 +367,30 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 				}),
 				{ description: "Ordered list of tasks. Independent tasks run in parallel. Dependent tasks wait for prerequisites." }
 			),
-			constraints: Type.Optional(Type.Array(Type.String(), { description: "Hard constraints: frameworks, patterns, rules, things to avoid" })),
-			successCriteria: Type.Optional(Type.Array(Type.String(), { description: "How to verify the project is complete and correct" })),
+			constraints: Type.Optional(Type.Union([Type.Array(Type.String()), Type.String()], { description: "Hard constraints: frameworks, patterns, rules, things to avoid" })),
+			successCriteria: Type.Optional(Type.Union([Type.Array(Type.String()), Type.String()], { description: "How to verify the project is complete and correct" })),
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const p = params as {
-				title: string; description: string; goals: string[]; requirements: string[];
-				architecture?: string[]; tasks: TaskDef[]; constraints?: string[]; successCriteria?: string[];
+			const raw = params as any;
+
+			// Normalize string fields to arrays (some models send strings instead of arrays)
+			const toArray = (v: any): string[] => {
+				if (!v) return [];
+				if (Array.isArray(v)) return v;
+				if (typeof v === "string") return v.split("\n").map((s: string) => s.replace(/^[-•*]\s*/, "").trim()).filter(Boolean);
+				return [];
+			};
+
+			const p = {
+				title: raw.title as string,
+				description: raw.description as string,
+				goals: toArray(raw.goals),
+				requirements: toArray(raw.requirements),
+				architecture: raw.architecture ? toArray(raw.architecture) : undefined,
+				tasks: raw.tasks as TaskDef[],
+				constraints: raw.constraints ? toArray(raw.constraints) : undefined,
+				successCriteria: raw.successCriteria ? toArray(raw.successCriteria) : undefined,
 			};
 
 			try {
