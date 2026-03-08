@@ -761,6 +761,121 @@ The `apiKey` field accepts either a literal key or an environment variable name 
 
 ---
 
+## Creating Your Own
+
+### Creating a Custom Extension
+
+Extensions add tools, commands, and event handlers to Phi Code. Place them in `~/.phi/agent/extensions/`:
+
+```typescript
+// ~/.phi/agent/extensions/my-extension.ts
+import type { ExtensionAPI } from "phi-code";
+
+export default function myExtension(pi: ExtensionAPI) {
+  // Register a tool
+  pi.registerTool({
+    name: "my_tool",
+    label: "My Tool",
+    description: "Does something useful",
+    parameters: Type.Object({
+      input: Type.String({ description: "Input text" }),
+    }),
+    async execute(_id, params, _signal, _onUpdate, _ctx) {
+      return { content: [{ type: "text", text: `Result: ${params.input}` }] };
+    },
+  });
+
+  // Register a command
+  pi.registerCommand("my-cmd", {
+    description: "My custom command",
+    handler: async (args, ctx) => {
+      ctx.ui.notify("Hello from my extension!", "info");
+    },
+  });
+
+  // Listen to events
+  pi.on("session_start", async (event, ctx) => {
+    // Do something on session start
+  });
+}
+```
+
+### Creating a Custom Skill
+
+Skills are auto-discovered from `~/.phi/agent/skills/`:
+
+```
+~/.phi/agent/skills/my-skill/
+├── SKILL.md          # Description and instructions
+├── script.py         # Optional scripts
+└── config.json       # Optional configuration
+```
+
+**SKILL.md** template:
+
+```markdown
+# My Custom Skill
+
+Brief description of what this skill does.
+
+## When to use
+
+Use when the user asks for X, Y, or Z.
+
+## Features
+
+- Feature 1
+- Feature 2
+- Feature 3
+
+## Usage
+
+```bash
+my-command --option value
+```
+
+## Notes
+
+Additional notes and examples.
+```
+
+Skills are loaded automatically and matched against user queries using keywords extracted from headers and content.
+
+### Creating a Custom Agent
+
+Sub-agents are defined in `~/.phi/agent/agents/`:
+
+```markdown
+---
+name: my-agent
+description: Specialized agent for specific tasks
+model: claude-3-5-sonnet-20241022
+reasoning: true
+tools: ["web_search", "my_tool"]
+temperature: 0.1
+---
+
+# Agent Instructions
+
+You are a specialized agent that handles specific tasks.
+
+## Your role
+
+- Handle task type X
+- Focus on Y approach
+- Prioritize Z outcomes
+
+## Guidelines
+
+- Be specific and actionable
+- Provide detailed explanations
+- Ask clarifying questions when needed
+```
+
+Agents can be invoked via `/run my-agent "task description"` or automatically via routing rules in `routing.json`.
+
+---
+
 ## Build from Source
 
 ```bash
