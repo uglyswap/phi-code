@@ -477,40 +477,35 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			const specFile = `spec-${ts}.md`;
 			await writeFile(join(plansDir, specFile), `# ${description}\n\n**Created:** ${new Date().toLocaleString()}\n`, "utf-8");
 
-			ctx.ui.notify(`📋 Plan created. Executing with agents...`, "info");
+			ctx.ui.notify(`📋 Executing project with agent workflow...`, "info");
 
-			// Load agent definitions for system prompts
-			const agentDefs = loadAgentDefs();
-			const phases = [
-				{ agent: "explore", label: "🔍 Exploring", instruction: `Analyze the project requirements and existing codebase. Identify what exists, what's needed, and any constraints.\n\nProject: ${description}` },
-				{ agent: "plan", label: "📐 Planning", instruction: `Design the architecture, file structure, and implementation approach.\n\nProject: ${description}` },
-				{ agent: "code", label: "💻 Coding", instruction: `Implement the complete project. Create ALL necessary files with production-quality code.\n\nProject: ${description}\n\nCreate every file needed. Do NOT leave placeholders or TODOs. Complete implementation.` },
-				{ agent: "test", label: "🧪 Testing", instruction: `Test the implementation. Run the code, check for errors, verify it works.\n\nProject: ${description}` },
-				{ agent: "review", label: "🔍 Reviewing", instruction: `Review code quality, security, and performance. Fix any issues found.\n\nProject: ${description}` },
-			];
+			// Build a single comprehensive prompt with all agent phases
+			const prompt = `# Project: ${description}
 
-			// Execute each phase sequentially
-			// Wait for idle first (command handler may still be "processing")
-			await ctx.waitForIdle();
+## Your workflow (follow these phases in order):
 
-			for (const phase of phases) {
-				const agentDef = agentDefs.get(phase.agent);
-				const systemPromptNote = agentDef?.systemPrompt
-					? `\n\n[Agent: ${phase.agent}] ${agentDef.systemPrompt.slice(0, 200)}`
-					: "";
+### Phase 1 — 🔍 EXPLORE
+Analyze the project requirements and any existing codebase. List what exists, what's needed, and constraints.
 
-				ctx.ui.notify(`\n${phase.label} (agent: ${phase.agent})...`, "info");
+### Phase 2 — 📐 PLAN  
+Design the architecture, file structure, and tech choices. Be specific about file names and structure.
 
-				// Send message — use followUp if agent is still streaming, direct otherwise
-				try {
-					pi.sendUserMessage(phase.instruction + systemPromptNote);
-				} catch {
-					pi.sendUserMessage(phase.instruction + systemPromptNote, { deliverAs: "followUp" });
-				}
-				await ctx.waitForIdle();
-			}
+### Phase 3 — 💻 CODE
+Implement EVERYTHING. Create ALL files with complete, production-quality code. No placeholders, no TODOs, no "implement later". Every file must be fully functional.
 
-			ctx.ui.notify(`\n✅ **Project complete!** Plan: \`${specFile}\``, "info");
+### Phase 4 — 🧪 TEST
+Run the code. Verify it works. Fix any errors you find.
+
+### Phase 5 — 🔍 REVIEW
+Check code quality. Fix any issues. Ensure everything is polished.
+
+## Rules
+- Complete ALL 5 phases in this turn
+- Create every file needed for a working project
+- Announce each phase as you start it (e.g. "## Phase 1 — Exploring...")
+- Do NOT stop after planning — implement everything`;
+
+			ctx.ui.pasteToEditor(prompt);
 		},
 	});
 
