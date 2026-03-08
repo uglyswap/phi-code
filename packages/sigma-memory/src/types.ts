@@ -1,9 +1,7 @@
 export interface MemoryConfig {
   memoryDir: string;        // ~/.phi/memory/
-  projectMemoryDir: string; // .phi/memory/ (dans le projet courant)
+  projectMemoryDir: string; // .phi/memory/ (in the current project)
   ontologyPath: string;     // ~/.phi/memory/ontology/graph.jsonl
-  qmdEnabled: boolean;
-  qmdCommand?: string;      // Chemin vers le binaire QMD
 }
 
 export interface SearchResult {
@@ -11,6 +9,13 @@ export interface SearchResult {
   line: number;
   content: string;
   score: number;
+}
+
+export interface VectorSearchResult {
+  file: string;
+  chunkIndex: number;
+  content: string;
+  score: number; // cosine similarity 0-1
 }
 
 export interface OntologyEntity {
@@ -38,7 +43,7 @@ export interface Note {
 }
 
 export interface UnifiedSearchResult {
-  source: 'notes' | 'ontology' | 'qmd';
+  source: 'notes' | 'ontology' | 'vectors';
   type?: 'entity' | 'relation' | 'note' | 'file';
   score: number;
   data: any;
@@ -56,13 +61,10 @@ export interface MemoryStatus {
     entitiesByType: Record<string, number>;
     relationsByType: Record<string, number>;
   };
-  qmd: {
-    available: boolean;
-    status?: {
-      files: number;
-      chunks: number;
-      lastUpdate: string | null;
-    };
+  vectors: {
+    documentCount: number;
+    chunkCount: number;
+    lastUpdate: string;
   };
 }
 

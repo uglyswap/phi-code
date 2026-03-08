@@ -3,13 +3,13 @@ import { homedir } from 'os';
 import { existsSync, mkdirSync } from 'fs';
 import { NotesManager } from './notes.js';
 import { OntologyManager } from './ontology.js';
-import { QMDManager } from './qmd.js';
+import { VectorStore } from './vector-store.js';
 import type { MemoryConfig, UnifiedSearchResult, MemoryStatus } from './types.js';
 
 export class SigmaMemory {
   public readonly notes: NotesManager;
   public readonly ontology: OntologyManager;
-  public readonly qmd: QMDManager;
+  public readonly vectors: VectorStore;
   private readonly config: MemoryConfig;
 
   constructor(config?: Partial<MemoryConfig>) {
@@ -17,9 +17,7 @@ export class SigmaMemory {
     const defaultConfig: MemoryConfig = {
       memoryDir: join(homedir(), '.phi', 'memory'),
       projectMemoryDir: join(process.cwd(), '.phi', 'memory'),
-      ontologyPath: join(homedir(), '.phi', 'memory', 'ontology', 'graph.jsonl'),
-      qmdEnabled: true,
-      qmdCommand: 'qmd'
+      ontologyPath: join(homedir(), '.phi', 'memory', 'ontology', 'graph.jsonl')
     };
 
     this.config = { ...defaultConfig, ...config };
@@ -27,23 +25,23 @@ export class SigmaMemory {
     // Initialize managers
     this.notes = new NotesManager(this.config);
     this.ontology = new OntologyManager(this.config);
-    this.qmd = new QMDManager(this.config);
+    this.vectors = new VectorStore(join(this.config.memoryDir, 'vectors.db'));
   }
 
   /**
-   * Unified search: searches notes + ontology + QMD, combines results
+   * Unified search: searches notes + ontology + vectors, combines results
    */
   async search(query: string): Promise<UnifiedSearchResult[]> {
     const results: UnifiedSearchResult[] = [];
 
-    // Search in notes
+    // Search in notes (full-text grep)
     try {
       const notesResults = this.notes.search(query);
       for (const result of notesResults) {
         results.push({
           source: 'notes',
           type: 'note',
-          score: 0.8, // Default score for notes
+          score: 0.8, // Default score for text-match notes
           data: result
         });
       }
@@ -77,19 +75,19 @@ export class SigmaMemory {
       // Ontology search failed silently
     }
 
-    // QMD vector search
+    // Vector similarity search
     try {
-      const qmdResults = await this.qmd.search(query, 5);
-      for (const result of qmdResults) {
+      const vectorResults = await this.vectors.search(query, 5);
+      for (const result of vectorResults) {
         results.push({
-          source: 'qmd',
+          source: 'vectors',
           type: 'file',
           score: result.score,
           data: result
         });
       }
     } catch (error) {
-      // QMD search failed silently
+      // Vector search failed silently
     }
 
     // Sort by score descending
@@ -99,7 +97,8 @@ export class SigmaMemory {
   }
 
   /**
-   * Initialize all required directories
+   * Initialize all required directories and the vector store.
+   * On first run, this will download the embedding model and index notes.
    */
   async init(): Promise<void> {
     // Create base directories
@@ -111,12 +110,26 @@ export class SigmaMemory {
       mkdirSync(this.config.projectMemoryDir, { recursive: true });
     }
 
-    // Initialize QMD if enabled
-    if (this.config.qmdEnabled && this.qmd.isAvailable()) {
+    // Initialize vector store (DB setup only — fast)
+    await this.vectors.init();
+
+    // Auto-index existing notes into the vector store
+    await this.indexNotes();
+  }
+
+  /**
+   * Index all markdown notes into the vector store.
+   * Reads every .md file from the notes directory and adds it.
+   */
+  async indexNotes(): Promise<void> {
+    const notesList = this.notes.list();
+
+    for (const note of notesList) {
       try {
-        await this.qmd.update();
-      } catch (error) {
-        // QMD initialization failed silently
+        const content = this.notes.read(note.name);
+        await this.vectors.addDocument(note.name, content);
+      } catch {
+        // Skip files that can't be read
       }
     }
   }
@@ -143,20 +156,13 @@ export class SigmaMemory {
       relationsByType: ontologyStats.relationsByType
     };
 
-    // QMD status
-    let qmdStatus: MemoryStatus['qmd'] = { available: false };
-    if (this.config.qmdEnabled && this.qmd.isAvailable()) {
-      const status = await this.qmd.status();
-      qmdStatus = {
-        available: true,
-        status: status || { files: 0, chunks: 0, lastUpdate: null }
-      };
-    }
+    // Vector store status
+    const vectorStats = this.vectors.getStats();
 
     return {
       notes: notesStatus,
       ontology: ontologyStatus,
-      qmd: qmdStatus
+      vectors: vectorStats
     };
   }
 
@@ -171,7 +177,7 @@ export class SigmaMemory {
 // Convenient exports
 export { NotesManager } from './notes.js';
 export { OntologyManager } from './ontology.js';
-export { QMDManager } from './qmd.js';
+export { VectorStore } from './vector-store.js';
 export * from './types.js';
 
 // Default export

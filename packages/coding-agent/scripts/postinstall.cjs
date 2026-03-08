@@ -58,7 +58,18 @@ for (const pkg of sigmaPackages) {
   createLink(srcPkg, destLink, pkg);
 }
 
-// 3. Ensure settings.json has quietStartup: true
+// 3. Ensure memory directories exist (vector store DB created on first use)
+const memoryDir = join(homedir(), ".phi", "memory");
+const memoryNotesDir = join(memoryDir, "notes");
+const memoryOntologyDir = join(memoryDir, "ontology");
+for (const dir of [memoryDir, memoryNotesDir, memoryOntologyDir]) {
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+    console.log(`  Φ Created ${dir}`);
+  }
+}
+
+// 4. Ensure settings.json has quietStartup: true
 const settingsPath = join(agentDir, "settings.json");
 try {
   let settings = {};
