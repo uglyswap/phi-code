@@ -482,7 +482,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
 				ctx.ui.notify(`\n${phase.label} (agent: ${phase.agent})...`, "info");
 
-				pi.sendUserMessage(phase.instruction + systemPromptNote);
+				pi.sendUserMessage(phase.instruction + systemPromptNote, { deliverAs: "followUp" });
 				await ctx.waitForIdle();
 			}
 
