@@ -38,9 +38,9 @@ Phi Code takes Pi's brilliant minimal architecture and adds what's missing for s
 | | Pi | Phi Code |
 |---|---|---|
 | **Memory** | None (session-only) | Persistent across sessions (notes + ontology + vector search) |
-| **Sub-agents** | Single agent | 5 specialized agents with parallel execution |
-| **Model routing** | Manual selection | Automatic task→model matching |
-| **Orchestration** | Manual | `/plan` → plan + parallel execution with isolated sub-agents (dependency-aware) |
+| **Sub-agents** | Single agent | 5 specialized agents with different models per role |
+| **Model routing** | Manual selection | Automatic task→model switching via routing.json |
+| **Orchestration** | Manual | `/plan` → 5 sequential agent phases, each with its own model |
 | **Skills** | Community | 12 bundled coding skills loaded on demand |
 | **Pre-configured models** | BYO key | 8 Alibaba Coding Plan models included (requires API key) |
 | **Web search** | None | Brave API + DuckDuckGo fallback |
@@ -114,7 +114,7 @@ phi-code/
 
 3. **Memory**: The `memory.ts` extension auto-loads `AGENTS.md` from `~/.phi/memory/` at session start if it exists.
 
-4. **Routing**: The `smart-router.ts` extension loads `~/.phi/agent/routing.json` and analyzes each user input to suggest the optimal model.
+4. **Routing**: The `smart-router.ts` extension loads `~/.phi/agent/routing.json` and automatically switches models based on task type.
 
 ---
 
@@ -165,26 +165,42 @@ Analyzes user input keywords and suggests the best model for the task.
 | `test` | test, verify, validate, check, assert, coverage | test |
 | `review` | review, audit, quality, security, improve, optimize | review |
 
-> Models are assigned by `/phi-init` based on your provider and OpenRouter rankings. See [Intelligent Routing](#intelligent-routing).
+When the smart router detects a matching category, it **automatically switches** the model via `pi.setModel()`. No manual intervention needed.
 
-**Configuration:** Override defaults in `~/.phi/agent/routing.json`. Full schema in `config/routing.json`.
+**Configuration:** Set model assignments in `~/.phi/agent/routing.json` (created by `/phi-init`).
 
-**Command:** `/routing` — show current routing configuration and model assignments.
+**Command:** `/routing` — show current routing configuration, test routes, enable/disable.
 
 ### Orchestrator Extension (`orchestrator.ts`)
 
-Breaks down complex project descriptions into structured plans.
+Event-driven multi-model orchestration. Each phase runs with its own model and agent persona.
 
-**Tool:**
+**How `/plan` works:**
 
-| Tool | Description |
-|------|-------------|
-| `orchestrate` | Full-cycle: creates spec.md + todo.md, then executes tasks in parallel waves (independent tasks run simultaneously, dependent tasks wait). Each agent: own context, model, system prompt. Results in progress.md. |
+```
+/plan Create a cyberpunk Pac-Man browser game
+
+📋 Orchestrator started — 5 phases with model routing + agent roles
+
+  🔍 Phase 1 — EXPLORE → MiniMax-M2.5 (agent: explore, 5 tools)
+  📐 Phase 2 — PLAN    → glm-5        (agent: plan, 4 tools)
+  💻 Phase 3 — CODE    → kimi-k2.5    (agent: code, 7 tools)
+  🧪 Phase 4 — TEST    → qwen3-coder+ (agent: test, 5 tools)
+  🔍 Phase 5 — REVIEW  → glm-4.7      (agent: review, 5 tools)
+```
+
+For each phase, the orchestrator:
+1. **Switches model** via `pi.setModel()` (from `routing.json`)
+2. **Injects agent system prompt** via `before_agent_start` event
+3. **Restricts tools** via `setActiveTools()` (explore = read-only, code = full write access)
+4. **Sends task instruction** to the LLM
+5. **Detects completion** via `output` event + `isIdle()` polling
+6. **Chains to next phase** automatically
 
 **Commands:**
-- `/plan` — Full workflow: plan → parallel execution with isolated sub-agents (dependency-aware waves)
-- `/run` — Re-execute an existing plan (e.g. after manual fixes)
-- `/plans` — List all plans with execution status (spec only / planned / executed)
+- `/plan <description>` — Full workflow: 5 sequential agent phases with model switching
+- `/run` — Re-execute an existing plan
+- `/plans` — List all plans
 
 **Philosophy:** Plans are stored on disk, not in LLM context. This respects Pi's minimalist approach — the system prompt stays at ~200 tokens. The agent reads plan files via the `read` tool when needed.
 
@@ -239,7 +255,7 @@ Production-grade model testing across 6 categories with real API calls.
 
 **Scoring:** S (80+), A (65+), B (50+), C (35+), D (<35)
 
-**Results saved:** `~/.phi/benchmark/results.json` — persistent, used by `/phi-init benchmark` mode.
+**Results saved:** `~/.phi/benchmark/results.json` — persistent, for reference.
 
 **Commands:**
 - `/benchmark` — Run on current model
@@ -265,26 +281,18 @@ Sub-agent management and visibility.
 
 ### Init Extension (`init.ts`)
 
-Interactive setup wizard with **3 fully functional modes**.
+Interactive setup wizard.
 
 **Command:** `/phi-init`
 
-**Modes:**
-
-| Mode | Description | Time |
-|------|-------------|------|
-| **auto** | Uses optimal defaults based on public rankings and model specializations | Instant |
-| **benchmark** | Tests models with `/benchmark all`, assigns best-per-category | 10-15 min |
-| **manual** | Interactive prompts — choose model for each of 6 task roles + fallbacks | 2-3 min |
-
 **Steps:**
 1. Detects available API keys (Alibaba, OpenAI, Anthropic, Google, OpenRouter, Groq)
-2. Lists available models per provider
-3. Asks for configuration mode
-4. **auto**: Assigns models based on specialization (coder→code, reasoning→debug/plan, fast→explore/test)
-5. **benchmark**: Checks for existing `/benchmark` results, assigns best model per category
-6. **manual**: Prompts user for each role (code, debug, plan, explore, test, review) with model list
-7. Creates `~/.phi/` directory structure (agent, memory, ontology)
+2. Auto-detects local endpoints (LM Studio on `:1234`, Ollama on `:11434`)
+3. Lists all available models per provider
+4. Interactive model assignment — choose a model for each of 6 agent roles (code, debug, plan, explore, test, review) + default + fallbacks
+5. Creates `~/.phi/` directory structure (agent, memory, ontology)
+6. Writes `routing.json` with model assignments
+7. Writes `models.json` with provider config
 8. Copies bundled sub-agent definitions
 9. Creates AGENTS.md template for persistent instructions
 10. Writes routing configuration
@@ -370,7 +378,7 @@ Phi Code defines 5 specialized sub-agents, each optimized for a specific task ty
 | **test** | Assigned by `/phi-init` | read, write, edit, bash, grep, find, ls | Writes tests, runs them, validates changes. Full tool access for test file creation. |
 | **review** | Assigned by `/phi-init` | read, grep, find, ls, bash | Senior code reviewer. Checks quality, security, maintainability. |
 
-> **Note**: Agent model assignments are configured by `/phi-init` based on your available models and OpenRouter rankings. All agents use `model: default` — the routing system determines the actual model at runtime.
+> **Note**: Agent model assignments are configured by `/phi-init`. All agents use `model: default` in their definition — the routing system and orchestrator determine the actual model at runtime based on `routing.json`.
 
 Each agent has a structured output format defined in its `.md` file (in the `agents/` directory). This ensures consistent, parseable results.
 
@@ -401,9 +409,9 @@ The smart router analyzes each message and suggests the best model based on task
 ### How It Works
 
 1. **Input analysis**: Keywords in your message are matched against routing categories
-2. **Model recommendation**: The router suggests the preferred model for that category
+2. **Model switch**: The router calls `pi.setModel()` to switch to the preferred model
 3. **Fallback**: If the preferred model is unavailable, the fallback model is used
-4. **Notification**: A subtle notification shows which model is recommended (non-blocking)
+4. **Notification**: A notification confirms which model was activated
 
 ### Default Routes
 
@@ -630,13 +638,13 @@ Commands are typed in the Phi Code terminal with a `/` prefix.
 
 | Command | Extension | Description |
 |---------|-----------|-------------|
-| `/phi-init` | init | Interactive setup wizard — 3 modes: auto, benchmark, manual |
+| `/phi-init` | init | Interactive setup wizard — detect providers, assign models to agents |
 | `/benchmark` | benchmark | Test models across 6 categories (code-gen, debug, planning, tool-calling, speed, orchestration) |
 | `/benchmark all` | benchmark | Run benchmark on ALL available models |
 | `/benchmark results` | benchmark | Show saved results with leaderboard and category breakdown |
 | `/agents` | agents | List all configured sub-agents with model assignments |
 | `/agents <name>` | agents | Show detailed info for a specific agent |
-| `/plan` | orchestrator | Full workflow: plan → parallel execution (dependency-aware waves) → progress report |
+| `/plan` | orchestrator | Full workflow: 5 sequential agent phases (explore→plan→code→test→review), each with its own model |
 | `/run` | orchestrator | Re-execute an existing plan's tasks with sub-agents |
 | `/plans` | orchestrator | List all plans with status (spec only / planned / executed) |
 | `/skills` | skill-loader | List all discovered skills with sources and descriptions |
