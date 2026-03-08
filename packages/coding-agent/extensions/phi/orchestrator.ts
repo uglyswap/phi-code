@@ -2,21 +2,18 @@
  * Orchestrator Extension - Full-cycle project planning and execution
  *
  * WORKFLOW (single command):
- *   /plan <description> → LLM analyzes → orchestrate tool → spec + todo → auto-execute → progress
- *   Everything happens in one shot. No manual steps.
+ *   /plan <description> → 5 sequential agent phases → each with its own model
+ *
+ * The orchestrator uses event-driven phase chaining:
+ *   1. Send phase 1 message with model A
+ *   2. Detect when agent goes idle (output event + polling)
+ *   3. Switch to model B, send phase 2
+ *   4. Repeat until all 5 phases complete
  *
  * Commands:
- *   /plan   — Full workflow: plan + execute with sub-agents
- *   /run    — Re-execute an existing plan (e.g. after fixes)
+ *   /plan   — Full workflow: plan + execute with agents
+ *   /run    — Re-execute an existing plan
  *   /plans  — List plans and their execution status
- *
- * Sub-agent execution:
- * Each task spawns a separate `phi` CLI process with:
- * - Its own system prompt (from the agent .md file)
- * - Its own model (from routing.json)
- * - Its own context (isolated, no shared history)
- * - Its own tool access (read, write, edit, bash, etc.)
- * Results are collected into progress.md and reported to the user.
  */
 
 import { Type } from "@sinclair/typebox";
@@ -451,10 +448,141 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	// ─── Orchestration State ─────────────────────────────────────────
+
+	interface OrchestratorPhase {
+		key: string;
+		label: string;
+		model: string;
+		fallback: string;
+		instruction: string;
+	}
+
+	let phaseQueue: OrchestratorPhase[] = [];
+	let orchestrationActive = false;
+	let idlePollTimer: ReturnType<typeof setInterval> | null = null;
+
+	/**
+	 * Load routing config and build phase queue with model assignments.
+	 */
+	function buildPhases(description: string): OrchestratorPhase[] {
+		// Read routing.json for model assignments
+		const routingPath = join(homedir(), ".phi", "agent", "routing.json");
+		let routing: any = { routes: {}, default: { model: "default" } };
+		try {
+			routing = JSON.parse(readFileSync(routingPath, "utf-8"));
+		} catch { /* no routing config */ }
+
+		function getModel(routeKey: string): { preferred: string; fallback: string } {
+			const route = routing.routes?.[routeKey];
+			return {
+				preferred: route?.preferredModel || routing.default?.model || "default",
+				fallback: route?.fallback || routing.default?.model || "default",
+			};
+		}
+
+		const explore = getModel("explore");
+		const plan = getModel("plan");
+		const code = getModel("code");
+		const test = getModel("test");
+		const review = getModel("review");
+
+		return [
+			{
+				key: "explore", label: "🔍 Phase 1 — EXPLORE", model: explore.preferred, fallback: explore.fallback,
+				instruction: `Analyze the project requirements and existing codebase. Identify what exists, what's needed, and any constraints.\n\n**Project:** ${description}\n\nList files, read key ones, check dependencies. Return a structured summary.`,
+			},
+			{
+				key: "plan", label: "📐 Phase 2 — PLAN", model: plan.preferred, fallback: plan.fallback,
+				instruction: `Design the architecture for this project. Define file structure, tech choices, and implementation approach.\n\n**Project:** ${description}\n\nBe specific: list every file to create with its purpose.`,
+			},
+			{
+				key: "code", label: "💻 Phase 3 — CODE", model: code.preferred, fallback: code.fallback,
+				instruction: `Implement the COMPLETE project. Create ALL files with production-quality code.\n\n**Project:** ${description}\n\n**Rules:**\n- Create every file needed\n- No placeholders, no TODOs, no stubs\n- Every function must be fully implemented\n- Follow the architecture from the previous planning phase`,
+			},
+			{
+				key: "test", label: "🧪 Phase 4 — TEST", model: test.preferred, fallback: test.fallback,
+				instruction: `Test the implementation. Run the code, check for errors, verify it works.\n\n**Project:** ${description}\n\nFix any errors you find. Ensure the project runs correctly.`,
+			},
+			{
+				key: "review", label: "🔍 Phase 5 — REVIEW", model: review.preferred, fallback: review.fallback,
+				instruction: `Review the code quality, security, and performance. Fix any issues.\n\n**Project:** ${description}\n\nCheck: error handling, edge cases, code style, documentation.`,
+			},
+		];
+	}
+
+	/**
+	 * Switch model for the current phase.
+	 * Tries preferred model first, then fallback.
+	 */
+	async function switchModelForPhase(phase: OrchestratorPhase, ctx: any): Promise<string> {
+		const available = ctx.modelRegistry?.getAvailable?.() || [];
+		const preferred = available.find((m: any) => m.id === phase.model);
+		const fallback = available.find((m: any) => m.id === phase.fallback);
+		const target = preferred || fallback;
+
+		if (target && target.id !== ctx.model?.id) {
+			const switched = await pi.setModel(target);
+			if (switched) return target.id;
+		}
+		return ctx.model?.id || phase.model;
+	}
+
+	/**
+	 * Send the next phase in the queue.
+	 * Called after the agent goes idle (previous phase complete).
+	 */
+	function sendNextPhase(ctx: any) {
+		if (phaseQueue.length === 0) {
+			// All phases done
+			orchestrationActive = false;
+			ctx.ui.notify(`\n✅ **All 5 phases complete!**`, "info");
+			return;
+		}
+
+		const phase = phaseQueue.shift()!;
+
+		// Switch model and send
+		switchModelForPhase(phase, ctx).then((modelId) => {
+			ctx.ui.notify(`\n${phase.label} → \`${modelId}\``, "info");
+			setTimeout(() => pi.sendUserMessage(phase.instruction), 200);
+		});
+	}
+
+	// ─── Output Event — Phase Chaining ───────────────────────────────
+
+	pi.on("output", async (_event, ctx) => {
+		if (!orchestrationActive || phaseQueue.length === 0) return;
+
+		// Debounce: clear any existing poll timer
+		if (idlePollTimer) {
+			clearInterval(idlePollTimer);
+			idlePollTimer = null;
+		}
+
+		// Poll for idle state (agent finishes tool calls + response)
+		let attempts = 0;
+		idlePollTimer = setInterval(() => {
+			attempts++;
+			if (attempts > 120) { // 60 seconds max
+				clearInterval(idlePollTimer!);
+				idlePollTimer = null;
+				ctx.ui.notify("⚠️ Orchestrator timeout — phase took too long.", "warning");
+				orchestrationActive = false;
+				return;
+			}
+			if (ctx.isIdle()) {
+				clearInterval(idlePollTimer!);
+				idlePollTimer = null;
+				sendNextPhase(ctx);
+			}
+		}, 500);
+	});
+
 	// ─── /plan Command — Full workflow ───────────────────────────────
 
 	pi.registerCommand("plan", {
-		description: "Plan AND execute a project with agents — describe what to build",
+		description: "Plan AND execute a project — 5 phases, each with its own model from routing.json",
 		handler: async (args, ctx) => {
 			const description = args.trim();
 
@@ -477,36 +605,24 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			const specFile = `spec-${ts}.md`;
 			await writeFile(join(plansDir, specFile), `# ${description}\n\n**Created:** ${new Date().toLocaleString()}\n`, "utf-8");
 
-			ctx.ui.notify(`📋 Launching orchestrator...`, "info");
+			// Build phases with model assignments from routing.json
+			const phases = buildPhases(description);
+			phaseQueue = phases.slice(1); // Queue phases 2-5
+			orchestrationActive = true;
+			const firstPhase = phases[0];
 
-			// Build a single comprehensive prompt with all agent phases
-			const prompt = `# Project: ${description}
+			ctx.ui.notify(`📋 **Orchestrator started** — 5 phases with model routing\n`, "info");
 
-## Your workflow (follow these phases in order):
+			// Show the plan
+			for (const p of phases) {
+				ctx.ui.notify(`  ${p.label} → \`${p.model}\``, "info");
+			}
+			ctx.ui.notify("", "info");
 
-### Phase 1 — 🔍 EXPLORE
-Analyze the project requirements and any existing codebase. List what exists, what's needed, and constraints.
-
-### Phase 2 — 📐 PLAN  
-Design the architecture, file structure, and tech choices. Be specific about file names and structure.
-
-### Phase 3 — 💻 CODE
-Implement EVERYTHING. Create ALL files with complete, production-quality code. No placeholders, no TODOs, no "implement later". Every file must be fully functional.
-
-### Phase 4 — 🧪 TEST
-Run the code. Verify it works. Fix any errors you find.
-
-### Phase 5 — 🔍 REVIEW
-Check code quality. Fix any issues. Ensure everything is polished.
-
-## Rules
-- Complete ALL 5 phases in this turn
-- Create every file needed for a working project
-- Announce each phase as you start it (e.g. "## Phase 1 — Exploring...")
-- Do NOT stop after planning — implement everything`;
-
-			// Send after handler returns (agent goes idle after command completes)
-			setTimeout(() => pi.sendUserMessage(prompt), 200);
+			// Switch model and send first phase after handler returns
+			const modelId = await switchModelForPhase(firstPhase, ctx);
+			ctx.ui.notify(`${firstPhase.label} → \`${modelId}\``, "info");
+			setTimeout(() => pi.sendUserMessage(firstPhase.instruction), 200);
 		},
 	});
 
