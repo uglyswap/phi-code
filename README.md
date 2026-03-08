@@ -176,6 +176,8 @@ Analyzes user input keywords and suggests the best model for the task.
 
 When the smart router detects a matching category, it **automatically switches** the model via `pi.setModel()`. No manual intervention needed.
 
+**Orchestration awareness:** The smart router automatically disables itself during `/plan` orchestration (checks `globalThis.__phiOrchestrationActive`), preventing conflicts with the orchestrator's model assignments.
+
 **Configuration:** Set model assignments in `~/.phi/agent/routing.json` (created by `/phi-init`).
 
 **Command:** `/routing` — show current routing configuration, test routes, enable/disable.
@@ -200,11 +202,11 @@ Event-driven multi-model orchestration. Each phase runs with its own model and a
 
 For each phase, the orchestrator:
 1. **Switches model** via `pi.setModel()` (from `routing.json`)
-2. **Injects agent system prompt** via `before_agent_start` event
+2. **Injects agent system prompt** via `before_agent_start` event handler
 3. **Restricts tools** via `setActiveTools()` (explore = read-only, code = full write access)
-4. **Sends task instruction** to the LLM
-5. **Detects completion** via `output` event + `isIdle()` polling
-6. **Chains to next phase** automatically
+4. **Sends task instruction** via `sendUserMessage()` (waits for idle first)
+5. **Detects completion** via debounced `output` event + `isIdle()` polling (2s delay, then 500ms checks)
+6. **Chains to next phase** automatically — smart router disabled during orchestration
 
 **Commands:**
 - `/plan <description>` — Full workflow: 5 sequential agent phases with model switching
