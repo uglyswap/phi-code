@@ -438,7 +438,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	// ─── /plan Command — Full workflow ───────────────────────────────
 
 	pi.registerCommand("plan", {
-		description: "Plan AND execute a project — describe what to build and the LLM does it all",
+		description: "Plan AND execute a project with agents — describe what to build",
 		handler: async (args, ctx) => {
 			const description = args.trim();
 
@@ -459,28 +459,34 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			await ensurePlansDir();
 			const ts = timestamp();
 			const specFile = `spec-${ts}.md`;
-			const todoFile = `todo-${ts}.md`;
+			await writeFile(join(plansDir, specFile), `# ${description}\n\n**Created:** ${new Date().toLocaleString()}\n`, "utf-8");
 
-			const spec = `# Project Plan\n\n**Created:** ${new Date().toLocaleString()}\n\n## Description\n\n${description}\n`;
-			await writeFile(join(plansDir, specFile), spec, "utf-8");
-			await writeFile(join(plansDir, todoFile), `# Todo\n\n(LLM will execute directly)\n`, "utf-8");
+			ctx.ui.notify(`📋 Plan created. Executing with agents...`, "info");
 
-			ctx.ui.notify(`📋 Plan created: \`${specFile}\`\n🚀 Executing project now...`, "info");
+			// Load agent definitions for system prompts
+			const agentDefs = loadAgentDefs();
+			const phases = [
+				{ agent: "explore", label: "🔍 Exploring", instruction: `Analyze the project requirements and existing codebase. Identify what exists, what's needed, and any constraints.\n\nProject: ${description}` },
+				{ agent: "plan", label: "📐 Planning", instruction: `Design the architecture, file structure, and implementation approach.\n\nProject: ${description}` },
+				{ agent: "code", label: "💻 Coding", instruction: `Implement the complete project. Create ALL necessary files with production-quality code.\n\nProject: ${description}\n\nCreate every file needed. Do NOT leave placeholders or TODOs. Complete implementation.` },
+				{ agent: "test", label: "🧪 Testing", instruction: `Test the implementation. Run the code, check for errors, verify it works.\n\nProject: ${description}` },
+				{ agent: "review", label: "🔍 Reviewing", instruction: `Review code quality, security, and performance. Fix any issues found.\n\nProject: ${description}` },
+			];
 
-			// Paste the structured prompt into the editor so the user just presses Enter
-			// This avoids sendUserMessage which fails with "Agent is already processing"
-			const prompt = `Build this project completely. Create all necessary files, implement all features, test everything.
+			// Execute each phase sequentially using sendUserMessage + waitForIdle
+			for (const phase of phases) {
+				const agentDef = agentDefs.get(phase.agent);
+				const systemPromptNote = agentDef?.systemPrompt
+					? `\n\n[Agent: ${phase.agent}] ${agentDef.systemPrompt.slice(0, 200)}`
+					: "";
 
-## Project
-${description}
+				ctx.ui.notify(`\n${phase.label} (agent: ${phase.agent})...`, "info");
 
-## Rules
-- Create ALL files needed for a complete, working project
-- Use best practices and clean code
-- Test that everything works (run the code if possible)
-- Report what you created when done`;
+				pi.sendUserMessage(phase.instruction + systemPromptNote);
+				await ctx.waitForIdle();
+			}
 
-			ctx.ui.pasteToEditor(prompt);
+			ctx.ui.notify(`\n✅ **Project complete!** Plan: \`${specFile}\``, "info");
 		},
 	});
 
