@@ -525,9 +525,9 @@ export class InteractiveMode {
 		const cwdBasename = path.basename(process.cwd());
 		const sessionName = this.sessionManager.getSessionName();
 		if (sessionName) {
-			this.ui.terminal.setTitle(`φ - ${sessionName} - ${cwdBasename}`);
+			this.ui.terminal.setTitle(`φ PHI Code - ${sessionName} - ${cwdBasename}`);
 		} else {
-			this.ui.terminal.setTitle(`φ - ${cwdBasename}`);
+			this.ui.terminal.setTitle(`φ PHI Code - ${cwdBasename}`);
 		}
 	}
 

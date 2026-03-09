@@ -548,7 +548,12 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
 **Step 4:** Write your findings to \`.phi/plans/explore-${ts}.md\`
 
-After your analysis, use \`ontology_add\` to save key project entities (files, modules, dependencies) to the knowledge graph.
+**Knowledge Graph:**
+After your analysis, use \`ontology_add\` to save key project entities AND their relations:
+- Add entities for: the project, each major library, each module/directory
+- Add relations between them: "uses", "contains", "depends_on", "implements"
+- Example: entity "finance-tracker" (type: Project) → relation "uses" → entity "ink" (type: Library)
+- ALWAYS create relations — entities without relations are useless
 
 **Format for the project brief:**
 \`\`\`markdown
@@ -578,6 +583,11 @@ After your analysis, use \`ontology_add\` to save key project entities (files, m
 				agent: loadAgentDef("plan"),
 				instruction: `You are the PLAN agent. Design the architecture and create a detailed task list.
 
+**Context Retrieval:**
+1. Use \`ontology_query\` to retrieve all entities and relations from Phase 1
+2. Use \`memory_search\` with project-relevant keywords to find existing notes
+3. Use this knowledge to inform your plan
+
 **Project Request:** ${description}
 
 **Step 1:** Read \`.phi/plans/brief-*.md\` (created by the explore phase)
@@ -604,12 +614,19 @@ After your analysis, use \`ontology_add\` to save key project entities (files, m
 ## Task 2: [Task Title] [agent-type]
 - [ ] Implementation details
 - Dependencies: Task 1
-\`\`\``,
+\`\`\`
+
+Before finishing, use \`memory_write\` to save your plan summary with relevant tags for future reference.`,
 			},
 			{
 				key: "code", label: "💻 Phase 3 — CODE", model: code.preferred, fallback: code.fallback,
 				agent: loadAgentDef("code"),
 				instruction: `You are the CODE agent. Implement the complete project.
+
+**Context Retrieval:**
+1. Use \`memory_search\` with project keywords to find notes from previous phases
+2. Use \`ontology_query\` to understand the project structure and dependencies
+3. Use this context to guide implementation
 
 **Project Request:** ${description}
 
@@ -639,12 +656,24 @@ After your analysis, use \`ontology_add\` to save key project entities (files, m
 
 ## Implementation Notes
 [Any important decisions or changes made]
-\`\`\``,
+\`\`\`
+
+After implementation, use \`memory_write\` to save a summary of what was built, patterns used, and any issues encountered.
+
+**CRITICAL RULES:**
+- Write ONE file per tool call — NEVER combine multiple files in a single response
+- Keep each file under 500 lines. If longer, split into modules
+- After writing each file, verify it exists with \`ls\` before proceeding`,
 			},
 			{
 				key: "test", label: "🧪 Phase 4 — TEST", model: test.preferred, fallback: test.fallback,
 				agent: loadAgentDef("test"),
 				instruction: `You are the TEST agent. Verify the implementation.
+
+**Context Retrieval:**
+1. Use \`memory_search\` to find implementation notes from the CODE phase
+2. Use \`ontology_query\` to understand the project architecture
+3. Use this context to focus your testing
 
 **Project Request:** ${description}
 
@@ -677,12 +706,19 @@ After your analysis, use \`ontology_add\` to save key project entities (files, m
 **CRITICAL RULES:**
 - NEVER run a server with \`&\` without cleanup. Always use: \`timeout 15 bash -c 'node src/index.js & PID=$!; sleep 2; curl ...; kill $PID'\`
 - ALWAYS kill background processes after testing
-- If a test hangs, use \`timeout\` to prevent deadlock`,
+- If a test hangs, use \`timeout\` to prevent deadlock
+
+After testing, use \`memory_write\` to save test results, bugs found, and lessons learned.`,
 			},
 			{
 				key: "review", label: "🔍 Phase 5 — REVIEW", model: review.preferred, fallback: review.fallback,
 				agent: loadAgentDef("review"),
 				instruction: `You are the REVIEW agent. Final quality review.
+
+**Context Retrieval:**
+1. Use \`memory_search\` to find all notes from previous phases (explore, plan, code, test)
+2. Use \`ontology_query\` to understand the full project architecture
+3. Review all \`.phi/plans/*.md\` files for complete context
 
 **Project Request:** ${description}
 
@@ -723,7 +759,11 @@ After your analysis, use \`ontology_add\` to save key project entities (files, m
 ✅ Project ready for production / ❌ Issues need resolution
 \`\`\`
 
-After your review, use \`memory_write\` to save key lessons learned, patterns found, and important decisions for future reference.`,
+After your review, use \`memory_write\` to save:
+- Key lessons learned about this project type
+- Patterns that worked well
+- Common mistakes to avoid in future projects
+Tag the note with relevant keywords for vector search.`,
 			},
 		];
 	}
