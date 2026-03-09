@@ -548,6 +548,8 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
 **Step 4:** Write your findings to \`.phi/plans/explore-${ts}.md\`
 
+After your analysis, use \`ontology_add\` to save key project entities (files, modules, dependencies) to the knowledge graph.
+
 **Format for the project brief:**
 \`\`\`markdown
 ## Project Brief
@@ -670,7 +672,12 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
 ## Final Status
 ✅ All tests pass / ❌ Issues remain
-\`\`\``,
+\`\`\`
+
+**CRITICAL RULES:**
+- NEVER run a server with \`&\` without cleanup. Always use: \`timeout 15 bash -c 'node src/index.js & PID=$!; sleep 2; curl ...; kill $PID'\`
+- ALWAYS kill background processes after testing
+- If a test hangs, use \`timeout\` to prevent deadlock`,
 			},
 			{
 				key: "review", label: "🔍 Phase 5 — REVIEW", model: review.preferred, fallback: review.fallback,
@@ -714,7 +721,9 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
 ## Final Verdict
 ✅ Project ready for production / ❌ Issues need resolution
-\`\`\``,
+\`\`\`
+
+After your review, use \`memory_write\` to save key lessons learned, patterns found, and important decisions for future reference.`,
 			},
 		];
 	}
@@ -748,8 +757,11 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			activeAgentPrompt = phase.agent.systemPrompt;
 			// Restrict tools to agent's allowed tools
 			if (phase.agent.tools.length > 0) {
-				activeAgentTools = phase.agent.tools;
-				pi.setActiveTools(phase.agent.tools);
+				// Always include memory tools in orchestration phases
+				const memoryTools = ['memory_search', 'memory_write', 'memory_read', 'ontology_add', 'ontology_query'];
+				const agentTools = [...phase.agent.tools, ...memoryTools.filter(t => !phase.agent.tools.includes(t))];
+				activeAgentTools = agentTools;
+				pi.setActiveTools(agentTools);
 			}
 		} else {
 			activeAgentPrompt = null;
@@ -816,8 +828,24 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	// Previous approach used "output" event which DOES NOT EXIST in Pi.
 	// That's why phases 2-5 never executed.
 
-	pi.on("agent_end", async (_event, ctx) => {
+	pi.on("agent_end", async (event, ctx) => {
 		if (!orchestrationActive || !phasePending) return;
+
+		// Capture last assistant message for context passing
+		const messages = event.messages || [];
+		const lastAssistant = messages.filter(m => m.role === 'assistant').pop();
+		let lastOutput = '';
+		if (lastAssistant?.content) {
+			const textParts = Array.isArray(lastAssistant.content) 
+				? lastAssistant.content.filter((c: any) => c.type === 'text').map((c: any) => c.text)
+				: [String(lastAssistant.content)];
+			lastOutput = textParts.join('\n').slice(0, 3000);
+		}
+
+		// Inject previous phase output into next phase
+		if (lastOutput && phaseQueue.length > 0) {
+			phaseQueue[0].instruction += `\n\n**Previous phase output (summary):**\n${lastOutput}`;
+		}
 
 		// Phase complete — chain to next
 		phasePending = false;

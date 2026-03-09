@@ -414,7 +414,7 @@ export class InteractiveMode {
 				"  ╚═╝     ╚═╝  ╚═╝╚═╝",
 			];
 			const asciiLogo = asciiLines.map(line => applyGradient(line)).join("\n");
-			const phiLabel = applyGradient("Φ " + APP_NAME.toUpperCase());
+			const phiLabel = applyGradient("φ " + APP_NAME.toUpperCase());
 			const logo = asciiLogo + "\n  " + phiLabel + theme.fg("dim", ` v${this.version}`) + theme.fg("dim", " — The Ultimate Coding Agent");
 
 			// Show keyboard shortcuts only when not quiet
@@ -525,9 +525,9 @@ export class InteractiveMode {
 		const cwdBasename = path.basename(process.cwd());
 		const sessionName = this.sessionManager.getSessionName();
 		if (sessionName) {
-			this.ui.terminal.setTitle(`Φ - ${sessionName} - ${cwdBasename}`);
+			this.ui.terminal.setTitle(`φ - ${sessionName} - ${cwdBasename}`);
 		} else {
-			this.ui.terminal.setTitle(`Φ - ${cwdBasename}`);
+			this.ui.terminal.setTitle(`φ - ${cwdBasename}`);
 		}
 	}
 

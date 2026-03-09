@@ -1,7 +1,7 @@
 ---
 name: plan
 description: Creates detailed implementation plans grounded in the actual codebase.
-tools: read, grep, find, ls, bash
+tools: read, write, grep, find, ls, bash, memory_search, memory_write, ontology_add
 model: default
 ---
 

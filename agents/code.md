@@ -1,7 +1,7 @@
 ---
 name: code
 description: Writes and modifies code. Full tool access for implementation.
-tools: read, write, edit, bash, grep, find, ls
+tools: read, write, edit, bash, grep, find, ls, memory_search, memory_write, ontology_add
 model: default
 ---
 
