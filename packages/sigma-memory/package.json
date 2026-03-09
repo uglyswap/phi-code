@@ -1,6 +1,6 @@
 {
 	"name": "sigma-memory",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Persistent memory for Phi Code — embedded vector search + Ontology graph + Markdown notes",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
