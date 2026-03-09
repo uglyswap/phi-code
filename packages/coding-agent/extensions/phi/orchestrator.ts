@@ -707,6 +707,12 @@ After implementation, use \`memory_write\` to save a summary of what was built, 
 - NEVER run a server with \`&\` without cleanup. Always use: \`timeout 15 bash -c 'node src/index.js & PID=$!; sleep 2; curl ...; kill $PID'\`
 - ALWAYS kill background processes after testing
 - If a test hangs, use \`timeout\` to prevent deadlock
+- NEVER put tool calls inside thinking blocks. Always use the proper JSON tool call format
+- NEVER modify source code permanently for testing. Use environment variables: \`PORT=3001 node server.js\` instead of editing files
+- NEVER create .env files with fake credentials. Use inline env vars: \`API_KEY=test node server.js\`
+- For port conflicts on Windows, use: \`netstat -ano | findstr :PORT\` and \`taskkill /PID <pid> /F\`
+- For port conflicts on Linux/Mac, use: \`lsof -ti:PORT | xargs kill -9\`
+- Always clean up after tests: kill background processes, remove temp files
 
 After testing, use \`memory_write\` to save test results, bugs found, and lessons learned.`,
 			},

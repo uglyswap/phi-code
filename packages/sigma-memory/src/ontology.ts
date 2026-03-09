@@ -164,10 +164,16 @@ export class OntologyManager {
   }
 
   /**
-   * Recherche par type/nom
+   * Recherche par id/type/nom
    */
-  findEntity(query: { type?: string; name?: string }): OntologyEntity[] {
+  findEntity(query: { id?: string; type?: string; name?: string }): OntologyEntity[] {
     this.loadGraph();
+
+    // Direct ID lookup - return exact match
+    if (query.id) {
+      const entity = this.entities.get(query.id);
+      return entity ? [entity] : [];
+    }
 
     const results: OntologyEntity[] = [];
     
