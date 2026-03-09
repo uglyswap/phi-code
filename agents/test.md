@@ -1,7 +1,7 @@
 ---
 name: test
 description: QA specialist. Writes tests, runs them, validates implementations.
-tools: read, write, edit, bash, grep, find, ls
+tools: read, write, edit, bash, grep, find, ls, memory_search, memory_write, ontology_add
 model: default
 ---
 

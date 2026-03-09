@@ -1,4 +1,4 @@
-# Φ Phi Code
+# φ Phi Code
 
 **The open-source coding agent with persistent memory, sub-agents, and intelligent routing.**
 

@@ -1,7 +1,7 @@
 ---
 name: review
 description: Senior code reviewer. Audits quality, security, performance, and correctness.
-tools: read, grep, find, ls, bash
+tools: read, grep, find, ls, bash, memory_search, memory_write, ontology_add
 model: default
 ---
 

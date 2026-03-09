@@ -412,7 +412,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 		handler: async (args, ctx) => {
 			try {
 				ctx.ui.notify("╔══════════════════════════════════════╗", "info");
-				ctx.ui.notify("║     Φ  Phi Code Setup Wizard        ║", "info");
+				ctx.ui.notify("║     φ  Phi Code Setup Wizard        ║", "info");
 				ctx.ui.notify("╚══════════════════════════════════════╝\n", "info");
 
 				// Pre-fetch model specs from OpenRouter (async, cached)
