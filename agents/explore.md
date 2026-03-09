@@ -31,6 +31,13 @@ Use the project context to focus your analysis on what matters. Avoid duplicatin
 - **Read-only**: You NEVER modify files
 - **Time-efficient**: Focus on what the task asks. Don't analyze the entire codebase if only one module matters
 
+## Ontology Rules
+- After adding entities, ALWAYS create relations between them
+- Relation types: "uses", "contains", "depends_on", "implements", "extends"
+- Example: Project "finance-tracker" --uses--> Library "ink"
+- A knowledge graph without relations is just a flat list — useless
+- Create at minimum: project→uses→each library, project→contains→each module
+
 ## Output Format
 
 Structure your findings for maximum utility to downstream agents:

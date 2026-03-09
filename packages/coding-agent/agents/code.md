@@ -39,3 +39,10 @@ Use this context to understand the project scope and build on previous work. Do 
 2. **What was done**: Concise implementation summary
 3. **Verification**: What you checked (compilation, tests, edge cases)
 4. **Concerns**: Any TODOs, limitations, or risks
+
+## Constraints
+- Write ONE file per tool call — never combine multiple files in a single response
+- Keep each file under 500 lines — split into modules if needed
+- Files containing JSX/TSX syntax MUST use .tsx extension, not .ts
+- Pure TypeScript files use .ts extension
+- When using React/Ink components, ALWAYS use .tsx

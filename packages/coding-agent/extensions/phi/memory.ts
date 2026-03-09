@@ -254,15 +254,38 @@ export default function memoryExtension(pi: ExtensionAPI) {
 					if (!p.from || !p.to || !p.relationType) {
 						return { content: [{ type: "text", text: "Relation requires 'from', 'to', and 'relationType'" }], isError: true };
 					}
+					
+					// Try finding source entity by ID first, then by name
+					let sourceEntity = sigmaMemory.ontology.findEntity({ id: p.from })[0];
+					if (!sourceEntity) {
+						// Try finding by name (case-insensitive)
+						const allEntities = sigmaMemory.ontology.findEntity({});
+						sourceEntity = allEntities.find(e => e.name.toLowerCase() === p.from.toLowerCase());
+						if (!sourceEntity) {
+							return { content: [{ type: "text", text: `Source entity not found: ${p.from}` }], isError: true };
+						}
+					}
+					
+					// Try finding target entity by ID first, then by name
+					let targetEntity = sigmaMemory.ontology.findEntity({ id: p.to })[0];
+					if (!targetEntity) {
+						// Try finding by name (case-insensitive)
+						const allEntities = sigmaMemory.ontology.findEntity({});
+						targetEntity = allEntities.find(e => e.name.toLowerCase() === p.to.toLowerCase());
+						if (!targetEntity) {
+							return { content: [{ type: "text", text: `Target entity not found: ${p.to}` }], isError: true };
+						}
+					}
+					
 					const id = sigmaMemory.ontology.addRelation({
-						from: p.from,
-						to: p.to,
+						from: sourceEntity.id,
+						to: targetEntity.id,
 						type: p.relationType,
 						properties: p.properties || {},
 					});
 					return {
-						content: [{ type: "text", text: `Relation added: \`${p.from}\` → **${p.relationType}** → \`${p.to}\` — ID: \`${id}\`` }],
-						details: { id, from: p.from, to: p.to, type: p.relationType },
+						content: [{ type: "text", text: `Relation added: \`${sourceEntity.name}\` → **${p.relationType}** → \`${targetEntity.name}\` — ID: \`${id}\`` }],
+						details: { id, from: sourceEntity.id, to: targetEntity.id, type: p.relationType },
 					};
 				}
 				return { content: [{ type: "text", text: "Type must be 'entity' or 'relation'" }], isError: true };
