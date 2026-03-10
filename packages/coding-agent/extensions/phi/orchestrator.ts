@@ -471,6 +471,10 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	let activeAgentTools: string[] | null = null;
 	let savedTools: string[] | null = null;
 	let phasePending = false; // true while waiting for a phase to complete
+	let phaseTimeoutId: ReturnType<typeof setTimeout> | null = null;
+	const MAX_PHASE_DURATION_MS = 10 * 60 * 1000; // 10 minutes per phase
+	const MAX_TOOL_CALLS_PER_PHASE = 60; // Safety limit
+	let phaseStartTime: number | null = null;
 
 	/**
 	 * Parse agent .md file with YAML frontmatter
@@ -541,6 +545,9 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 **Project Request:** ${description}
 
 **Your tasks:**
+
+**Parallelization:** When making multiple tool calls that don't depend on each other (e.g., memory_search + ontology_query, or reading 2+ files), call them IN PARALLEL in the same response. This is faster.
+
 1. Call \`memory_search\` with project-relevant keywords (MANDATORY)
 2. List all existing files and read key ones
 3. Identify tech stack, patterns, and constraints
@@ -555,6 +562,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 **LAST ACTION (MANDATORY):** Call \`memory_write\` to save your exploration findings for downstream agents.
 
 **Knowledge Graph:**
+// TODO: ontology_batch_add for reducing API calls (currently single-item only)
 After your analysis, use \`ontology_add\` to save key project entities AND their relations:
 - Add entities for: the project, each major library, each module/directory
 - Add relations between them: "uses", "contains", "depends_on", "implements"
@@ -721,6 +729,8 @@ After implementation, use \`memory_write\` to save a summary of what was built, 
 - On Linux/Mac fallback: \`lsof -ti:PORT | xargs kill -9\`
 - Always clean up after tests: kill background processes, remove temp files
 
+**Anti-loop rule:** If the SAME test fails 3 times in a row with the same error after your fixes, STOP trying to fix it. Write the failure in your test report as "UNRESOLVED" and move on. Do not waste more than 3 iterations on the same issue.
+
 After testing, use \`memory_write\` to save test results, bugs found, and lessons learned.` + runtimeInfo,
 			},
 			{
@@ -780,7 +790,12 @@ After your review, use \`memory_write\` ONCE to save:
 - Common mistakes to avoid in future projects
 Tag the note with relevant keywords for vector search.
 
-**Important:** Write lessons-learned ONCE. Do not call memory_write twice with the same filename or duplicate content.` + runtimeInfo,
+**Important:** Write lessons-learned ONCE. Do not call memory_write twice with the same filename or duplicate content.
+
+**Ontology enrichment:** After your review, use \`ontology_add\` to save your key findings:
+- Add a "review-report" entity with type "Document"
+- Add relations to the project: "reviews" → project, quality score as entity property
+- Save any new architectural decisions or patterns discovered` + runtimeInfo,
 			},
 		];
 	}
@@ -852,6 +867,16 @@ Tag the note with relevant keywords for vector search.
 			setOrchestrationActive(false);
 			phasePending = false;
 			deactivateAgent();
+			if (phaseTimeoutId) { clearTimeout(phaseTimeoutId); phaseTimeoutId = null; }
+			// Generate global final summary
+			const totalPhases = 5; // always 5
+			const elapsed = phaseStartTime ? Math.round((Date.now() - phaseStartTime) / 1000) : 0;
+			const minutes = Math.floor(elapsed / 60);
+			const seconds = elapsed % 60;
+			ctx.ui.notify(`\n📊 **Orchestration Summary**\n` +
+				`  Phases: ${totalPhases}/5 completed\n` +
+				`  Duration: ${minutes}m ${seconds}s\n` +
+				`  Check \`.phi/plans/\` for all reports`, "info");
 			try {
 				ctx.ui.notify(`\n✅ **All 5 phases complete!**`, "info");
 			} catch {
@@ -870,6 +895,15 @@ Tag the note with relevant keywords for vector search.
 			ctx.ui.notify(`\n${phase.label} → \`${modelId}\` (agent: ${agentName})`, "info");
 			// Small delay to let the model switch settle, then send instruction
 			setTimeout(() => pi.sendUserMessage(phase.instruction), 500);
+			// Set phase timeout — abort if phase takes too long
+			if (phaseTimeoutId) clearTimeout(phaseTimeoutId);
+			phaseTimeoutId = setTimeout(() => {
+				if (orchestrationActive && phasePending) {
+					ctx.ui.notify(`\n⏰ **Phase timed out** (${MAX_PHASE_DURATION_MS / 60000} min limit). Skipping to next phase.`, "warning");
+					phasePending = false;
+					sendNextPhase(ctx);
+				}
+			}, MAX_PHASE_DURATION_MS);
 		});
 	}
 
@@ -902,6 +936,9 @@ Tag the note with relevant keywords for vector search.
 			return;
 		}
 
+		// Clear phase timeout on normal completion
+		if (phaseTimeoutId) { clearTimeout(phaseTimeoutId); phaseTimeoutId = null; }
+
 		// Build a structured summary of what happened in this phase
 		// Instead of raw LLM text, extract concrete actions: files created/modified,
 		// errors encountered, test results. This gives the next phase actionable context.
@@ -930,8 +967,12 @@ Tag the note with relevant keywords for vector search.
 					const match = content.match(/edited (.+)/) || content.match(/in (.+)/);
 					if (match) filesEdited.push(match[1]);
 				}
-				// Track errors
-				if (content.includes('ERR:') || content.includes('Error:') || content.includes('FAIL')) {
+				// Track errors — but filter out edit retries (old_text mismatch = normal retry, not error)
+				if ((content.includes('ERR:') || content.includes('Error:') || content.includes('FAIL'))
+					&& !content.includes('old text must match')
+					&& !content.includes('The old text')
+					&& !content.includes('oldText not found')
+					&& !content.includes('old_text not found')) {
 					const preview = content.slice(0, 150).replace(/\n/g, ' ');
 					errorsHit.push(`${name}: ${preview}`);
 				}
@@ -943,13 +984,42 @@ Tag the note with relevant keywords for vector search.
 			}
 		}
 
+		// Detect API errors (401, auth failures) — abort workflow if found
+		const hasAuthError = messages.some((msg: any) => {
+			const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || '');
+			return content.includes('401') && (content.includes('invalid access token') || content.includes('token expired') || content.includes('Unauthorized'));
+		});
+		if (hasAuthError || (toolCallCount === 0 && messages.length > 0)) {
+			const errorMsg = hasAuthError ? 'API authentication error (401)' : 'Phase produced 0 tool calls — possible API or model error';
+			ctx.ui.notify(`\n❌ **Orchestrator aborted:** ${errorMsg}\nCheck your API key and model configuration.`, "error");
+			setOrchestrationActive(false);
+			phasePending = false;
+			deactivateAgent();
+			if (phaseTimeoutId) { clearTimeout(phaseTimeoutId); phaseTimeoutId = null; }
+			return;
+		}
+
 		// Build the summary
 		const summaryParts: string[] = [];
 		summaryParts.push(`Tool calls: ${toolCallCount}`);
+		// Anti-loop guard: warn if tool calls are excessive
+		if (toolCallCount > MAX_TOOL_CALLS_PER_PHASE) {
+			summaryParts.push(`⚠️ WARNING: Phase used ${toolCallCount} tool calls (limit: ${MAX_TOOL_CALLS_PER_PHASE}). Possible loop detected.`);
+		}
 		if (filesWritten.length > 0) summaryParts.push(`Files created/written: ${filesWritten.join(', ')}`);
 		if (filesEdited.length > 0) summaryParts.push(`Files edited: ${filesEdited.join(', ')}`);
 		if (testResults.length > 0) summaryParts.push(`Test results:\n${testResults.join('\n')}`);
 		if (errorsHit.length > 0) summaryParts.push(`Errors encountered: ${errorsHit.length}\n${errorsHit.slice(0, 5).join('\n')}`);
+
+		// Verify mandatory tool usage
+		const toolNames = messages
+			.filter((m: any) => m.role === 'tool' || m.role === 'function' || m.role === 'toolResult')
+			.map((m: any) => (m as any).name || (m as any).toolName || '');
+		const hasMemorySearch = toolNames.includes('memory_search');
+		const hasMemoryWrite = toolNames.includes('memory_write');
+		if (!hasMemorySearch) summaryParts.push(`⚠️ Phase did NOT call memory_search (mandatory)`);
+		if (!hasMemoryWrite) summaryParts.push(`⚠️ Phase did NOT call memory_write (mandatory)`);
+
 		const phaseSummary = summaryParts.join('\n');
 
 		// Inject structured summary into next phase
@@ -1005,6 +1075,8 @@ Tag the note with relevant keywords for vector search.
 			}
 			ctx.ui.notify("", "info");
 
+			// Record orchestration start time for final summary
+			phaseStartTime = Date.now();
 			// Switch model and activate agent for first phase
 			const modelId = await switchModelForPhase(firstPhase, ctx);
 			activateAgent(firstPhase, ctx);
