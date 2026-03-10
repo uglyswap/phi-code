@@ -46,3 +46,4 @@ Use this context to understand the project scope and build on previous work. Do 
 - Files containing JSX/TSX syntax MUST use .tsx extension, not .ts
 - Pure TypeScript files use .ts extension
 - When using React/Ink components, ALWAYS use .tsx
+- After writing ALL files, verify they exist with a single `find . -name '*.ts' -o -name '*.js' -o -name '*.html' -o -name '*.tsx' | sort`
