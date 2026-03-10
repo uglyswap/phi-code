@@ -33,6 +33,7 @@ Use implementation results to know which files were created/modified and what be
 - **Realistic assertions**: Test what matters, not trivial details
 - **Match conventions**: Use the project's test framework, directory structure, and naming patterns
 - **Clean test code**: Tests are documentation — use descriptive names that explain expected behavior
+- **Cross-platform**: Use `npx jest` (not `NODE_ENV=test jest`) — the latter fails on Windows. If you need env vars, use `npx cross-env NODE_ENV=test jest`
 
 ## Test Writing
 

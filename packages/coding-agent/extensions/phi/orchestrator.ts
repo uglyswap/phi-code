@@ -527,6 +527,8 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		const review = getModel("review");
 
 		const ts = timestamp();
+		// Inject runtime info so agents can adapt to the host OS
+		const runtimeInfo = `\n\nRuntime: ${process.platform} (${process.arch})`;
 
 		return [
 			{
@@ -534,19 +536,23 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 				agent: loadAgentDef("explore"),
 				instruction: `You are the EXPLORE agent. Analyze the project requirements and existing codebase.
 
+**FIRST ACTION (MANDATORY):** Call \`memory_search\` with project-relevant keywords to check for prior context.
+
 **Project Request:** ${description}
 
 **Your tasks:**
-1. List all existing files and read key ones
-2. Identify tech stack, patterns, and constraints
-3. Create a STRUCTURED PROJECT BRIEF in \`.phi/plans/brief-${ts}.md\`:
+1. Call \`memory_search\` with project-relevant keywords (MANDATORY)
+2. List all existing files and read key ones
+3. Identify tech stack, patterns, and constraints
+4. Create a STRUCTURED PROJECT BRIEF in \`.phi/plans/brief-${ts}.md\`:
    - Context: what exists now
    - Objective: what needs to be built
    - Requirements: specific features needed
    - Tech decisions: frameworks, patterns to use
    - Constraints: what to NOT break
+5. Write your findings to \`.phi/plans/explore-${ts}.md\`
 
-**Step 4:** Write your findings to \`.phi/plans/explore-${ts}.md\`
+**LAST ACTION (MANDATORY):** Call \`memory_write\` to save your exploration findings for downstream agents.
 
 **Knowledge Graph:**
 After your analysis, use \`ontology_add\` to save key project entities AND their relations:
@@ -576,7 +582,7 @@ After your analysis, use \`ontology_add\` to save key project entities AND their
 - Every function fully implemented
 - Follow existing patterns if codebase exists
 - [Any other specific constraints]
-\`\`\``,
+\`\`\`` + runtimeInfo,
 			},
 			{
 				key: "plan", label: "📐 Phase 2 — PLAN", model: plan.preferred, fallback: plan.fallback,
@@ -616,7 +622,7 @@ After your analysis, use \`ontology_add\` to save key project entities AND their
 - Dependencies: Task 1
 \`\`\`
 
-Before finishing, use \`memory_write\` to save your plan summary with relevant tags for future reference.`,
+Before finishing, use \`memory_write\` to save your plan summary with relevant tags for future reference.` + runtimeInfo,
 			},
 			{
 				key: "code", label: "💻 Phase 3 — CODE", model: code.preferred, fallback: code.fallback,
@@ -663,7 +669,7 @@ After implementation, use \`memory_write\` to save a summary of what was built, 
 **CRITICAL RULES:**
 - Write ONE file per tool call — NEVER combine multiple files in a single response
 - Keep each file under 500 lines. If longer, split into modules
-- After writing each file, verify it exists with \`ls\` before proceeding`,
+- After writing ALL files, verify they exist with a single \`find . -name '*.ts' -o -name '*.js' -o -name '*.html' | sort\`` + runtimeInfo,
 			},
 			{
 				key: "test", label: "🧪 Phase 4 — TEST", model: test.preferred, fallback: test.fallback,
@@ -710,20 +716,23 @@ After implementation, use \`memory_write\` to save a summary of what was built, 
 - NEVER put tool calls inside thinking blocks. Always use the proper JSON tool call format
 - NEVER modify source code permanently for testing. Use environment variables: \`PORT=3001 node server.js\` instead of editing files
 - NEVER create .env files with fake credentials. Use inline env vars: \`API_KEY=test node server.js\`
-- For port conflicts on Windows, use: \`netstat -ano | findstr :PORT\` and \`taskkill /PID <pid> /F\`
-- For port conflicts on Linux/Mac, use: \`lsof -ti:PORT | xargs kill -9\`
+- For port conflicts, prefer: \`npx kill-port PORT\` (cross-platform)
+- On Windows fallback: \`netstat -ano | findstr :PORT\` and \`taskkill /PID <pid> /F\`
+- On Linux/Mac fallback: \`lsof -ti:PORT | xargs kill -9\`
 - Always clean up after tests: kill background processes, remove temp files
 
-After testing, use \`memory_write\` to save test results, bugs found, and lessons learned.`,
+After testing, use \`memory_write\` to save test results, bugs found, and lessons learned.` + runtimeInfo,
 			},
 			{
 				key: "review", label: "🔍 Phase 5 — REVIEW", model: review.preferred, fallback: review.fallback,
 				agent: loadAgentDef("review"),
 				instruction: `You are the REVIEW agent. Final quality review.
 
+**FIRST ACTIONS (MANDATORY — do these before anything else):**
+1. Call \`memory_search\` to find all notes from previous phases (explore, plan, code, test)
+2. Call \`ontology_query\` to understand the full project architecture and entity relationships
+
 **Context Retrieval:**
-1. Use \`memory_search\` to find all notes from previous phases (explore, plan, code, test)
-2. Use \`ontology_query\` to understand the full project architecture
 3. Review all \`.phi/plans/*.md\` files for complete context
 
 **Project Request:** ${description}
@@ -765,11 +774,13 @@ After testing, use \`memory_write\` to save test results, bugs found, and lesson
 ✅ Project ready for production / ❌ Issues need resolution
 \`\`\`
 
-After your review, use \`memory_write\` to save:
+After your review, use \`memory_write\` ONCE to save:
 - Key lessons learned about this project type
 - Patterns that worked well
 - Common mistakes to avoid in future projects
-Tag the note with relevant keywords for vector search.`,
+Tag the note with relevant keywords for vector search.
+
+**Important:** Write lessons-learned ONCE. Do not call memory_write twice with the same filename or duplicate content.` + runtimeInfo,
 			},
 		];
 	}
@@ -837,10 +848,16 @@ Tag the note with relevant keywords for vector search.`,
 
 	function sendNextPhase(ctx: any) {
 		if (phaseQueue.length === 0) {
+			// All phases done — clean up and notify
 			setOrchestrationActive(false);
 			phasePending = false;
 			deactivateAgent();
-			ctx.ui.notify(`\n✅ **All 5 phases complete!**`, "info");
+			try {
+				ctx.ui.notify(`\n✅ **All 5 phases complete!**`, "info");
+			} catch {
+				// Fallback: inject completion message into conversation stream
+				try { pi.sendUserMessage(`✅ All 5 phases complete! The project is ready for review.`); } catch { /* best effort */ }
+			}
 			return;
 		}
 
@@ -875,7 +892,15 @@ Tag the note with relevant keywords for vector search.`,
 	// That's why phases 2-5 never executed.
 
 	pi.on("agent_end", async (event, ctx) => {
-		if (!orchestrationActive || !phasePending) return;
+		if (!orchestrationActive) return;
+		// Allow completion even if phasePending was cleared by a duplicate event
+		if (!phasePending) {
+			// If queue is empty and orchestration is active, force completion
+			if (phaseQueue.length === 0) {
+				sendNextPhase(ctx);
+			}
+			return;
+		}
 
 		// Build a structured summary of what happened in this phase
 		// Instead of raw LLM text, extract concrete actions: files created/modified,
@@ -888,12 +913,13 @@ Tag the note with relevant keywords for vector search.`,
 		let toolCallCount = 0;
 
 		for (const msg of messages) {
-			if (msg.role === 'tool' || msg.role === 'function') {
+			// Pi uses role: "toolResult" instead of "tool"
+			if (msg.role === 'tool' || msg.role === 'function' || msg.role === 'toolResult') {
 				toolCallCount++;
 				const content = Array.isArray(msg.content)
 					? msg.content.map((c: any) => c.text || '').join('')
 					: String(msg.content || '');
-				const name = (msg as any).name || '';
+				const name = (msg as any).name || (msg as any).toolName || '';
 				// Track writes
 				if (name === 'write' && content.includes('Successfully wrote')) {
 					const match = content.match(/wrote \d+ bytes to (.+)/);
