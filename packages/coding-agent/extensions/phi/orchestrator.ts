@@ -877,16 +877,25 @@ Tag the note with relevant keywords for vector search.`,
 	pi.on("agent_end", async (event, ctx) => {
 		if (!orchestrationActive || !phasePending) return;
 
-		// Capture last assistant message for context passing
+		// Capture the most informative assistant message for context passing
+		// The last message is often trivial ("Good, file created."). Find the longest
+		// text-only assistant message instead — that's usually the real analysis/plan.
 		const messages = event.messages || [];
-		const lastAssistant = messages.filter(m => m.role === 'assistant').pop();
-		let lastOutput = '';
-		if (lastAssistant?.content) {
-			const textParts = Array.isArray(lastAssistant.content) 
-				? lastAssistant.content.filter((c: any) => c.type === 'text').map((c: any) => c.text)
-				: [String(lastAssistant.content)];
-			lastOutput = textParts.join('\n').slice(0, 3000);
+		const assistantMessages = messages.filter(m => m.role === 'assistant');
+		let bestOutput = '';
+		let bestLength = 0;
+		for (const msg of assistantMessages) {
+			if (!msg.content) continue;
+			const textParts = Array.isArray(msg.content)
+				? msg.content.filter((c: any) => c.type === 'text').map((c: any) => c.text)
+				: [String(msg.content)];
+			const combined = textParts.join('\n');
+			if (combined.length > bestLength) {
+				bestLength = combined.length;
+				bestOutput = combined;
+			}
 		}
+		const lastOutput = bestOutput.slice(0, 4000);
 
 		// Inject previous phase output into next phase
 		if (lastOutput && phaseQueue.length > 0) {
