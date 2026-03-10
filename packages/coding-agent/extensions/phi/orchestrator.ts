@@ -877,29 +877,58 @@ Tag the note with relevant keywords for vector search.`,
 	pi.on("agent_end", async (event, ctx) => {
 		if (!orchestrationActive || !phasePending) return;
 
-		// Capture the most informative assistant message for context passing
-		// The last message is often trivial ("Good, file created."). Find the longest
-		// text-only assistant message instead — that's usually the real analysis/plan.
+		// Build a structured summary of what happened in this phase
+		// Instead of raw LLM text, extract concrete actions: files created/modified,
+		// errors encountered, test results. This gives the next phase actionable context.
 		const messages = event.messages || [];
-		const assistantMessages = messages.filter(m => m.role === 'assistant');
-		let bestOutput = '';
-		let bestLength = 0;
-		for (const msg of assistantMessages) {
-			if (!msg.content) continue;
-			const textParts = Array.isArray(msg.content)
-				? msg.content.filter((c: any) => c.type === 'text').map((c: any) => c.text)
-				: [String(msg.content)];
-			const combined = textParts.join('\n');
-			if (combined.length > bestLength) {
-				bestLength = combined.length;
-				bestOutput = combined;
+		const filesWritten: string[] = [];
+		const filesEdited: string[] = [];
+		const errorsHit: string[] = [];
+		const testResults: string[] = [];
+		let toolCallCount = 0;
+
+		for (const msg of messages) {
+			if (msg.role === 'tool' || msg.role === 'function') {
+				toolCallCount++;
+				const content = Array.isArray(msg.content)
+					? msg.content.map((c: any) => c.text || '').join('')
+					: String(msg.content || '');
+				const name = (msg as any).name || '';
+				// Track writes
+				if (name === 'write' && content.includes('Successfully wrote')) {
+					const match = content.match(/wrote \d+ bytes to (.+)/);
+					if (match) filesWritten.push(match[1]);
+				}
+				// Track edits
+				if (name === 'edit' && !content.includes('ERR')) {
+					const match = content.match(/edited (.+)/) || content.match(/in (.+)/);
+					if (match) filesEdited.push(match[1]);
+				}
+				// Track errors
+				if (content.includes('ERR:') || content.includes('Error:') || content.includes('FAIL')) {
+					const preview = content.slice(0, 150).replace(/\n/g, ' ');
+					errorsHit.push(`${name}: ${preview}`);
+				}
+				// Track test results
+				if (content.includes('PASS') || content.includes('✅') || content.includes('✗') || content.includes('❌')) {
+					const lines = content.split('\n').filter(l => /PASS|FAIL|✅|❌|✗/.test(l));
+					testResults.push(...lines.slice(0, 10));
+				}
 			}
 		}
-		const lastOutput = bestOutput.slice(0, 4000);
 
-		// Inject previous phase output into next phase
-		if (lastOutput && phaseQueue.length > 0) {
-			phaseQueue[0].instruction += `\n\n**Previous phase output (summary):**\n${lastOutput}`;
+		// Build the summary
+		const summaryParts: string[] = [];
+		summaryParts.push(`Tool calls: ${toolCallCount}`);
+		if (filesWritten.length > 0) summaryParts.push(`Files created/written: ${filesWritten.join(', ')}`);
+		if (filesEdited.length > 0) summaryParts.push(`Files edited: ${filesEdited.join(', ')}`);
+		if (testResults.length > 0) summaryParts.push(`Test results:\n${testResults.join('\n')}`);
+		if (errorsHit.length > 0) summaryParts.push(`Errors encountered: ${errorsHit.length}\n${errorsHit.slice(0, 5).join('\n')}`);
+		const phaseSummary = summaryParts.join('\n');
+
+		// Inject structured summary into next phase
+		if (phaseSummary && phaseQueue.length > 0) {
+			phaseQueue[0].instruction += `\n\n**Previous phase summary:**\n${phaseSummary}`;
 		}
 
 		// Phase complete — chain to next
