@@ -286,7 +286,10 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
 		const ts = timestamp();
 		// Inject runtime info so agents can adapt to the host OS
-		const runtimeInfo = `\n\nRuntime: ${process.platform} (${process.arch})`;
+		const shellNote = process.platform === 'win32'
+			? `\nShell: bash (Git Bash), NOT cmd.exe. Always use Unix syntax: rm not del, test -f not if exist, / not \\\\`
+			: '';
+		const runtimeInfo = `\n\nRuntime: ${process.platform} (${process.arch})${shellNote}`;
 
 		return [
 			{
@@ -311,7 +314,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
    - Requirements: specific features needed
    - Tech decisions: frameworks, patterns to use
    - Constraints: what to NOT break
-5. Write your findings to \`.phi/plans/explore-${ts}.md\`
+5. **MANDATORY:** Write your findings to \`.phi/plans/explore-${ts}.md\` using the \`write\` tool. This file is READ by Phase 2 PLAN — if you skip it, the plan agent has no context. Do NOT skip this step.
 
 **LAST ACTION (MANDATORY):** Call \`memory_write\` to save your exploration findings for downstream agents.
 
@@ -428,6 +431,8 @@ Before finishing, use \`memory_write\` to save your plan summary with relevant t
 
 After implementation, use \`memory_write\` to save a summary of what was built, patterns used, and any issues encountered.
 
+**Ontology update:** Use \`ontology_add\` to update the project status (e.g., entity "implementation" type "Phase" with properties {status: "complete", files: "N"}) and add a relation to the project entity.
+
 **CRITICAL RULES:**
 - Write ONE file per tool call — NEVER combine multiple files in a single response
 - Keep each file under 500 lines. If longer, split into modules
@@ -485,7 +490,9 @@ After implementation, use \`memory_write\` to save a summary of what was built, 
 
 **Anti-loop rule:** If the SAME test fails 3 times in a row with the same error after your fixes, STOP trying to fix it. Write the failure in your test report as "UNRESOLVED" and move on. Do not waste more than 3 iterations on the same issue.
 
-After testing, use \`memory_write\` to save test results, bugs found, and lessons learned.` + runtimeInfo,
+After testing, use \`memory_write\` to save test results, bugs found, and lessons learned.
+
+**Ontology update:** Use \`ontology_add\` to update the project status (e.g., entity "test-results" type "Phase" with properties {passed: "N", failed: "M", coverage: "X%"}) and add a relation to the project entity.` + runtimeInfo,
 			},
 			{
 				key: "review", label: "🔍 Phase 5 — REVIEW", model: review.preferred, fallback: review.fallback,
