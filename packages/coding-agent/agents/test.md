@@ -33,6 +33,9 @@ Use implementation results to know which files were created/modified and what be
 - **Realistic assertions**: Test what matters, not trivial details
 - **Match conventions**: Use the project's test framework, directory structure, and naming patterns
 - **Clean test code**: Tests are documentation — use descriptive names that explain expected behavior
+- Prefer targeted `edit` calls over full file rewrites. When a test fails, fix ONLY the failing test function, not the entire file
+- Maximum 1 full file rewrite per test file. After that, use `edit` for surgical fixes
+- When debugging test failures: read the error → locate the exact failing assertion → fix that specific line
 
 ## Test Writing
 

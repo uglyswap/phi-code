@@ -43,9 +43,10 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		description: "Search for content in memory using unified search (notes + ontology + vector search)",
 		promptSnippet: "Search project memory (notes, ontology, vector search). ALWAYS call before answering questions about prior work, decisions, or project context.",
 		promptGuidelines: [
-			"Before answering questions about prior work, architecture, decisions, or project context: call memory_search first.",
+			"MANDATORY: Before starting ANY task, call memory_search with relevant keywords. This is not optional.",
 			"When starting work on a topic, search memory for existing notes and learnings.",
 			"After completing important work or learning something new, use memory_write to save it.",
+			"MANDATORY: After completing any significant work, call memory_write to save what you did and what you learned.",
 			"When a command fails or produces an unexpected error, document the error and fix in memory_write (self-improvement).",
 			"When the user corrects you, save the correction in memory_write so you never repeat the mistake.",
 			"After a significant debugging session, write a summary of root cause and solution to memory.",
