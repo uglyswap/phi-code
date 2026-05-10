@@ -4,12 +4,12 @@
  * Shows how to select a specific model and thinking level.
  */
 
-import { getModel } from "phi-code-ai";
-import { AuthStorage, createAgentSession, ModelRegistry } from "phi-code";
+import { getModel } from "@earendil-works/pi-ai";
+import { AuthStorage, createAgentSession, ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 // Set up auth storage and model registry
 const authStorage = AuthStorage.create();
-const modelRegistry = new ModelRegistry(authStorage);
+const modelRegistry = ModelRegistry.create(authStorage);
 
 // Option 1: Find a specific built-in model by provider/id
 const opus = getModel("anthropic", "claude-opus-4-5");

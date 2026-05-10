@@ -1,4 +1,4 @@
-import type { AgentState } from "phi-code-agent";
+import type { AgentState } from "@earendil-works/pi-agent-core";
 import { Store } from "../store.js";
 import type { SessionData, SessionMetadata, StoreConfig } from "../types.js";
 

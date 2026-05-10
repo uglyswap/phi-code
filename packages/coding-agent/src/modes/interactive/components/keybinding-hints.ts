@@ -2,65 +2,47 @@
  * Utilities for formatting keybinding hints in the UI.
  */
 
-import { type EditorAction, getEditorKeybindings, type KeyId } from "phi-code-tui";
-import type { AppAction, KeybindingsManager } from "../../../core/keybindings.js";
+import { getKeybindings, type Keybinding, type KeyId } from "@earendil-works/pi-tui";
 import { theme } from "../theme/theme.js";
 
-/**
- * Format keys array as display string (e.g., ["ctrl+c", "escape"] -> "ctrl+c/escape").
- */
-function formatKeys(keys: KeyId[]): string {
+export interface KeyTextFormatOptions {
+	capitalize?: boolean;
+}
+
+function formatKeyPart(part: string, options: KeyTextFormatOptions): string {
+	const displayPart = process.platform === "darwin" && part.toLowerCase() === "alt" ? "option" : part;
+	return options.capitalize ? displayPart.charAt(0).toUpperCase() + displayPart.slice(1) : displayPart;
+}
+
+export function formatKeyText(key: string, options: KeyTextFormatOptions = {}): string {
+	return key
+		.split("/")
+		.map((k) =>
+			k
+				.split("+")
+				.map((part) => formatKeyPart(part, options))
+				.join("+"),
+		)
+		.join("/");
+}
+
+function formatKeys(keys: KeyId[], options: KeyTextFormatOptions = {}): string {
 	if (keys.length === 0) return "";
-	if (keys.length === 1) return keys[0]!;
-	return keys.join("/");
+	return formatKeyText(keys.join("/"), options);
 }
 
-/**
- * Get display string for an editor action.
- */
-export function editorKey(action: EditorAction): string {
-	return formatKeys(getEditorKeybindings().getKeys(action));
+export function keyText(keybinding: Keybinding): string {
+	return formatKeys(getKeybindings().getKeys(keybinding));
 }
 
-/**
- * Get display string for an app action.
- */
-export function appKey(keybindings: KeybindingsManager, action: AppAction): string {
-	return formatKeys(keybindings.getKeys(action));
+export function keyDisplayText(keybinding: Keybinding): string {
+	return formatKeys(getKeybindings().getKeys(keybinding), { capitalize: true });
 }
 
-/**
- * Format a keybinding hint with consistent styling: dim key, muted description.
- * Looks up the key from editor keybindings automatically.
- *
- * @param action - Editor action name (e.g., "selectConfirm", "expandTools")
- * @param description - Description text (e.g., "to expand", "cancel")
- * @returns Formatted string with dim key and muted description
- */
-export function keyHint(action: EditorAction, description: string): string {
-	return theme.fg("dim", editorKey(action)) + theme.fg("muted", ` ${description}`);
+export function keyHint(keybinding: Keybinding, description: string): string {
+	return theme.fg("dim", keyText(keybinding)) + theme.fg("muted", ` ${description}`);
 }
 
-/**
- * Format a keybinding hint for app-level actions.
- * Requires the KeybindingsManager instance.
- *
- * @param keybindings - KeybindingsManager instance
- * @param action - App action name (e.g., "interrupt", "externalEditor")
- * @param description - Description text
- * @returns Formatted string with dim key and muted description
- */
-export function appKeyHint(keybindings: KeybindingsManager, action: AppAction, description: string): string {
-	return theme.fg("dim", appKey(keybindings, action)) + theme.fg("muted", ` ${description}`);
-}
-
-/**
- * Format a raw key string with description (for non-configurable keys like ↑↓).
- *
- * @param key - Raw key string
- * @param description - Description text
- * @returns Formatted string with dim key and muted description
- */
 export function rawKeyHint(key: string, description: string): string {
-	return theme.fg("dim", key) + theme.fg("muted", ` ${description}`);
+	return theme.fg("dim", formatKeyText(key)) + theme.fg("muted", ` ${description}`);
 }

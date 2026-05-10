@@ -1,7 +1,7 @@
+import type { Model } from "@earendil-works/pi-ai";
 import { icon } from "@mariozechner/mini-lit";
 import { Button } from "@mariozechner/mini-lit/dist/Button.js";
 import { Select, type SelectOption } from "@mariozechner/mini-lit/dist/Select.js";
-import type { Model } from "phi-code-ai";
 import { html, LitElement } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { createRef, ref } from "lit/directives/ref.js";
@@ -9,7 +9,7 @@ import { Brain, Loader2, Paperclip, Send, Sparkles, Square } from "lucide";
 import { type Attachment, loadAttachment } from "../utils/attachment-utils.js";
 import { i18n } from "../utils/i18n.js";
 import "./AttachmentTile.js";
-import type { ThinkingLevel } from "phi-code-agent";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
 @customElement("message-editor")
 export class MessageEditor extends LitElement {
@@ -60,6 +60,9 @@ export class MessageEditor extends LitElement {
 	};
 
 	private handleKeyDown = (e: KeyboardEvent) => {
+		// Ignore key events during IME composition (e.g. CJK input)
+		if (e.isComposing || e.key === "Process") return;
+
 		if (e.key === "Enter" && !e.shiftKey) {
 			e.preventDefault();
 			if (!this.isStreaming && !this.processingFiles && (this.value.trim() || this.attachments.length > 0)) {
@@ -333,7 +336,9 @@ export class MessageEditor extends LitElement {
 											{ value: "high", label: i18n("High"), icon: icon(Brain, "sm") },
 										] as SelectOption[],
 										onChange: (value: string) => {
-											this.onThinkingChange?.(value as "off" | "minimal" | "low" | "medium" | "high");
+											const level = value as "off" | "minimal" | "low" | "medium" | "high";
+											this.thinkingLevel = level;
+											this.onThinkingChange?.(level);
 										},
 										width: "80px",
 										size: "sm",
