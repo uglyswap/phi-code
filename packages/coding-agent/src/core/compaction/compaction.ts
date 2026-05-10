@@ -5,9 +5,9 @@
  * and after compaction the session is reloaded.
  */
 
-import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, Model, Usage } from "@earendil-works/pi-ai";
-import { completeSimple } from "@earendil-works/pi-ai";
+import type { AgentMessage, ThinkingLevel } from "phi-code-agent";
+import type { AssistantMessage, Model, Usage } from "phi-code-ai";
+import { completeSimple } from "phi-code-ai";
 import {
 	convertToLlm,
 	createBranchSummaryMessage,

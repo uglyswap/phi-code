@@ -10,7 +10,7 @@ import {
 	streamSimple,
 	type ToolResultMessage,
 	validateToolArguments,
-} from "@earendil-works/pi-ai";
+} from "phi-code-ai";
 import type {
 	AgentContext,
 	AgentEvent,
