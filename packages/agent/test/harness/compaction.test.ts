@@ -5,7 +5,7 @@ import {
 	type Model,
 	registerFauxProvider,
 	type Usage,
-} from "@earendil-works/pi-ai";
+} from "phi-code-ai";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	calculateContextTokens,

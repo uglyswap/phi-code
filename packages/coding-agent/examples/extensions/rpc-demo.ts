@@ -17,7 +17,7 @@
  * - setEditorText() - via /rpc-prefill command
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@phi-code-admin/phi-code";
 
 export default function (pi: ExtensionAPI) {
 	let turnCount = 0;

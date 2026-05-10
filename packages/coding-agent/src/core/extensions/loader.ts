@@ -42,28 +42,26 @@ import type {
 
 /** Modules available to extensions via virtualModules (for compiled Bun binary) */
 const VIRTUAL_MODULES: Record<string, unknown> = {
+	// typebox (new upstream name)
 	typebox: _bundledTypebox,
 	"typebox/compile": _bundledTypeboxCompile,
 	"typebox/value": _bundledTypeboxValue,
 	"@sinclair/typebox": _bundledTypebox,
 	"@sinclair/typebox/compile": _bundledTypeboxCompile,
 	"@sinclair/typebox/value": _bundledTypeboxValue,
+	// phi-code packages
+	"phi-code": _bundledPiCodingAgent,
+	"@phi-code-admin/phi-code": _bundledPiCodingAgent,
 	"phi-code-agent": _bundledPiAgentCore,
 	"phi-code-tui": _bundledPiTui,
 	"phi-code-ai": _bundledPiAi,
 	"phi-code-ai/oauth": _bundledPiAiOauth,
-	"phi-code": _bundledPiCodingAgent,
-	"@phi-code-admin/phi-code": _bundledPiCodingAgent,
-	"@earendil-works/pi-agent-core": _bundledPiAgentCore,
-	"@earendil-works/pi-tui": _bundledPiTui,
-	"@earendil-works/pi-ai": _bundledPiAi,
-	"@earendil-works/pi-ai/oauth": _bundledPiAiOauth,
-	"@earendil-works/pi-coding-agent": _bundledPiCodingAgent,
+	// Backwards compat aliases (upstream @mariozechner scope)
+	"@mariozechner/pi-coding-agent": _bundledPiCodingAgent,
 	"@mariozechner/pi-agent-core": _bundledPiAgentCore,
 	"@mariozechner/pi-tui": _bundledPiTui,
 	"@mariozechner/pi-ai": _bundledPiAi,
 	"@mariozechner/pi-ai/oauth": _bundledPiAiOauth,
-	"@mariozechner/pi-coding-agent": _bundledPiCodingAgent,
 };
 
 const require = createRequire(import.meta.url);
@@ -94,34 +92,26 @@ function getAliases(): Record<string, string> {
 	};
 
 	const piCodingAgentEntry = packageIndex;
-	const piAgentCoreEntry = resolveWorkspaceOrImport("agent/dist/index.js", "@earendil-works/pi-agent-core");
-	const piTuiEntry = resolveWorkspaceOrImport("tui/dist/index.js", "@earendil-works/pi-tui");
-	const piAiEntry = resolveWorkspaceOrImport("ai/dist/index.js", "@earendil-works/pi-ai");
-	const piAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "@earendil-works/pi-ai/oauth");
-
-	const piCodingAgentEntryPhi = packageIndex;
-	const piAgentCoreEntryPhi = resolveWorkspaceOrImport("agent/dist/index.js", "phi-code-agent");
-	const piTuiEntryPhi = resolveWorkspaceOrImport("tui/dist/index.js", "phi-code-tui");
-	const piAiEntryPhi = resolveWorkspaceOrImport("ai/dist/index.js", "phi-code-ai");
-	const piAiOauthEntryPhi = resolveWorkspaceOrImport("ai/dist/oauth.js", "phi-code-ai/oauth");
+	const piAgentCoreEntry = resolveWorkspaceOrImport("agent/dist/index.js", "phi-code-agent");
+	const piTuiEntry = resolveWorkspaceOrImport("tui/dist/index.js", "phi-code-tui");
+	const piAiEntry = resolveWorkspaceOrImport("ai/dist/index.js", "phi-code-ai");
+	const piAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "phi-code-ai/oauth");
 
 	_aliases = {
-		"phi-code": piCodingAgentEntryPhi,
-		"@phi-code-admin/phi-code": piCodingAgentEntryPhi,
-		"phi-code-agent": piAgentCoreEntryPhi,
-		"phi-code-tui": piTuiEntryPhi,
-		"phi-code-ai": piAiEntryPhi,
-		"phi-code-ai/oauth": piAiOauthEntryPhi,
-		"@earendil-works/pi-coding-agent": piCodingAgentEntry,
-		"@earendil-works/pi-agent-core": piAgentCoreEntry,
-		"@earendil-works/pi-tui": piTuiEntry,
-		"@earendil-works/pi-ai": piAiEntry,
-		"@earendil-works/pi-ai/oauth": piAiOauthEntry,
+		// phi-code packages
+		"phi-code": piCodingAgentEntry,
+		"@phi-code-admin/phi-code": piCodingAgentEntry,
+		"phi-code-agent": piAgentCoreEntry,
+		"phi-code-tui": piTuiEntry,
+		"phi-code-ai": piAiEntry,
+		"phi-code-ai/oauth": piAiOauthEntry,
+		// Backwards compat aliases (upstream @mariozechner scope)
 		"@mariozechner/pi-coding-agent": piCodingAgentEntry,
 		"@mariozechner/pi-agent-core": piAgentCoreEntry,
 		"@mariozechner/pi-tui": piTuiEntry,
 		"@mariozechner/pi-ai": piAiEntry,
 		"@mariozechner/pi-ai/oauth": piAiOauthEntry,
+		// typebox (new upstream name)
 		typebox: typeboxEntry,
 		"typebox/compile": typeboxCompileEntry,
 		"typebox/value": typeboxValueEntry,

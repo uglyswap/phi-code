@@ -11,7 +11,7 @@ import {
 	getAgentDir,
 	type PromptTemplate,
 	SessionManager,
-} from "@earendil-works/pi-coding-agent";
+} from "@phi-code-admin/phi-code";
 
 // Define custom templates
 const deployTemplate: PromptTemplate = {

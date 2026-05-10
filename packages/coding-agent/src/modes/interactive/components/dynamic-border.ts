@@ -1,4 +1,4 @@
-import type { Component } from "@earendil-works/pi-tui";
+import type { Component } from "phi-code-tui";
 import { theme } from "../theme/theme.js";
 
 /**

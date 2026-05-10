@@ -9,9 +9,9 @@
  * 2. Use /tools to open the tool selector
  */
 
-import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@earendil-works/pi-coding-agent";
-import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
-import { Container, type SettingItem, SettingsList } from "@earendil-works/pi-tui";
+import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@phi-code-admin/phi-code";
+import { getSettingsListTheme } from "@phi-code-admin/phi-code";
+import { Container, type SettingItem, SettingsList } from "phi-code-tui";
 
 // State persisted to session
 interface ToolsState {
