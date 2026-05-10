@@ -5,12 +5,12 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import * as readline from "node:readline";
-import type { AgentEvent, AgentMessage, ThinkingLevel } from "phi-code-agent";
-import type { ImageContent } from "phi-code-ai";
+import type { AgentEvent, AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import type { SessionStats } from "../../core/agent-session.js";
 import type { BashResult } from "../../core/bash-executor.js";
 import type { CompactionResult } from "../../core/compaction/index.js";
+import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
 import type { RpcCommand, RpcResponse, RpcSessionState, RpcSlashCommand } from "./rpc-types.js";
 
 // ============================================================================
@@ -53,7 +53,7 @@ export type RpcEventListener = (event: AgentEvent) => void;
 
 export class RpcClient {
 	private process: ChildProcess | null = null;
-	private rl: readline.Interface | null = null;
+	private stopReadingStdout: (() => void) | null = null;
 	private eventListeners: RpcEventListener[] = [];
 	private pendingRequests: Map<string, { resolve: (response: RpcResponse) => void; reject: (error: Error) => void }> =
 		new Map();
@@ -92,15 +92,11 @@ export class RpcClient {
 		// Collect stderr for debugging
 		this.process.stderr?.on("data", (data) => {
 			this.stderr += data.toString();
+			process.stderr.write(data);
 		});
 
-		// Set up line reader for stdout
-		this.rl = readline.createInterface({
-			input: this.process.stdout!,
-			terminal: false,
-		});
-
-		this.rl.on("line", (line) => {
+		// Set up strict JSONL reader for stdout.
+		this.stopReadingStdout = attachJsonlLineReader(this.process.stdout!, (line) => {
 			this.handleLine(line);
 		});
 
@@ -118,7 +114,8 @@ export class RpcClient {
 	async stop(): Promise<void> {
 		if (!this.process) return;
 
-		this.rl?.close();
+		this.stopReadingStdout?.();
+		this.stopReadingStdout = null;
 		this.process.kill("SIGTERM");
 
 		// Wait for process to exit
@@ -135,7 +132,6 @@ export class RpcClient {
 		});
 
 		this.process = null;
-		this.rl = null;
 		this.pendingRequests.clear();
 	}
 
@@ -347,6 +343,15 @@ export class RpcClient {
 	}
 
 	/**
+	 * Clone the current active branch into a new session.
+	 * @returns Object with `cancelled: true` if an extension cancelled the clone
+	 */
+	async clone(): Promise<{ cancelled: boolean }> {
+		const response = await this.send({ type: "clone" });
+		return this.getData(response);
+	}
+
+	/**
 	 * Get messages available for forking.
 	 */
 	async getForkMessages(): Promise<Array<{ entryId: string; text: string }>> {
@@ -493,7 +498,7 @@ export class RpcClient {
 				},
 			});
 
-			this.process!.stdin!.write(`${JSON.stringify(fullCommand)}\n`);
+			this.process!.stdin!.write(serializeJsonLine(fullCommand));
 		});
 	}
 

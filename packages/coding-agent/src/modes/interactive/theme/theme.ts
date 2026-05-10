@@ -1,11 +1,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { EditorTheme, MarkdownTheme, SelectListTheme } from "phi-code-tui";
-import { type Static, Type } from "@sinclair/typebox";
-import { TypeCompiler } from "@sinclair/typebox/compiler";
+import type { EditorTheme, MarkdownTheme, SelectListTheme } from "@earendil-works/pi-tui";
 import chalk from "chalk";
 import { highlight, supportsLanguage } from "cli-highlight";
+import { type Static, Type } from "typebox";
+import { Compile } from "typebox/compile";
 import { getCustomThemesDir, getThemesDir } from "../../../config.js";
+import type { SourceInfo } from "../../../core/source-info.js";
+import { closeWatcher, watchWithErrorHandler } from "../../../utils/fs-watch.js";
 
 // ============================================================================
 // Types & Schema
@@ -93,7 +95,7 @@ const ThemeJsonSchema = Type.Object({
 
 type ThemeJson = Static<typeof ThemeJsonSchema>;
 
-const validateThemeJson = TypeCompiler.Compile(ThemeJsonSchema);
+const validateThemeJson = Compile(ThemeJsonSchema);
 
 export type ThemeColor =
 	| "accent"
@@ -341,6 +343,7 @@ function resolveThemeColors<T extends Record<string, ColorValue>>(
 export class Theme {
 	readonly name?: string;
 	readonly sourcePath?: string;
+	sourceInfo?: SourceInfo;
 	private fgColors: Map<ThemeColor, string>;
 	private bgColors: Map<ThemeBg, string>;
 	private mode: ColorMode;
@@ -349,10 +352,11 @@ export class Theme {
 		fgColors: Record<ThemeColor, string | number>,
 		bgColors: Record<ThemeBg, string | number>,
 		mode: ColorMode,
-		options: { name?: string; sourcePath?: string } = {},
+		options: { name?: string; sourcePath?: string; sourceInfo?: SourceInfo } = {},
 	) {
 		this.name = options.name;
 		this.sourcePath = options.sourcePath;
+		this.sourceInfo = options.sourceInfo;
 		this.mode = mode;
 		this.fgColors = new Map();
 		for (const [key, value] of Object.entries(fgColors) as [ThemeColor, string | number][]) {
@@ -512,23 +516,29 @@ export function getAvailableThemesWithPaths(): ThemeInfo[] {
 function parseThemeJson(label: string, json: unknown): ThemeJson {
 	if (!validateThemeJson.Check(json)) {
 		const errors = Array.from(validateThemeJson.Errors(json));
-		const missingColors: string[] = [];
+		const missingColors = new Set<string>();
 		const otherErrors: string[] = [];
 
-		for (const e of errors) {
-			// Check for missing required color properties
-			const match = e.path.match(/^\/colors\/(\w+)$/);
-			if (match && e.message.includes("Required")) {
-				missingColors.push(match[1]);
-			} else {
-				otherErrors.push(`  - ${e.path}: ${e.message}`);
+		for (const error of errors) {
+			if (error.keyword === "required" && error.instancePath === "/colors") {
+				const requiredProperties = (error.params as { requiredProperties?: string[] }).requiredProperties;
+				for (const requiredProperty of requiredProperties ?? []) {
+					missingColors.add(requiredProperty);
+				}
+				continue;
 			}
+
+			const path = error.instancePath || "/";
+			otherErrors.push(`  - ${path}: ${error.message}`);
 		}
 
 		let errorMessage = `Invalid theme "${label}":\n`;
-		if (missingColors.length > 0) {
+		if (missingColors.size > 0) {
 			errorMessage += "\nMissing required color tokens:\n";
-			errorMessage += missingColors.map((c) => `  - ${c}`).join("\n");
+			errorMessage += Array.from(missingColors)
+				.sort()
+				.map((color) => `  - ${color}`)
+				.join("\n");
 			errorMessage += '\n\nPlease add these colors to your theme\'s "colors" object.';
 			errorMessage += "\nSee the built-in themes (dark.json, light.json) for reference values.";
 		}
@@ -647,7 +657,8 @@ function getDefaultTheme(): string {
 // ============================================================================
 
 // Use globalThis to share theme across module loaders (tsx + jiti in dev mode)
-const THEME_KEY = Symbol.for("phi-code:theme");
+const THEME_KEY = Symbol.for("@earendil-works/pi-coding-agent:theme");
+const THEME_KEY_OLD = Symbol.for("@mariozechner/pi-coding-agent:theme");
 
 // Export theme as a getter that reads from globalThis
 // This ensures all module instances (tsx, jiti) see the same theme
@@ -661,10 +672,12 @@ export const theme: Theme = new Proxy({} as Theme, {
 
 function setGlobalTheme(t: Theme): void {
 	(globalThis as Record<symbol, Theme>)[THEME_KEY] = t;
+	(globalThis as Record<symbol, Theme>)[THEME_KEY_OLD] = t;
 }
 
 let currentThemeName: string | undefined;
 let themeWatcher: fs.FSWatcher | undefined;
+let themeReloadTimer: NodeJS.Timeout | undefined;
 let onThemeChangeCallback: (() => void) | undefined;
 const registeredThemes = new Map<string, Theme>();
 
@@ -730,11 +743,7 @@ export function onThemeChange(callback: () => void): void {
 }
 
 function startThemeWatcher(): void {
-	// Stop existing watcher if any
-	if (themeWatcher) {
-		themeWatcher.close();
-		themeWatcher = undefined;
-	}
+	stopThemeWatcher();
 
 	// Only watch if it's a custom theme (not built-in)
 	if (!currentThemeName || currentThemeName === "dark" || currentThemeName === "light") {
@@ -742,56 +751,77 @@ function startThemeWatcher(): void {
 	}
 
 	const customThemesDir = getCustomThemesDir();
-	const themeFile = path.join(customThemesDir, `${currentThemeName}.json`);
+	const watchedThemeName = currentThemeName;
+	const watchedFileName = `${watchedThemeName}.json`;
+	const themeFile = path.join(customThemesDir, watchedFileName);
 
 	// Only watch if the file exists
 	if (!fs.existsSync(themeFile)) {
 		return;
 	}
 
-	try {
-		themeWatcher = fs.watch(themeFile, (eventType) => {
-			if (eventType === "change") {
-				// Debounce rapid changes
-				setTimeout(() => {
-					try {
-						// Reload the theme
-						setGlobalTheme(loadTheme(currentThemeName!));
-						// Notify callback (to invalidate UI)
-						if (onThemeChangeCallback) {
-							onThemeChangeCallback();
-						}
-					} catch (_error) {
-						// Ignore errors (file might be in invalid state while being edited)
-					}
-				}, 100);
-			} else if (eventType === "rename") {
-				// File was deleted or renamed - fall back to default theme
-				setTimeout(() => {
-					if (!fs.existsSync(themeFile)) {
-						currentThemeName = "dark";
-						setGlobalTheme(loadTheme("dark"));
-						if (themeWatcher) {
-							themeWatcher.close();
-							themeWatcher = undefined;
-						}
-						if (onThemeChangeCallback) {
-							onThemeChangeCallback();
-						}
-					}
-				}, 100);
+	const scheduleReload = () => {
+		if (themeReloadTimer) {
+			clearTimeout(themeReloadTimer);
+		}
+		themeReloadTimer = setTimeout(() => {
+			themeReloadTimer = undefined;
+
+			// Ignore stale timers after switching themes or stopping the watcher
+			if (currentThemeName !== watchedThemeName) {
+				return;
 			}
-		});
-	} catch (_error) {
-		// Ignore errors starting watcher
-	}
+
+			// Keep the last successfully loaded theme active if the file is temporarily missing
+			if (!fs.existsSync(themeFile)) {
+				return;
+			}
+
+			try {
+				// Reload the theme from disk and refresh the registry cache
+				const reloadedTheme = loadThemeFromPath(themeFile);
+				registeredThemes.set(watchedThemeName, reloadedTheme);
+				setGlobalTheme(reloadedTheme);
+				// Notify callback (to invalidate UI)
+				if (onThemeChangeCallback) {
+					onThemeChangeCallback();
+				}
+			} catch (_error) {
+				// Ignore errors (file might be in invalid state while being edited)
+			}
+		}, 100);
+	};
+
+	themeWatcher =
+		watchWithErrorHandler(
+			customThemesDir,
+			(_eventType, filename) => {
+				if (currentThemeName !== watchedThemeName) {
+					return;
+				}
+				if (!filename) {
+					scheduleReload();
+					return;
+				}
+				if (filename !== watchedFileName) {
+					return;
+				}
+				scheduleReload();
+			},
+			() => {
+				closeWatcher(themeWatcher);
+				themeWatcher = undefined;
+			},
+		) ?? undefined;
 }
 
 export function stopThemeWatcher(): void {
-	if (themeWatcher) {
-		themeWatcher.close();
-		themeWatcher = undefined;
+	if (themeReloadTimer) {
+		clearTimeout(themeReloadTimer);
+		themeReloadTimer = undefined;
 	}
+	closeWatcher(themeWatcher);
+	themeWatcher = undefined;
 }
 
 // ============================================================================
@@ -895,16 +925,12 @@ export function getThemeExportColors(themeName?: string): {
 		if (!exportSection) return {};
 
 		const vars = themeJson.vars ?? {};
-		const resolve = (value: string | number | undefined): string | undefined => {
+		const resolve = (value: ColorValue | undefined): string | undefined => {
 			if (value === undefined) return undefined;
-			if (typeof value === "number") return ansi256ToHex(value);
-			if (value.startsWith("$")) {
-				const resolved = vars[value];
-				if (resolved === undefined) return undefined;
-				if (typeof resolved === "number") return ansi256ToHex(resolved);
-				return resolved;
-			}
-			return value;
+			const resolved = resolveVarRefs(value, vars);
+			if (typeof resolved === "number") return ansi256ToHex(resolved);
+			if (resolved === "") return undefined;
+			return resolved;
 		};
 
 		return {
@@ -961,6 +987,12 @@ function getCliHighlightTheme(t: Theme): CliHighlightTheme {
 export function highlightCode(code: string, lang?: string): string[] {
 	// Validate language before highlighting to avoid stderr spam from cli-highlight
 	const validLang = lang && supportsLanguage(lang) ? lang : undefined;
+	// Skip highlighting when no valid language is specified. cli-highlight's
+	// auto-detection is unreliable and can misidentify prose as AppleScript,
+	// LiveCodeServer, etc., coloring random English words as keywords.
+	if (!validLang) {
+		return code.split("\n").map((line) => theme.fg("mdCodeBlock", line));
+	}
 	const opts = {
 		language: validLang,
 		ignoreIllegals: true,
@@ -1063,6 +1095,12 @@ export function getMarkdownTheme(): MarkdownTheme {
 		highlightCode: (code: string, lang?: string): string[] => {
 			// Validate language before highlighting to avoid stderr spam from cli-highlight
 			const validLang = lang && supportsLanguage(lang) ? lang : undefined;
+			// Skip highlighting when no valid language is specified. cli-highlight's
+			// auto-detection is unreliable and can misidentify prose as AppleScript,
+			// LiveCodeServer, etc., coloring random English words as keywords.
+			if (!validLang) {
+				return code.split("\n").map((line) => theme.fg("mdCodeBlock", line));
+			}
 			const opts = {
 				language: validLang,
 				ignoreIllegals: true,
@@ -1094,7 +1132,7 @@ export function getEditorTheme(): EditorTheme {
 	};
 }
 
-export function getSettingsListTheme(): import("phi-code-tui").SettingsListTheme {
+export function getSettingsListTheme(): import("@earendil-works/pi-tui").SettingsListTheme {
 	return {
 		label: (text: string, selected: boolean) => (selected ? theme.fg("accent", text) : text),
 		value: (text: string, selected: boolean) => (selected ? theme.fg("accent", text) : theme.fg("muted", text)),

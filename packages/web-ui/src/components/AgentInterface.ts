@@ -1,4 +1,4 @@
-import { streamSimple, type ToolResultMessage, type Usage } from "phi-code-ai";
+import { streamSimple, type ToolResultMessage, type Usage } from "@earendil-works/pi-ai";
 import { html, LitElement } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
 import { ModelSelector } from "../dialogs/ModelSelector.js";
@@ -8,7 +8,7 @@ import "./MessageList.js";
 import "./Messages.js"; // Import for side effects to register the custom elements
 import { getAppStorage } from "../storage/app-storage.js";
 import "./StreamingMessageContainer.js";
-import type { Agent, AgentEvent } from "phi-code-agent";
+import type { Agent, AgentEvent } from "@earendil-works/pi-agent-core";
 import type { Attachment } from "../utils/attachment-utils.js";
 import { formatUsage } from "../utils/format.js";
 import { i18n } from "../utils/i18n.js";
@@ -32,6 +32,8 @@ export class AgentInterface extends LitElement {
 	@property({ attribute: false }) onBeforeToolCall?: (toolName: string, args: any) => boolean | Promise<boolean>;
 	// Optional callback called when cost display is clicked
 	@property({ attribute: false }) onCostClick?: () => void;
+	// Optional callback to override model selector behavior
+	@property({ attribute: false }) onModelSelect?: () => void;
 
 	// References
 	@query("message-editor") private _messageEditor!: MessageEditor;
@@ -151,10 +153,17 @@ export class AgentInterface extends LitElement {
 		this._unsubscribeSession = this.session.subscribe(async (ev: AgentEvent) => {
 			switch (ev.type) {
 				case "message_start":
-				case "message_end":
 				case "turn_start":
 				case "turn_end":
 				case "agent_start":
+					this.requestUpdate();
+					break;
+				case "message_end":
+					// Clear streaming container when a message completes
+					// to prevent duplicate rendering (stable list now has this message)
+					if (this._streamingContainer) {
+						this._streamingContainer.setMessage(null, true);
+					}
 					this.requestUpdate();
 					break;
 				case "agent_end":
@@ -364,12 +373,18 @@ export class AgentInterface extends LitElement {
 							}}
 							.onAbort=${() => session.abort()}
 							.onModelSelect=${() => {
-								ModelSelector.open(state.model, (model) => session.setModel(model));
+								if (this.onModelSelect) {
+									this.onModelSelect();
+								} else {
+									ModelSelector.open(state.model, (model) => {
+										session.state.model = model;
+									});
+								}
 							}}
 							.onThinkingChange=${
 								this.enableThinkingSelector
 									? (level: "off" | "minimal" | "low" | "medium" | "high") => {
-											session.setThinkingLevel(level);
+											session.state.thinkingLevel = level;
 										}
 									: undefined
 							}

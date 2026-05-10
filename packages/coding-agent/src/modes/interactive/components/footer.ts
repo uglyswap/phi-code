@@ -1,4 +1,4 @@
-import { type Component, truncateToWidth, visibleWidth } from "phi-code-tui";
+import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { AgentSession } from "../../../core/agent-session.js";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.js";
 import { theme } from "../theme/theme.js";
@@ -37,6 +37,10 @@ export class FooterComponent implements Component {
 		private session: AgentSession,
 		private footerData: ReadonlyFooterDataProvider,
 	) {}
+
+	setSession(session: AgentSession): void {
+		this.session = session;
+	}
 
 	setAutoCompactEnabled(enabled: boolean): void {
 		this.autoCompactEnabled = enabled;
@@ -86,7 +90,7 @@ export class FooterComponent implements Component {
 		const contextPercent = contextUsage?.percent !== null ? contextPercentValue.toFixed(1) : "?";
 
 		// Replace home directory with ~
-		let pwd = process.cwd();
+		let pwd = this.session.sessionManager.getCwd();
 		const home = process.env.HOME || process.env.USERPROFILE;
 		if (home && pwd.startsWith(home)) {
 			pwd = `~${pwd.slice(home.length)}`;

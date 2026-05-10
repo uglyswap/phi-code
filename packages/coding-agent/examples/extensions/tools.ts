@@ -9,9 +9,9 @@
  * 2. Use /tools to open the tool selector
  */
 
-import type { ExtensionAPI, ExtensionContext, ToolInfo } from "phi-code";
-import { getSettingsListTheme } from "phi-code";
-import { Container, type SettingItem, SettingsList } from "phi-code-tui";
+import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@earendil-works/pi-coding-agent";
+import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+import { Container, type SettingItem, SettingsList } from "@earendil-works/pi-tui";
 
 // State persisted to session
 interface ToolsState {
@@ -136,11 +136,6 @@ export default function toolsExtension(pi: ExtensionAPI) {
 
 	// Restore state when navigating the session tree
 	pi.on("session_tree", async (_event, ctx) => {
-		restoreFromBranch(ctx);
-	});
-
-	// Restore state after forking
-	pi.on("session_fork", async (_event, ctx) => {
 		restoreFromBranch(ctx);
 	});
 }

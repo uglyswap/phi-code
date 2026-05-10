@@ -1,5 +1,5 @@
-import type { AgentMessage } from "phi-code-agent";
-import type { AssistantMessage, Model } from "phi-code-ai";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { generateSummary } from "../src/core/compaction/index.js";
 
@@ -7,8 +7,8 @@ const { completeSimpleMock } = vi.hoisted(() => ({
 	completeSimpleMock: vi.fn(),
 }));
 
-vi.mock("phi-code-ai", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("phi-code-ai")>();
+vi.mock("@earendil-works/pi-ai", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@earendil-works/pi-ai")>();
 	return {
 		...actual,
 		completeSimple: completeSimpleMock,
@@ -56,18 +56,58 @@ describe("generateSummary reasoning options", () => {
 		completeSimpleMock.mockResolvedValue(mockSummaryResponse);
 	});
 
-	it("sets reasoning=high for reasoning-capable models", async () => {
-		await generateSummary(messages, createModel(true), 2000, "test-key");
+	it("uses the provided thinking level for reasoning-capable models", async () => {
+		await generateSummary(
+			messages,
+			createModel(true),
+			2000,
+			"test-key",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			"medium",
+		);
 
 		expect(completeSimpleMock).toHaveBeenCalledTimes(1);
 		expect(completeSimpleMock.mock.calls[0][2]).toMatchObject({
-			reasoning: "high",
+			reasoning: "medium",
 			apiKey: "test-key",
 		});
 	});
 
+	it("does not set reasoning when thinking is off", async () => {
+		await generateSummary(
+			messages,
+			createModel(true),
+			2000,
+			"test-key",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			"off",
+		);
+
+		expect(completeSimpleMock).toHaveBeenCalledTimes(1);
+		expect(completeSimpleMock.mock.calls[0][2]).toMatchObject({
+			apiKey: "test-key",
+		});
+		expect(completeSimpleMock.mock.calls[0][2]).not.toHaveProperty("reasoning");
+	});
+
 	it("does not set reasoning for non-reasoning models", async () => {
-		await generateSummary(messages, createModel(false), 2000, "test-key");
+		await generateSummary(
+			messages,
+			createModel(false),
+			2000,
+			"test-key",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			"medium",
+		);
 
 		expect(completeSimpleMock).toHaveBeenCalledTimes(1);
 		expect(completeSimpleMock.mock.calls[0][2]).toMatchObject({

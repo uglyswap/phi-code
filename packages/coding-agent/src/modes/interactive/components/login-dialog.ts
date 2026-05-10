@@ -1,5 +1,5 @@
-import { getOAuthProviders } from "phi-code-ai/oauth";
-import { Container, type Focusable, getEditorKeybindings, Input, Spacer, Text, type TUI } from "phi-code-tui";
+import { getOAuthProviders } from "@earendil-works/pi-ai/oauth";
+import { Container, type Focusable, getKeybindings, Input, Spacer, Text, type TUI } from "@earendil-works/pi-tui";
 import { exec } from "child_process";
 import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
@@ -30,18 +30,21 @@ export class LoginDialogComponent extends Container implements Focusable {
 		tui: TUI,
 		providerId: string,
 		private onComplete: (success: boolean, message?: string) => void,
+		providerNameOverride?: string,
+		titleOverride?: string,
 	) {
 		super();
 		this.tui = tui;
 
 		const providerInfo = getOAuthProviders().find((p) => p.id === providerId);
-		const providerName = providerInfo?.name || providerId;
+		const providerName = providerNameOverride || providerInfo?.name || providerId;
+		const title = titleOverride ?? `Login to ${providerName}`;
 
 		// Top border
 		this.addChild(new DynamicBorder());
 
 		// Title
-		this.addChild(new Text(theme.fg("warning", `Login to ${providerName}`), 1, 0));
+		this.addChild(new Text(theme.fg("accent", theme.bold(title)), 1, 0));
 
 		// Dynamic content area
 		this.contentContainer = new Container();
@@ -84,7 +87,8 @@ export class LoginDialogComponent extends Container implements Focusable {
 	showAuth(url: string, instructions?: string): void {
 		this.contentContainer.clear();
 		this.contentContainer.addChild(new Spacer(1));
-		this.contentContainer.addChild(new Text(theme.fg("accent", url), 1, 0));
+		const linkedUrl = `\x1b]8;;${url}\x07${url}\x1b]8;;\x07`;
+		this.contentContainer.addChild(new Text(theme.fg("accent", linkedUrl), 1, 0));
 
 		const clickHint = process.platform === "darwin" ? "Cmd+click to open" : "Ctrl+click to open";
 		const hyperlink = `\x1b]8;;${url}\x07${clickHint}\x1b]8;;\x07`;
@@ -109,7 +113,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 		this.contentContainer.addChild(new Spacer(1));
 		this.contentContainer.addChild(new Text(theme.fg("dim", prompt), 1, 0));
 		this.contentContainer.addChild(this.input);
-		this.contentContainer.addChild(new Text(`(${keyHint("selectCancel", "to cancel")})`, 1, 0));
+		this.contentContainer.addChild(new Text(`(${keyHint("tui.select.cancel", "to cancel")})`, 1, 0));
 		this.tui.requestRender();
 
 		return new Promise((resolve, reject) => {
@@ -130,7 +134,11 @@ export class LoginDialogComponent extends Container implements Focusable {
 		}
 		this.contentContainer.addChild(this.input);
 		this.contentContainer.addChild(
-			new Text(`(${keyHint("selectCancel", "to cancel,")} ${keyHint("selectConfirm", "to submit")})`, 1, 0),
+			new Text(
+				`(${keyHint("tui.select.cancel", "to cancel,")} ${keyHint("tui.select.confirm", "to submit")})`,
+				1,
+				0,
+			),
 		);
 
 		this.input.setValue("");
@@ -143,12 +151,26 @@ export class LoginDialogComponent extends Container implements Focusable {
 	}
 
 	/**
+	 * Show informational text without prompting for input.
+	 */
+	showInfo(lines: string[]): void {
+		this.contentContainer.clear();
+		this.contentContainer.addChild(new Spacer(1));
+		for (const line of lines) {
+			this.contentContainer.addChild(new Text(line, 1, 0));
+		}
+		this.contentContainer.addChild(new Spacer(1));
+		this.contentContainer.addChild(new Text(`(${keyHint("tui.select.cancel", "to close")})`, 1, 0));
+		this.tui.requestRender();
+	}
+
+	/**
 	 * Show waiting message (for polling flows like GitHub Copilot)
 	 */
 	showWaiting(message: string): void {
 		this.contentContainer.addChild(new Spacer(1));
 		this.contentContainer.addChild(new Text(theme.fg("dim", message), 1, 0));
-		this.contentContainer.addChild(new Text(`(${keyHint("selectCancel", "to cancel")})`, 1, 0));
+		this.contentContainer.addChild(new Text(`(${keyHint("tui.select.cancel", "to cancel")})`, 1, 0));
 		this.tui.requestRender();
 	}
 
@@ -161,9 +183,9 @@ export class LoginDialogComponent extends Container implements Focusable {
 	}
 
 	handleInput(data: string): void {
-		const kb = getEditorKeybindings();
+		const kb = getKeybindings();
 
-		if (kb.matches(data, "selectCancel")) {
+		if (kb.matches(data, "tui.select.cancel")) {
 			this.cancel();
 			return;
 		}

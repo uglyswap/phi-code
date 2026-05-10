@@ -5,7 +5,7 @@ import {
 	type ThinkingConfig,
 } from "@google/genai";
 import { getEnvApiKey } from "../env-api-keys.js";
-import { calculateCost } from "../models.js";
+import { calculateCost, clampThinkingLevel } from "../models.js";
 import type {
 	Api,
 	AssistantMessage,
@@ -22,7 +22,7 @@ import type {
 } from "../types.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
-import type { GoogleThinkingLevel } from "./google-gemini-cli.js";
+import type { GoogleThinkingLevel } from "./google-shared.js";
 import {
 	convertMessages,
 	convertTools,
@@ -31,7 +31,7 @@ import {
 	mapToolChoice,
 	retainThoughtSignature,
 } from "./google-shared.js";
-import { buildBaseOptions, clampReasoning } from "./simple-options.js";
+import { buildBaseOptions } from "./simple-options.js";
 
 export interface GoogleOptions extends StreamOptions {
 	toolChoice?: "auto" | "none" | "any";
@@ -74,8 +74,11 @@ export const streamGoogle: StreamFunction<"google-generative-ai", GoogleOptions>
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
 			const client = createClient(model, apiKey, options?.headers);
-			const params = buildParams(model, context, options);
-			options?.onPayload?.(params);
+			let params = buildParams(model, context, options);
+			const nextParams = await options?.onPayload?.(params, model);
+			if (nextParams !== undefined) {
+				params = nextParams as GenerateContentParameters;
+			}
 			const googleStream = await client.models.generateContentStream(params);
 
 			stream.push({ type: "start", partial: output });
@@ -83,6 +86,9 @@ export const streamGoogle: StreamFunction<"google-generative-ai", GoogleOptions>
 			const blocks = output.content;
 			const blockIndex = () => blocks.length - 1;
 			for await (const chunk of googleStream) {
+				// @google/genai documents GenerateContentResponse.responseId as an output-only field
+				// used to identify each response. Keep the first non-empty one from the stream.
+				output.responseId ||= chunk.responseId;
 				const candidate = chunk.candidates?.[0];
 				if (candidate?.content?.parts) {
 					for (const part of candidate.content.parts) {
@@ -205,7 +211,8 @@ export const streamGoogle: StreamFunction<"google-generative-ai", GoogleOptions>
 
 				if (chunk.usageMetadata) {
 					output.usage = {
-						input: chunk.usageMetadata.promptTokenCount || 0,
+						input:
+							(chunk.usageMetadata.promptTokenCount || 0) - (chunk.usageMetadata.cachedContentTokenCount || 0),
 						output:
 							(chunk.usageMetadata.candidatesTokenCount || 0) + (chunk.usageMetadata.thoughtsTokenCount || 0),
 						cacheRead: chunk.usageMetadata.cachedContentTokenCount || 0,
@@ -283,15 +290,16 @@ export const streamSimpleGoogle: StreamFunction<"google-generative-ai", SimpleSt
 		return streamGoogle(model, context, { ...base, thinking: { enabled: false } } satisfies GoogleOptions);
 	}
 
-	const effort = clampReasoning(options.reasoning)!;
+	const clampedReasoning = clampThinkingLevel(model, options.reasoning);
+	const effort = (clampedReasoning === "off" ? "high" : clampedReasoning) as ClampedThinkingLevel;
 	const googleModel = model as Model<"google-generative-ai">;
 
-	if (isGemini3ProModel(googleModel) || isGemini3FlashModel(googleModel)) {
+	if (isGemini3ProModel(googleModel) || isGemini3FlashModel(googleModel) || isGemma4Model(googleModel)) {
 		return streamGoogle(model, context, {
 			...base,
 			thinking: {
 				enabled: true,
-				level: getGemini3ThinkingLevel(effort, googleModel),
+				level: getThinkingLevel(effort, googleModel),
 			},
 		} satisfies GoogleOptions);
 	}
@@ -365,6 +373,8 @@ function buildParams(
 			thinkingConfig.thinkingBudget = options.thinking.budgetTokens;
 		}
 		config.thinkingConfig = thinkingConfig;
+	} else if (model.reasoning && options.thinking && !options.thinking.enabled) {
+		config.thinkingConfig = getDisabledThinkingConfig(model);
 	}
 
 	if (options.signal) {
@@ -385,6 +395,10 @@ function buildParams(
 
 type ClampedThinkingLevel = Exclude<ThinkingLevel, "xhigh">;
 
+function isGemma4Model(model: Model<"google-generative-ai">): boolean {
+	return /gemma-?4/.test(model.id.toLowerCase());
+}
+
 function isGemini3ProModel(model: Model<"google-generative-ai">): boolean {
 	return /gemini-3(?:\.\d+)?-pro/.test(model.id.toLowerCase());
 }
@@ -393,15 +407,40 @@ function isGemini3FlashModel(model: Model<"google-generative-ai">): boolean {
 	return /gemini-3(?:\.\d+)?-flash/.test(model.id.toLowerCase());
 }
 
-function getGemini3ThinkingLevel(
-	effort: ClampedThinkingLevel,
-	model: Model<"google-generative-ai">,
-): GoogleThinkingLevel {
+function getDisabledThinkingConfig(model: Model<"google-generative-ai">): ThinkingConfig {
+	// Google docs: Gemini 3.1 Pro cannot disable thinking, and Gemini 3 Flash / Flash-Lite
+	// do not support full thinking-off either. For Gemini 3 models, use the lowest supported
+	// thinkingLevel without includeThoughts so hidden thinking remains invisible to pi.
+	if (isGemini3ProModel(model)) {
+		return { thinkingLevel: "LOW" as any };
+	}
+	if (isGemini3FlashModel(model)) {
+		return { thinkingLevel: "MINIMAL" as any };
+	}
+	if (isGemma4Model(model)) {
+		return { thinkingLevel: "MINIMAL" as any };
+	}
+
+	// Gemini 2.x supports disabling via thinkingBudget = 0.
+	return { thinkingBudget: 0 };
+}
+
+function getThinkingLevel(effort: ClampedThinkingLevel, model: Model<"google-generative-ai">): GoogleThinkingLevel {
 	if (isGemini3ProModel(model)) {
 		switch (effort) {
 			case "minimal":
 			case "low":
 				return "LOW";
+			case "medium":
+			case "high":
+				return "HIGH";
+		}
+	}
+	if (isGemma4Model(model)) {
+		switch (effort) {
+			case "minimal":
+			case "low":
+				return "MINIMAL";
 			case "medium":
 			case "high":
 				return "HIGH";
@@ -434,6 +473,16 @@ function getGoogleBudget(
 			low: 2048,
 			medium: 8192,
 			high: 32768,
+		};
+		return budgets[effort];
+	}
+
+	if (model.id.includes("2.5-flash-lite")) {
+		const budgets: Record<ClampedThinkingLevel, number> = {
+			minimal: 512,
+			low: 2048,
+			medium: 8192,
+			high: 24576,
 		};
 		return budgets[effort];
 	}
