@@ -8,7 +8,7 @@
  * - Edge case tests (wide chars, styled text, emoji)
  */
 
-import type { ExtensionAPI, ExtensionCommandContext, Theme } from "phi-code";
+import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@phi-code-admin/phi-code";
 import { CURSOR_MARKER, type Focusable, matchesKey, visibleWidth } from "phi-code-tui";
 
 export default function (pi: ExtensionAPI) {

@@ -1,7 +1,7 @@
 import "@mariozechner/mini-lit/dist/CodeBlock.js";
-import type { ToolResultMessage } from "phi-code-ai";
 import { createRef, ref } from "lit/directives/ref.js";
 import { FileCode2 } from "lucide";
+import type { ToolResultMessage } from "phi-code-ai";
 import "../../components/ConsoleBlock.js";
 import { Diff } from "@mariozechner/mini-lit/dist/Diff.js";
 import { html, type TemplateResult } from "lit";

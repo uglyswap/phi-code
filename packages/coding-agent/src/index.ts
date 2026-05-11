@@ -13,10 +13,19 @@ export {
 	parseSkillBlock,
 	type SessionStats,
 } from "./core/agent-session.js";
+// Phi Code: hot-reload key store and config watcher (Q5/Q6/Q9)
+export {
+	ApiKeyStore,
+	type ApiKeyStoreOptions,
+	getApiKeyStore,
+	type ModelsConfigPersisted,
+	type ProviderConfigPersisted,
+} from "./core/api-key-store.js";
 // Auth and model registry
 export {
 	type ApiKeyCredential,
 	type AuthCredential,
+	type AuthStatus,
 	AuthStorage,
 	type AuthStorageBackend,
 	FileAuthStorageBackend,
@@ -46,6 +55,7 @@ export {
 	serializeConversation,
 	shouldCompact,
 } from "./core/compaction/index.js";
+export { ConfigWatcher, getConfigWatcher } from "./core/config-watcher.js";
 export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.js";
 // Extension system
 export type {
@@ -53,9 +63,14 @@ export type {
 	AgentStartEvent,
 	AgentToolResult,
 	AgentToolUpdateCallback,
-	AppAction,
+	AppKeybinding,
+	AutocompleteProviderFactory,
 	BashToolCallEvent,
 	BeforeAgentStartEvent,
+	BeforeAgentStartEventResult,
+	BeforeProviderRequestEvent,
+	BeforeProviderRequestEventResult,
+	BuildSystemPromptOptions,
 	CompactOptions,
 	ContextEvent,
 	ContextUsage,
@@ -95,22 +110,23 @@ export type {
 	ReadToolCallEvent,
 	RegisteredCommand,
 	RegisteredTool,
+	ResolvedCommand,
 	SessionBeforeCompactEvent,
 	SessionBeforeForkEvent,
 	SessionBeforeSwitchEvent,
 	SessionBeforeTreeEvent,
 	SessionCompactEvent,
-	SessionForkEvent,
 	SessionShutdownEvent,
 	SessionStartEvent,
-	SessionSwitchEvent,
 	SessionTreeEvent,
 	SlashCommandInfo,
-	SlashCommandLocation,
 	SlashCommandSource,
+	SourceInfo,
 	TerminalInputHandler,
 	ToolCallEvent,
+	ToolCallEventResult,
 	ToolDefinition,
+	ToolExecutionMode,
 	ToolInfo,
 	ToolRenderResultOptions,
 	ToolResultEvent,
@@ -119,10 +135,12 @@ export type {
 	UserBashEvent,
 	UserBashEventResult,
 	WidgetPlacement,
+	WorkingIndicatorOptions,
 	WriteToolCallEvent,
 } from "./core/extensions/index.js";
 export {
 	createExtensionRuntime,
+	defineTool,
 	discoverAndLoadExtensions,
 	ExtensionRunner,
 	isBashToolResult,
@@ -135,8 +153,6 @@ export {
 	isWriteToolResult,
 	wrapRegisteredTool,
 	wrapRegisteredTools,
-	wrapToolsWithExtensions,
-	wrapToolWithExtensions,
 } from "./core/extensions/index.js";
 // Footer data provider (git branch + extension statuses - data not otherwise available to extensions)
 export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.js";
@@ -152,13 +168,23 @@ export type {
 } from "./core/package-manager.js";
 export { DefaultPackageManager } from "./core/package-manager.js";
 export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.js";
-export { DefaultResourceLoader } from "./core/resource-loader.js";
+export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-loader.js";
 // SDK for programmatic usage
 export {
+	AgentSessionRuntime,
+	type AgentSessionRuntimeDiagnostic,
+	type AgentSessionServices,
+	type CreateAgentSessionFromServicesOptions,
 	type CreateAgentSessionOptions,
 	type CreateAgentSessionResult,
+	type CreateAgentSessionRuntimeFactory,
+	type CreateAgentSessionRuntimeResult,
+	type CreateAgentSessionServicesOptions,
 	// Factory
 	createAgentSession,
+	createAgentSessionFromServices,
+	createAgentSessionRuntime,
+	createAgentSessionServices,
 	createBashTool,
 	// Tool factories (for custom cwd)
 	createCodingTools,
@@ -170,8 +196,6 @@ export {
 	createReadTool,
 	createWriteTool,
 	type PromptTemplate,
-	// Pre-built tools (use process.cwd())
-	readOnlyTools,
 } from "./core/sdk.js";
 export {
 	type BranchSummaryEntry,
@@ -213,6 +237,7 @@ export {
 	type Skill,
 	type SkillFrontmatter,
 } from "./core/skills.js";
+export { createSyntheticSourceInfo } from "./core/source-info.js";
 // Tools
 export {
 	type BashOperations,
@@ -221,36 +246,37 @@ export {
 	type BashToolDetails,
 	type BashToolInput,
 	type BashToolOptions,
-	bashTool,
-	codingTools,
+	createBashToolDefinition,
+	createEditToolDefinition,
+	createFindToolDefinition,
+	createGrepToolDefinition,
+	createLocalBashOperations,
+	createLsToolDefinition,
+	createReadToolDefinition,
+	createWriteToolDefinition,
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 	type EditOperations,
 	type EditToolDetails,
 	type EditToolInput,
 	type EditToolOptions,
-	editTool,
 	type FindOperations,
 	type FindToolDetails,
 	type FindToolInput,
 	type FindToolOptions,
-	findTool,
 	formatSize,
 	type GrepOperations,
 	type GrepToolDetails,
 	type GrepToolInput,
 	type GrepToolOptions,
-	grepTool,
 	type LsOperations,
 	type LsToolDetails,
 	type LsToolInput,
 	type LsToolOptions,
-	lsTool,
 	type ReadOperations,
 	type ReadToolDetails,
 	type ReadToolInput,
 	type ReadToolOptions,
-	readTool,
 	type ToolsOptions,
 	type TruncationOptions,
 	type TruncationResult,
@@ -260,15 +286,22 @@ export {
 	type WriteOperations,
 	type WriteToolInput,
 	type WriteToolOptions,
-	writeTool,
+	withFileMutationQueue,
 } from "./core/tools/index.js";
 // Main entry point
-export { main } from "./main.js";
+export { type MainOptions, main } from "./main.js";
 // Run modes for programmatic SDK usage
 export {
 	InteractiveMode,
 	type InteractiveModeOptions,
+	type ModelInfo,
 	type PrintModeOptions,
+	RpcClient,
+	type RpcClientOptions,
+	type RpcCommand,
+	type RpcEventListener,
+	type RpcResponse,
+	type RpcSessionState,
 	runPrintMode,
 	runRpcMode,
 } from "./modes/index.js";
@@ -276,8 +309,6 @@ export {
 export {
 	ArminComponent,
 	AssistantMessageComponent,
-	appKey,
-	appKeyHint,
 	BashExecutionComponent,
 	BorderedLoader,
 	BranchSummaryMessageComponent,
@@ -288,9 +319,9 @@ export {
 	ExtensionEditorComponent,
 	ExtensionInputComponent,
 	ExtensionSelectorComponent,
-	editorKey,
 	FooterComponent,
 	keyHint,
+	keyText,
 	LoginDialogComponent,
 	ModelSelectorComponent,
 	OAuthSelectorComponent,

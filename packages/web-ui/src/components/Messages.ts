@@ -1,3 +1,5 @@
+import { html, LitElement, type TemplateResult } from "lit";
+import { customElement, property } from "lit/decorators.js";
 import type {
 	AssistantMessage as AssistantMessageType,
 	ImageContent,
@@ -6,8 +8,6 @@ import type {
 	ToolResultMessage as ToolResultMessageType,
 	UserMessage as UserMessageType,
 } from "phi-code-ai";
-import { html, LitElement, type TemplateResult } from "lit";
-import { customElement, property } from "lit/decorators.js";
 import { renderTool } from "../tools/index.js";
 import type { Attachment } from "../utils/attachment-utils.js";
 import { formatUsage } from "../utils/format.js";
@@ -85,7 +85,7 @@ export class UserMessage extends LitElement {
 export class AssistantMessage extends LitElement {
 	@property({ type: Object }) message!: AssistantMessageType;
 	@property({ type: Array }) tools?: AgentTool<any>[];
-	@property({ type: Object }) pendingToolCalls?: Set<string>;
+	@property({ type: Object }) pendingToolCalls?: ReadonlySet<string>;
 	@property({ type: Boolean }) hideToolCalls = false;
 	@property({ type: Object }) toolResultsById?: Map<string, ToolResultMessageType>;
 	@property({ type: Boolean }) isStreaming: boolean = false;

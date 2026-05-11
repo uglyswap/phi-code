@@ -153,6 +153,13 @@ function detectProviders(): DetectedProvider[] {
 			available: false,
 		},
 		{
+			name: "OpenCode Go",
+			envVar: "OPENCODE_GO_API_KEY",
+			baseUrl: "https://opencode.ai/zen/go/v1",
+			models: ["kimi-k2.6", "kimi-k2.5", "qwen3-coder", "qwen3-coder-plus", "glm-4.6", "glm-5", "deepseek-v3", "minimax-m2", "MiniMax-M2.5", "moonshotai-kimi-thinking", "z-ai-glm-4.7", "gpt-oss-120b"],
+			available: false,
+		},
+		{
 			name: "OpenAI",
 			envVar: "OPENAI_API_KEY",
 			baseUrl: "https://api.openai.com/v1",
@@ -408,8 +415,15 @@ _Edit this file to customize Phi Code's behavior for your project._
 	// ─── Command ─────────────────────────────────────────────────────
 
 	pi.registerCommand("phi-init", {
-		description: "Initialize Phi Code — interactive setup wizard",
+		description: "Initialize Phi Code (legacy alias — prefer /setup for the refined wizard)",
 		handler: async (args, ctx) => {
+			ctx.ui.notify(
+				"NOTE: `/phi-init` is the legacy wizard. The refined replacement is `/setup` " +
+					"(richer flow: Alibaba dual-endpoint, OpenCode Go auto-fetch, ping validation, " +
+					"separate chat/orchestration assignments, hot-reload integration). " +
+					"This legacy command still works for backwards compatibility.",
+				"info",
+			);
 			try {
 				ctx.ui.notify("╔══════════════════════════════════════╗", "info");
 				ctx.ui.notify("║     φ  Phi Code Setup Wizard        ║", "info");

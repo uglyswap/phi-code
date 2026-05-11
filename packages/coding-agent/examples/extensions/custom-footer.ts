@@ -8,8 +8,8 @@
  * Token stats come from ctx.sessionManager/ctx.model (already accessible).
  */
 
+import type { ExtensionAPI } from "@phi-code-admin/phi-code";
 import type { AssistantMessage } from "phi-code-ai";
-import type { ExtensionAPI } from "phi-code";
 import { truncateToWidth, visibleWidth } from "phi-code-tui";
 
 export default function (pi: ExtensionAPI) {

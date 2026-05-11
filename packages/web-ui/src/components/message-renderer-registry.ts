@@ -1,5 +1,5 @@
-import type { AgentMessage } from "phi-code-agent";
 import type { TemplateResult } from "lit";
+import type { AgentMessage } from "phi-code-agent";
 
 // Extract role type from AppMessage union
 export type MessageRole = AgentMessage["role"];

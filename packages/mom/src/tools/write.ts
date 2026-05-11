@@ -1,5 +1,5 @@
-import type { AgentTool } from "phi-code-agent";
 import { Type } from "@sinclair/typebox";
+import type { AgentTool } from "phi-code-agent";
 import type { Executor } from "../sandbox.js";
 
 const writeSchema = Type.Object({

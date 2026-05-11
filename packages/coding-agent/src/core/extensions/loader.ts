@@ -1,7 +1,6 @@
 /**
  * Extension loader - loads TypeScript extension modules using jiti.
  *
- * Uses @mariozechner/jiti fork with virtualModules support for compiled Bun binaries.
  */
 
 import * as fs from "node:fs";
@@ -18,14 +17,17 @@ import * as _bundledPiTui from "phi-code-tui";
 // Static imports of packages that extensions may use.
 // These MUST be static so Bun bundles them into the compiled binary.
 // The virtualModules option then makes them available to extensions.
-import * as _bundledTypebox from "@sinclair/typebox";
-import { getAgentDir, isBunBinary, CONFIG_DIR_NAME } from "../../config.js";
+import * as _bundledTypebox from "typebox";
+import * as _bundledTypeboxCompile from "typebox/compile";
+import * as _bundledTypeboxValue from "typebox/value";
+import { CONFIG_DIR_NAME, getAgentDir, isBunBinary } from "../../config.js";
 // NOTE: This import works because loader.ts exports are NOT re-exported from index.ts,
 // avoiding a circular dependency. Extensions can import from phi-code.
 import * as _bundledPiCodingAgent from "../../index.js";
 import { createEventBus, type EventBus } from "../event-bus.js";
 import type { ExecOptions } from "../exec.js";
 import { execCommand } from "../exec.js";
+import { createSyntheticSourceInfo } from "../source-info.js";
 import type {
 	Extension,
 	ExtensionAPI,
@@ -40,12 +42,26 @@ import type {
 
 /** Modules available to extensions via virtualModules (for compiled Bun binary) */
 const VIRTUAL_MODULES: Record<string, unknown> = {
+	// typebox (new upstream name)
+	typebox: _bundledTypebox,
+	"typebox/compile": _bundledTypeboxCompile,
+	"typebox/value": _bundledTypeboxValue,
 	"@sinclair/typebox": _bundledTypebox,
+	"@sinclair/typebox/compile": _bundledTypeboxCompile,
+	"@sinclair/typebox/value": _bundledTypeboxValue,
+	// phi-code packages
+	"phi-code": _bundledPiCodingAgent,
+	"@phi-code-admin/phi-code": _bundledPiCodingAgent,
 	"phi-code-agent": _bundledPiAgentCore,
 	"phi-code-tui": _bundledPiTui,
 	"phi-code-ai": _bundledPiAi,
 	"phi-code-ai/oauth": _bundledPiAiOauth,
-	"phi-code": _bundledPiCodingAgent,
+	// Backwards compat aliases (upstream @mariozechner scope)
+	"@mariozechner/pi-coding-agent": _bundledPiCodingAgent,
+	"@mariozechner/pi-agent-core": _bundledPiAgentCore,
+	"@mariozechner/pi-tui": _bundledPiTui,
+	"@mariozechner/pi-ai": _bundledPiAi,
+	"@mariozechner/pi-ai/oauth": _bundledPiAiOauth,
 };
 
 const require = createRequire(import.meta.url);
@@ -55,14 +71,16 @@ const require = createRequire(import.meta.url);
  * In Bun binary mode, virtualModules is used instead.
  */
 let _aliases: Record<string, string> | null = null;
+
 function getAliases(): Record<string, string> {
 	if (_aliases) return _aliases;
 
 	const __dirname = path.dirname(fileURLToPath(import.meta.url));
 	const packageIndex = path.resolve(__dirname, "../..", "index.js");
 
-	const typeboxEntry = require.resolve("@sinclair/typebox");
-	const typeboxRoot = typeboxEntry.replace(/[\\/]build[\\/]cjs[\\/]index\.js$/, "");
+	const typeboxEntry = require.resolve("typebox");
+	const typeboxCompileEntry = require.resolve("typebox/compile");
+	const typeboxValueEntry = require.resolve("typebox/value");
 
 	const packagesRoot = path.resolve(__dirname, "../../../../");
 	const resolveWorkspaceOrImport = (workspaceRelativePath: string, specifier: string): string => {
@@ -73,13 +91,33 @@ function getAliases(): Record<string, string> {
 		return fileURLToPath(import.meta.resolve(specifier));
 	};
 
+	const piCodingAgentEntry = packageIndex;
+	const piAgentCoreEntry = resolveWorkspaceOrImport("agent/dist/index.js", "phi-code-agent");
+	const piTuiEntry = resolveWorkspaceOrImport("tui/dist/index.js", "phi-code-tui");
+	const piAiEntry = resolveWorkspaceOrImport("ai/dist/index.js", "phi-code-ai");
+	const piAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "phi-code-ai/oauth");
+
 	_aliases = {
-		"phi-code": packageIndex,
-		"phi-code-agent": resolveWorkspaceOrImport("agent/dist/index.js", "phi-code-agent"),
-		"phi-code-tui": resolveWorkspaceOrImport("tui/dist/index.js", "phi-code-tui"),
-		"phi-code-ai": resolveWorkspaceOrImport("ai/dist/index.js", "phi-code-ai"),
-		"phi-code-ai/oauth": resolveWorkspaceOrImport("ai/dist/oauth.js", "phi-code-ai/oauth"),
-		"@sinclair/typebox": typeboxRoot,
+		// phi-code packages
+		"phi-code": piCodingAgentEntry,
+		"@phi-code-admin/phi-code": piCodingAgentEntry,
+		"phi-code-agent": piAgentCoreEntry,
+		"phi-code-tui": piTuiEntry,
+		"phi-code-ai": piAiEntry,
+		"phi-code-ai/oauth": piAiOauthEntry,
+		// Backwards compat aliases (upstream @mariozechner scope)
+		"@mariozechner/pi-coding-agent": piCodingAgentEntry,
+		"@mariozechner/pi-agent-core": piAgentCoreEntry,
+		"@mariozechner/pi-tui": piTuiEntry,
+		"@mariozechner/pi-ai": piAiEntry,
+		"@mariozechner/pi-ai/oauth": piAiOauthEntry,
+		// typebox (new upstream name)
+		typebox: typeboxEntry,
+		"typebox/compile": typeboxCompileEntry,
+		"typebox/value": typeboxValueEntry,
+		"@sinclair/typebox": typeboxEntry,
+		"@sinclair/typebox/compile": typeboxCompileEntry,
+		"@sinclair/typebox/value": typeboxValueEntry,
 	};
 
 	return _aliases;
@@ -120,6 +158,12 @@ export function createExtensionRuntime(): ExtensionRuntime {
 	const notInitialized = () => {
 		throw new Error("Extension runtime not initialized. Action methods cannot be called during extension loading.");
 	};
+	const state: { staleMessage?: string } = {};
+	const assertActive = () => {
+		if (state.staleMessage) {
+			throw new Error(state.staleMessage);
+		}
+	};
 
 	const runtime: ExtensionRuntime = {
 		sendMessage: notInitialized,
@@ -139,10 +183,16 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		setThinkingLevel: notInitialized,
 		flagValues: new Map(),
 		pendingProviderRegistrations: [],
+		assertActive,
+		invalidate: (message) => {
+			state.staleMessage ??=
+				message ??
+				"This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().";
+		},
 		// Pre-bind: queue registrations so bindCore() can flush them once the
 		// model registry is available. bindCore() replaces both with direct calls.
-		registerProvider: (name, config) => {
-			runtime.pendingProviderRegistrations.push({ name, config });
+		registerProvider: (name, config, extensionPath = "<unknown>") => {
+			runtime.pendingProviderRegistrations.push({ name, config, extensionPath });
 		},
 		unregisterProvider: (name) => {
 			runtime.pendingProviderRegistrations = runtime.pendingProviderRegistrations.filter((r) => r.name !== name);
@@ -166,21 +216,28 @@ function createExtensionAPI(
 	const api = {
 		// Registration methods - write to extension
 		on(event: string, handler: HandlerFn): void {
+			runtime.assertActive();
 			const list = extension.handlers.get(event) ?? [];
 			list.push(handler);
 			extension.handlers.set(event, list);
 		},
 
 		registerTool(tool: ToolDefinition): void {
+			runtime.assertActive();
 			extension.tools.set(tool.name, {
 				definition: tool,
-				extensionPath: extension.path,
+				sourceInfo: extension.sourceInfo,
 			});
 			runtime.refreshTools();
 		},
 
-		registerCommand(name: string, options: Omit<RegisteredCommand, "name">): void {
-			extension.commands.set(name, { name, ...options });
+		registerCommand(name: string, options: Omit<RegisteredCommand, "name" | "sourceInfo">): void {
+			runtime.assertActive();
+			extension.commands.set(name, {
+				name,
+				sourceInfo: extension.sourceInfo,
+				...options,
+			});
 		},
 
 		registerShortcut(
@@ -190,6 +247,7 @@ function createExtensionAPI(
 				handler: (ctx: import("./types.js").ExtensionContext) => Promise<void> | void;
 			},
 		): void {
+			runtime.assertActive();
 			extension.shortcuts.set(shortcut, { shortcut, extensionPath: extension.path, ...options });
 		},
 
@@ -197,6 +255,7 @@ function createExtensionAPI(
 			name: string,
 			options: { description?: string; type: "boolean" | "string"; default?: boolean | string },
 		): void {
+			runtime.assertActive();
 			extension.flags.set(name, { name, extensionPath: extension.path, ...options });
 			if (options.default !== undefined && !runtime.flagValues.has(name)) {
 				runtime.flagValues.set(name, options.default);
@@ -204,78 +263,96 @@ function createExtensionAPI(
 		},
 
 		registerMessageRenderer<T>(customType: string, renderer: MessageRenderer<T>): void {
+			runtime.assertActive();
 			extension.messageRenderers.set(customType, renderer as MessageRenderer);
 		},
 
 		// Flag access - checks extension registered it, reads from runtime
 		getFlag(name: string): boolean | string | undefined {
+			runtime.assertActive();
 			if (!extension.flags.has(name)) return undefined;
 			return runtime.flagValues.get(name);
 		},
 
 		// Action methods - delegate to shared runtime
 		sendMessage(message, options): void {
+			runtime.assertActive();
 			runtime.sendMessage(message, options);
 		},
 
 		sendUserMessage(content, options): void {
+			runtime.assertActive();
 			runtime.sendUserMessage(content, options);
 		},
 
 		appendEntry(customType: string, data?: unknown): void {
+			runtime.assertActive();
 			runtime.appendEntry(customType, data);
 		},
 
 		setSessionName(name: string): void {
+			runtime.assertActive();
 			runtime.setSessionName(name);
 		},
 
 		getSessionName(): string | undefined {
+			runtime.assertActive();
 			return runtime.getSessionName();
 		},
 
 		setLabel(entryId: string, label: string | undefined): void {
+			runtime.assertActive();
 			runtime.setLabel(entryId, label);
 		},
 
 		exec(command: string, args: string[], options?: ExecOptions) {
+			runtime.assertActive();
 			return execCommand(command, args, options?.cwd ?? cwd, options);
 		},
 
 		getActiveTools(): string[] {
+			runtime.assertActive();
 			return runtime.getActiveTools();
 		},
 
 		getAllTools() {
+			runtime.assertActive();
 			return runtime.getAllTools();
 		},
 
 		setActiveTools(toolNames: string[]): void {
+			runtime.assertActive();
 			runtime.setActiveTools(toolNames);
 		},
 
 		getCommands() {
+			runtime.assertActive();
 			return runtime.getCommands();
 		},
 
 		setModel(model) {
+			runtime.assertActive();
 			return runtime.setModel(model);
 		},
 
 		getThinkingLevel() {
+			runtime.assertActive();
 			return runtime.getThinkingLevel();
 		},
 
 		setThinkingLevel(level) {
+			runtime.assertActive();
 			runtime.setThinkingLevel(level);
 		},
 
 		registerProvider(name: string, config: ProviderConfig) {
-			runtime.registerProvider(name, config);
+			runtime.assertActive();
+			runtime.registerProvider(name, config, extension.path);
 		},
 
 		unregisterProvider(name: string) {
-			runtime.unregisterProvider(name);
+			runtime.assertActive();
+			runtime.unregisterProvider(name, extension.path);
 		},
 
 		events: eventBus,
@@ -302,9 +379,16 @@ async function loadExtensionModule(extensionPath: string) {
  * Create an Extension object with empty collections.
  */
 function createExtension(extensionPath: string, resolvedPath: string): Extension {
+	const source =
+		extensionPath.startsWith("<") && extensionPath.endsWith(">")
+			? extensionPath.slice(1, -1).split(":")[0] || "temporary"
+			: "local";
+	const baseDir = extensionPath.startsWith("<") ? undefined : path.dirname(resolvedPath);
+
 	return {
 		path: extensionPath,
 		resolvedPath,
+		sourceInfo: createSyntheticSourceInfo(extensionPath, { source, baseDir }),
 		handlers: new Map(),
 		tools: new Map(),
 		messageRenderers: new Map(),

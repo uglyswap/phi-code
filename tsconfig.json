@@ -4,28 +4,23 @@
 		"noEmit": true,
 		"paths": {
 			"*": ["./*"],
-			"@mariozechner/pi-ai": ["./packages/ai/src/index.ts"],
-			"@mariozechner/pi-ai/oauth": ["./packages/ai/src/oauth.ts"],
-			"@mariozechner/pi-ai/*": ["./packages/ai/src/*"],
-			"@mariozechner/pi-ai/dist/*": ["./packages/ai/src/*"],
-			"@mariozechner/pi-agent-core": ["./packages/agent/src/index.ts"],
-			"@mariozechner/pi-agent-core/*": ["./packages/agent/src/*"],
-			"@mariozechner/pi-coding-agent": ["./packages/coding-agent/src/index.ts"],
-			"@mariozechner/pi-coding-agent/hooks": ["./packages/coding-agent/src/core/hooks/index.ts"],
-			"@mariozechner/pi-coding-agent/*": ["./packages/coding-agent/src/*"],
-			"@sinclair/typebox": ["./node_modules/@sinclair/typebox"],
-			"@mariozechner/pi-mom": ["./packages/mom/src/index.ts"],
-			"@mariozechner/pi-mom/*": ["./packages/mom/src/*"],
-			"@mariozechner/pi": ["./packages/pods/src/index.ts"],
-			"@mariozechner/pi/*": ["./packages/pods/src/*"],
-			"@mariozechner/pi-tui": ["./packages/tui/src/index.ts"],
-			"@mariozechner/pi-tui/*": ["./packages/tui/src/*"],
+			"phi-code": ["./packages/coding-agent/src/index.ts"],
+			"@phi-code-admin/phi-code": ["./packages/coding-agent/src/index.ts"],
+			"@phi-code-admin/phi-code/hooks": ["./packages/coding-agent/src/core/hooks/index.ts"],
+			"@phi-code-admin/phi-code/*": ["./packages/coding-agent/src/*"],
+			"phi-code-ai": ["./packages/ai/src/index.ts"],
+			"phi-code-ai/oauth": ["./packages/ai/src/oauth.ts"],
+			"phi-code-ai/*": ["./packages/ai/src/*.ts", "./packages/ai/src/providers/*.ts"],
+			"phi-code-ai/dist/*": ["./packages/ai/src/*"],
+			"phi-code-agent": ["./packages/agent/src/index.ts"],
+			"phi-code-agent/*": ["./packages/agent/src/*"],
+			"phi-code-tui": ["./packages/tui/src/index.ts"],
+			"phi-code-tui/*": ["./packages/tui/src/*"],
+			"typebox": ["./node_modules/typebox"],
 			"@mariozechner/pi-web-ui": ["./packages/web-ui/src/index.ts"],
-			"@mariozechner/pi-web-ui/*": ["./packages/web-ui/src/*"],
-			"@mariozechner/pi-agent-old": ["./packages/agent-old/src/index.ts"],
-			"@mariozechner/pi-agent-old/*": ["./packages/agent-old/src/*"]
+			"@mariozechner/pi-web-ui/*": ["./packages/web-ui/src/*"]
 		}
 	},
 	"include": ["packages/*/src/**/*", "packages/*/test/**/*", "packages/coding-agent/examples/**/*"],
-	"exclude": ["packages/web-ui/**/*", "**/dist/**"]
+	"exclude": ["packages/web-ui/**/*", "packages/mom/**/*", "packages/pods/**/*", "**/dist/**"]
 }
