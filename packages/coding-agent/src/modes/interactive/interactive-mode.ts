@@ -575,56 +575,58 @@ export class InteractiveMode {
 		// Add header container as first child
 		this.ui.addChild(this.headerContainer);
 
-		// Add header with keybindings from config (unless silenced)
-		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
-			// Phi Code gradient ASCII logo (yellow -> orange -> pink -> magenta)
-			const gradientColors: [number, number, number][] = [
-				[255, 220, 50],
-				[255, 165, 50],
-				[255, 100, 100],
-				[230, 80, 150],
-				[200, 50, 180],
-				[180, 50, 220],
-			];
-			const applyGradient = (line: string): string => {
-				const chars = [...line];
-				const visibleChars = chars.filter((c) => c !== " ");
-				const totalVisible = visibleChars.length;
-				let visibleIdx = 0;
-				return chars
-					.map((c) => {
-						if (c === " ") return c;
-						const t = totalVisible > 1 ? visibleIdx / (totalVisible - 1) : 0;
-						visibleIdx++;
-						const segLen = gradientColors.length - 1;
-						const seg = Math.min(Math.floor(t * segLen), segLen - 1);
-						const local = t * segLen - seg;
-						const [r1, g1, b1] = gradientColors[seg];
-						const [r2, g2, b2] = gradientColors[seg + 1];
-						const r = Math.round(r1 + (r2 - r1) * local);
-						const g = Math.round(g1 + (g2 - g1) * local);
-						const b = Math.round(b1 + (b2 - b1) * local);
-						return `\x1b[38;2;${r};${g};${b}m${c}\x1b[0m`;
-					})
-					.join("");
-			};
-			const asciiLines = [
-				"  ██████╗ ██╗  ██╗██╗",
-				"  ██╔══██╗██║  ██║██║",
-				"  ██████╔╝███████║██║",
-				"  ██╔═══╝ ██╔══██║██║",
-				"  ██║     ██║  ██║██║",
-				"  ╚═╝     ╚═╝  ╚═╝╚═╝",
-			];
-			const asciiLogo = asciiLines.map((line) => applyGradient(line)).join("\n");
-			const phiLabel = applyGradient(`φ ${APP_NAME.toUpperCase()}`);
-			const logo =
-				asciiLogo +
-				"\n  " +
-				phiLabel +
-				theme.fg("dim", ` v${this.version}`) +
-				theme.fg("dim", " — The Ultimate Coding Agent");
+		// Phi Code gradient ASCII logo (yellow -> orange -> pink -> magenta).
+		// ALWAYS displayed at startup, independent of quietStartup setting.
+		// quietStartup only gates the keyboard shortcuts panel below.
+		const gradientColors: [number, number, number][] = [
+			[255, 220, 50],
+			[255, 165, 50],
+			[255, 100, 100],
+			[230, 80, 150],
+			[200, 50, 180],
+			[180, 50, 220],
+		];
+		const applyGradient = (line: string): string => {
+			const chars = [...line];
+			const visibleChars = chars.filter((c) => c !== " ");
+			const totalVisible = visibleChars.length;
+			let visibleIdx = 0;
+			return chars
+				.map((c) => {
+					if (c === " ") return c;
+					const t = totalVisible > 1 ? visibleIdx / (totalVisible - 1) : 0;
+					visibleIdx++;
+					const segLen = gradientColors.length - 1;
+					const seg = Math.min(Math.floor(t * segLen), segLen - 1);
+					const local = t * segLen - seg;
+					const [r1, g1, b1] = gradientColors[seg];
+					const [r2, g2, b2] = gradientColors[seg + 1];
+					const r = Math.round(r1 + (r2 - r1) * local);
+					const g = Math.round(g1 + (g2 - g1) * local);
+					const b = Math.round(b1 + (b2 - b1) * local);
+					return `\x1b[38;2;${r};${g};${b}m${c}\x1b[0m`;
+				})
+				.join("");
+		};
+		const asciiLines = [
+			"  ██████╗ ██╗  ██╗██╗",
+			"  ██╔══██╗██║  ██║██║",
+			"  ██████╔╝███████║██║",
+			"  ██╔═══╝ ██╔══██║██║",
+			"  ██║     ██║  ██║██║",
+			"  ╚═╝     ╚═╝  ╚═╝╚═╝",
+		];
+		const asciiLogo = asciiLines.map((line) => applyGradient(line)).join("\n");
+		const phiLabel = applyGradient(`φ ${APP_NAME.toUpperCase()}`);
+		const logo =
+			asciiLogo +
+			"\n  " +
+			phiLabel +
+			theme.fg("dim", ` v${this.version}`) +
+			theme.fg("dim", " — The Ultimate Coding Agent");
 
+		// Show keyboard hints panel only when not silenced (quietStartup)
+		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
 			// Build startup instructions using keybinding hint helpers
 			const hint = (keybinding: AppKeybinding, description: string) => keyHint(keybinding, description);
 
@@ -671,16 +673,15 @@ export class InteractiveMode {
 				1,
 				0,
 			);
-
-			// Setup UI layout
-			this.headerContainer.addChild(new Spacer(1));
-			this.headerContainer.addChild(this.builtInHeader);
-			this.headerContainer.addChild(new Spacer(1));
 		} else {
-			// Minimal header when silenced
-			this.builtInHeader = new Text("", 0, 0);
-			this.headerContainer.addChild(this.builtInHeader);
+			// quietStartup: show only the logo, no keyboard hints panel
+			this.builtInHeader = new Text(logo, 1, 0);
 		}
+
+		// Setup UI layout (always show the header with logo)
+		this.headerContainer.addChild(new Spacer(1));
+		this.headerContainer.addChild(this.builtInHeader);
+		this.headerContainer.addChild(new Spacer(1));
 
 		this.ui.addChild(this.chatContainer);
 		this.ui.addChild(this.pendingMessagesContainer);
@@ -1309,7 +1310,11 @@ export class InteractiveMode {
 		force?: boolean;
 		showDiagnosticsWhenQuiet?: boolean;
 	}): void {
-		const showListing = options?.force || this.options.verbose || !this.settingsManager.getQuietStartup();
+		// Phi Code: by default we keep the startup terminal clean.
+		// The Context/Skills/Extensions panel only appears with --verbose or
+		// an explicit force (eg /reload). Use `phi --verbose` to see resources
+		// loaded at startup, or run `/agents`, `/skills`, `/keys list` etc.
+		const showListing = options?.force === true || this.options.verbose === true;
 		const showDiagnostics = showListing || options?.showDiagnosticsWhenQuiet === true;
 		if (!showListing && !showDiagnostics) {
 			return;
