@@ -412,6 +412,49 @@ export default function memoryExtension(pi: ExtensionAPI) {
 	});
 
 	/**
+	 * Per-turn reminder injection (Combo strategy D).
+	 *
+	 * Pi LLMs (Claude, Kimi, GLM, MiniMax) consistently ignore "MANDATORY"
+	 * guidelines buried in long system prompts. To enforce the
+	 * memory_search/memory_write rules, we prepend a fresh <system-reminder>
+	 * block to the system prompt at EVERY turn. This pattern is what Claude
+	 * Code and Cursor use successfully in production for high-priority rules.
+	 *
+	 * The reminder is short and concrete (includes the user's current prompt
+	 * truncated) so it grabs the LLM's attention even mid-conversation when
+	 * the original critical_rule has receded due to context pressure.
+	 */
+	pi.on("before_agent_start", async (event, _ctx) => {
+		// Skip during /plan orchestration: the orchestrator manages its own
+		// systemPrompt per phase via the same hook. Conflicting overrides would
+		// override the orchestrator's agent personas.
+		if ((globalThis as any).__phiOrchestrationActive) {
+			return {};
+		}
+		const userPrompt = (event.prompt ?? "").trim();
+		if (userPrompt.length === 0) {
+			return {};
+		}
+		const truncated = userPrompt.length > 200 ? `${userPrompt.slice(0, 200)}...` : userPrompt;
+		const reminder = `<system-reminder>
+You are about to respond to a new user message:
+"${truncated.replace(/"/g, '\\"')}"
+
+REMINDER (project rule, applies every turn):
+1. Call \`memory_search\` FIRST with keywords from the user's intent. Recent
+   project context, prior decisions, and saved learnings are accessible
+   ONLY via this tool.
+2. AFTER completing significant work, call \`memory_write\` to save what
+   you did and learned.
+
+These two tool calls are not optional. Skipping them violates project rules.
+</system-reminder>
+
+`;
+		return { systemPrompt: reminder + event.systemPrompt };
+	});
+
+	/**
 	 * Auto-load AGENTS.md on session start
 	 * Checks both project directory and ~/.phi/memory/
 	 */
