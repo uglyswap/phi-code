@@ -153,6 +153,13 @@ function detectProviders(): DetectedProvider[] {
 			available: false,
 		},
 		{
+			name: "OpenCode Go",
+			envVar: "OPENCODE_GO_API_KEY",
+			baseUrl: "https://opencode.ai/zen/go/v1",
+			models: ["kimi-k2.6", "kimi-k2.5", "qwen3-coder", "qwen3-coder-plus", "glm-4.6", "glm-5", "deepseek-v3", "minimax-m2", "MiniMax-M2.5", "moonshotai-kimi-thinking", "z-ai-glm-4.7", "gpt-oss-120b"],
+			available: false,
+		},
+		{
 			name: "OpenAI",
 			envVar: "OPENAI_API_KEY",
 			baseUrl: "https://api.openai.com/v1",
