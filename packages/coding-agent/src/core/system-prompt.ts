@@ -128,7 +128,26 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
 
-	let prompt = `You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
+	// Phi Code critical rules block - placed FIRST so LLMs see it before
+	// anything else. The XML <critical_rule> tag follows the format LLMs
+	// (Claude, Kimi, GLM) respect most reliably for high-priority instructions.
+	// The memory_search rule is also re-injected per-turn by extensions/phi/memory.ts
+	// via the before_agent_start hook for maximum enforcement.
+	const criticalRules = `<critical_rule priority="absolute">
+BEFORE responding to ANY user message, you MUST first call \`memory_search\`
+with relevant keywords from the user's intent. This is non-negotiable.
+Even for simple questions, call memory_search first to check for prior
+context, decisions, or saved notes about this project. Only AFTER reading
+the results, proceed with the task.
+
+AFTER completing any significant work, you MUST call \`memory_write\` to
+save what you did and what you learned. This is how the project memory
+grows across sessions.
+</critical_rule>
+
+`;
+
+	let prompt = `${criticalRules}You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
 
 Available tools:
 ${toolsList}
