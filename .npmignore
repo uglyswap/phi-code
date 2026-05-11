@@ -12,8 +12,7 @@ biome.json
 # Source (already in files)
 packages/*/src/
 
-# Build artifacts
-dist/
+# Build artifacts (do NOT exclude dist/ globally: workspace packages need it)
 *.log
 
 # IDE
