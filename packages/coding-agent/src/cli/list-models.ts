@@ -2,9 +2,9 @@
  * List available models with optional fuzzy search
  */
 
+import chalk from "chalk";
 import type { Api, Model } from "phi-code-ai";
 import { fuzzyFilter } from "phi-code-tui";
-import chalk from "chalk";
 import { formatNoModelsAvailableMessage } from "../core/auth-guidance.js";
 import type { ModelRegistry } from "../core/model-registry.js";
 

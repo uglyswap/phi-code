@@ -1,6 +1,6 @@
-import type { AgentTool } from "phi-code-agent";
 import { Type } from "@sinclair/typebox";
 import * as Diff from "diff";
+import type { AgentTool } from "phi-code-agent";
 import type { Executor } from "../sandbox.js";
 
 /**

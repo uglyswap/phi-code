@@ -2,8 +2,8 @@
  * Hello Tool - Minimal custom tool example
  */
 
-import { Type } from "phi-code-ai";
 import { defineTool, type ExtensionAPI } from "@phi-code-admin/phi-code";
+import { Type } from "phi-code-ai";
 
 const helloTool = defineTool({
 	name: "hello",

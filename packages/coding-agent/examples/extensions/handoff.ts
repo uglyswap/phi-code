@@ -12,10 +12,10 @@
  * The generated prompt appears as a draft in the editor for review/editing.
  */
 
-import type { AgentMessage } from "phi-code-agent";
-import { complete, type Message } from "phi-code-ai";
 import type { ExtensionAPI, SessionEntry } from "@phi-code-admin/phi-code";
 import { BorderedLoader, convertToLlm, serializeConversation } from "@phi-code-admin/phi-code";
+import type { AgentMessage } from "phi-code-agent";
+import { complete, type Message } from "phi-code-ai";
 
 const SYSTEM_PROMPT = `You are a context transfer assistant. Given a conversation history and the user's goal for a new thread, generate a focused prompt that:
 

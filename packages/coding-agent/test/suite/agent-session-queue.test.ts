@@ -1,6 +1,6 @@
+import type { ExtensionAPI } from "@phi-code-admin/phi-code";
 import type { AgentTool } from "phi-code-agent";
 import { fauxAssistantMessage, fauxToolCall } from "phi-code-ai";
-import type { ExtensionAPI } from "@phi-code-admin/phi-code";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, getAssistantTexts, getMessageText, getUserTexts, type Harness } from "./harness.js";

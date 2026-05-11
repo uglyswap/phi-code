@@ -1,6 +1,6 @@
-import { complete, getModel } from "phi-code-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@phi-code-admin/phi-code";
 import { DynamicBorder, getMarkdownTheme } from "@phi-code-admin/phi-code";
+import { complete, getModel } from "phi-code-ai";
 import { Container, Markdown, matchesKey, Text } from "phi-code-tui";
 
 type ContentBlock = {

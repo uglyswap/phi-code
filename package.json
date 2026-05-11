@@ -50,7 +50,6 @@
 	"version": "0.0.3",
 	"dependencies": {
 		"@mariozechner/jiti": "^2.6.5",
-		"phi-code": "^0.30.2",
 		"get-east-asian-width": "^1.4.0"
 	},
 	"overrides": {

@@ -1,7 +1,7 @@
-import type { AgentTool } from "phi-code-agent";
-import { Container, Text } from "phi-code-tui";
 import { mkdir as fsMkdir, writeFile as fsWriteFile } from "fs/promises";
 import { dirname } from "path";
+import type { AgentTool } from "phi-code-agent";
+import { Container, Text } from "phi-code-tui";
 import { type Static, Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.js";
 import { getLanguageFromPath, highlightCode } from "../../modes/interactive/theme/theme.js";

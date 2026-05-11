@@ -13,9 +13,9 @@
  *   pi --extension examples/extensions/custom-compaction.ts
  */
 
-import { complete } from "phi-code-ai";
 import type { ExtensionAPI } from "@phi-code-admin/phi-code";
 import { convertToLlm, serializeConversation } from "@phi-code-admin/phi-code";
+import { complete } from "phi-code-ai";
 
 export default function (pi: ExtensionAPI) {
 	pi.on("session_before_compact", async (event, ctx) => {

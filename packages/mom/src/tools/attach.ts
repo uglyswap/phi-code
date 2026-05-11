@@ -1,6 +1,6 @@
-import type { AgentTool } from "phi-code-agent";
 import { Type } from "@sinclair/typebox";
 import { basename, resolve as resolvePath } from "path";
+import type { AgentTool } from "phi-code-agent";
 
 // This will be set by the agent before running
 let uploadFn: ((filePath: string, title?: string) => Promise<void>) | null = null;

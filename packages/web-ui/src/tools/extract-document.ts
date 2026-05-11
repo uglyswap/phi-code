@@ -1,8 +1,8 @@
-import type { AgentTool } from "phi-code-agent";
-import type { ToolResultMessage } from "phi-code-ai";
 import { html } from "lit";
 import { createRef, ref } from "lit/directives/ref.js";
 import { FileText } from "lucide";
+import type { AgentTool } from "phi-code-agent";
+import type { ToolResultMessage } from "phi-code-ai";
 import { type Static, Type } from "typebox";
 import { EXTRACT_DOCUMENT_DESCRIPTION } from "../prompts/prompts.js";
 import { loadAttachment } from "../utils/attachment-utils.js";

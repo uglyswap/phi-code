@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { EditorTheme, MarkdownTheme, SelectListTheme } from "phi-code-tui";
 import chalk from "chalk";
 import { highlight, supportsLanguage } from "cli-highlight";
+import type { EditorTheme, MarkdownTheme, SelectListTheme } from "phi-code-tui";
 import { type Static, Type } from "typebox";
 import { Compile } from "typebox/compile";
 import { getCustomThemesDir, getThemesDir } from "../../../config.js";

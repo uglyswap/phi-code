@@ -1,6 +1,6 @@
-import type { AgentState } from "phi-code-agent";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { basename, join } from "path";
+import type { AgentState } from "phi-code-agent";
 import { APP_NAME, getExportTemplateDir } from "../../config.js";
 import { getResolvedThemeColors, getThemeExportColors } from "../../modes/interactive/theme/theme.js";
 import type { ToolDefinition } from "../extensions/types.js";

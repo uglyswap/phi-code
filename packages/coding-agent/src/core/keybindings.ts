@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 import {
 	type Keybinding,
 	type KeybindingDefinitions,
@@ -6,8 +8,6 @@ import {
 	TUI_KEYBINDINGS,
 	KeybindingsManager as TuiKeybindingsManager,
 } from "phi-code-tui";
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
 import { getAgentDir } from "../config.js";
 
 export interface AppKeybindings {

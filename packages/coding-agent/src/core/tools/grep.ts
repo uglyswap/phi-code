@@ -1,9 +1,9 @@
 import { createInterface } from "node:readline";
-import type { AgentTool } from "phi-code-agent";
-import { Text } from "phi-code-tui";
 import { spawn } from "child_process";
 import { readFileSync, statSync } from "fs";
 import path from "path";
+import type { AgentTool } from "phi-code-agent";
+import { Text } from "phi-code-tui";
 import { type Static, Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.js";
 import { ensureTool } from "../../utils/tools-manager.js";

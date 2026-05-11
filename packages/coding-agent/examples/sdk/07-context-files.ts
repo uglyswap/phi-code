@@ -4,12 +4,7 @@
  * Context files provide project-specific instructions loaded into the system prompt.
  */
 
-import {
-	createAgentSession,
-	DefaultResourceLoader,
-	getAgentDir,
-	SessionManager,
-} from "@phi-code-admin/phi-code";
+import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager } from "@phi-code-admin/phi-code";
 
 // Disable context files entirely by returning an empty list in agentsFilesOverride.
 const loader = new DefaultResourceLoader({

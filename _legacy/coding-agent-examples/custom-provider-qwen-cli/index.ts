@@ -9,8 +9,8 @@
  *   # Then /login qwen-cli, or set QWEN_CLI_API_KEY=...
  */
 
-import type { OAuthCredentials, OAuthLoginCallbacks } from "phi-code-ai";
 import type { ExtensionAPI } from "phi-code";
+import type { OAuthCredentials, OAuthLoginCallbacks } from "phi-code-ai";
 
 // =============================================================================
 // Constants

@@ -1,12 +1,12 @@
 import { icon } from "@mariozechner/mini-lit";
 import "@mariozechner/mini-lit/dist/MarkdownBlock.js";
-import type { Agent, AgentMessage, AgentTool } from "phi-code-agent";
-import { StringEnum, type ToolCall } from "phi-code-ai";
 import { Button } from "@mariozechner/mini-lit/dist/Button.js";
 import { html, LitElement, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { createRef, type Ref, ref } from "lit/directives/ref.js";
 import { X } from "lucide";
+import type { Agent, AgentMessage, AgentTool } from "phi-code-agent";
+import { StringEnum, type ToolCall } from "phi-code-ai";
 import { type Static, Type } from "typebox";
 import type { ArtifactMessage } from "../../components/Messages.js";
 import { ArtifactsRuntimeProvider } from "../../components/sandbox/ArtifactsRuntimeProvider.js";

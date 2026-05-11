@@ -1,9 +1,9 @@
-import type { AgentTool } from "phi-code-agent";
-import type { ToolResultMessage } from "phi-code-ai";
 import { i18n } from "@mariozechner/mini-lit";
 import { html } from "lit";
 import { createRef, ref } from "lit/directives/ref.js";
 import { Code } from "lucide";
+import type { AgentTool } from "phi-code-agent";
+import type { ToolResultMessage } from "phi-code-ai";
 import { type Static, Type } from "typebox";
 import { type SandboxFile, SandboxIframe, type SandboxResult } from "../components/SandboxedIframe.js";
 import type { SandboxRuntimeProvider } from "../components/sandbox/SandboxRuntimeProvider.js";

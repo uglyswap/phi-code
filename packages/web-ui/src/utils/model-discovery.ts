@@ -1,6 +1,6 @@
-import type { Model } from "phi-code-ai";
 import { LMStudioClient } from "@lmstudio/sdk";
 import { Ollama } from "ollama/browser";
+import type { Model } from "phi-code-ai";
 
 /**
  * Discover models from an Ollama server.

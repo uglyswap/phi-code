@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
+import { spawn } from "child_process";
 import type { AgentTool } from "phi-code-agent";
 import { Container, Text, truncateToWidth } from "phi-code-tui";
-import { spawn } from "child_process";
 import { type Static, Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.js";
 import { truncateToVisualLines } from "../../modes/interactive/components/visual-truncate.js";

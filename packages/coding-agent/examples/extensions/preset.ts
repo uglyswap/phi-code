@@ -40,9 +40,9 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Api, Model } from "phi-code-ai";
 import type { ExtensionAPI, ExtensionContext } from "@phi-code-admin/phi-code";
 import { DynamicBorder, getAgentDir } from "@phi-code-admin/phi-code";
+import type { Api, Model } from "phi-code-ai";
 import { Container, Key, type SelectItem, SelectList, Text } from "phi-code-tui";
 
 // Preset configuration

@@ -10,8 +10,8 @@
  * correct for that point in history.
  */
 
-import { StringEnum } from "phi-code-ai";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@phi-code-admin/phi-code";
+import { StringEnum } from "phi-code-ai";
 import { matchesKey, Text, truncateToWidth } from "phi-code-tui";
 import { Type } from "typebox";
 

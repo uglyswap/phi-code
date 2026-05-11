@@ -1,7 +1,7 @@
-import type { AgentTool } from "phi-code-agent";
-import { Box, Container, Spacer, Text } from "phi-code-tui";
 import { constants } from "fs";
 import { access as fsAccess, readFile as fsReadFile, writeFile as fsWriteFile } from "fs/promises";
+import type { AgentTool } from "phi-code-agent";
+import { Box, Container, Spacer, Text } from "phi-code-tui";
 import { type Static, Type } from "typebox";
 import { renderDiff } from "../../modes/interactive/components/diff.js";
 import type { ToolDefinition } from "../extensions/types.js";

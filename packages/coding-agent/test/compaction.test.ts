@@ -1,8 +1,8 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import type { AgentMessage } from "phi-code-agent";
 import type { AssistantMessage, Usage } from "phi-code-ai";
 import { getModel } from "phi-code-ai";
-import { readFileSync } from "fs";
-import { join } from "path";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	type CompactionSettings,

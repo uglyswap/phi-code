@@ -1,5 +1,3 @@
-import type { AgentMessage } from "phi-code-agent";
-import type { ImageContent, Message, TextContent } from "phi-code-ai";
 import { randomUUID } from "crypto";
 import {
 	appendFileSync,
@@ -15,6 +13,8 @@ import {
 } from "fs";
 import { readdir, readFile, stat } from "fs/promises";
 import { join, resolve } from "path";
+import type { AgentMessage } from "phi-code-agent";
+import type { ImageContent, Message, TextContent } from "phi-code-ai";
 import { v7 as uuidv7 } from "uuid";
 import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.js";
 import {

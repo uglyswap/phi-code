@@ -10,10 +10,10 @@
  * - createMomSettingsManager: Creates a SettingsManager backed by workspace settings.json
  */
 
-import type { UserMessage } from "phi-code-ai";
-import { type SessionManager, type SessionMessageEntry, SettingsManager } from "phi-code";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
+import { type SessionManager, type SessionMessageEntry, SettingsManager } from "phi-code";
+import type { UserMessage } from "phi-code-ai";
 
 // ============================================================================
 // Sync log.jsonl to SessionManager

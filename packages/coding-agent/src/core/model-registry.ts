@@ -2,6 +2,8 @@
  * Model registry - manages built-in and custom models, provides API key resolution.
  */
 
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 import {
 	type AnthropicMessagesCompat,
 	type Api,
@@ -19,8 +21,6 @@ import {
 	type SimpleStreamOptions,
 } from "phi-code-ai";
 import { registerOAuthProvider, resetOAuthProviders } from "phi-code-ai/oauth";
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
 import { type Static, Type } from "typebox";
 import { Compile } from "typebox/compile";
 import type { TLocalizedValidationError } from "typebox/error";

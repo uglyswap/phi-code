@@ -30,9 +30,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { StringEnum } from "phi-code-ai";
-import type { ExtensionAPI } from "phi-code";
 import { type Static, Type } from "@sinclair/typebox";
+import type { ExtensionAPI } from "phi-code";
+import { StringEnum } from "phi-code-ai";
 
 const PROVIDER = "google-antigravity";
 
