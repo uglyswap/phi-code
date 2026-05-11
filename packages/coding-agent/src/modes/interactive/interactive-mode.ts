@@ -617,7 +617,7 @@ export class InteractiveMode {
 				"  ╚═╝     ╚═╝  ╚═╝╚═╝",
 			];
 			const asciiLogo = asciiLines.map((line) => applyGradient(line)).join("\n");
-			const phiLabel = applyGradient("φ " + APP_NAME.toUpperCase());
+			const phiLabel = applyGradient(`φ ${APP_NAME.toUpperCase()}`);
 			const logo =
 				asciiLogo +
 				"\n  " +
