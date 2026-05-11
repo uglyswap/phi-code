@@ -146,9 +146,7 @@ describe("detectInstallMethod", () => {
 		);
 
 		expect(detectInstallMethod()).toBe("pnpm");
-		expect(getUpdateInstruction("@phi-code-admin/phi-code")).toBe(
-			"Run: pnpm install -g @phi-code-admin/phi-code",
-		);
+		expect(getUpdateInstruction("@phi-code-admin/phi-code")).toBe("Run: pnpm install -g @phi-code-admin/phi-code");
 	});
 
 	test("does not self-update unknown wrapper installs", () => {
@@ -232,9 +230,7 @@ describe("detectInstallMethod", () => {
 		setExecPath(`${packageDir}\\dist\\cli.js`);
 
 		expect(detectInstallMethod()).toBe("npm");
-		expect(getUpdateInstruction("@phi-code-admin/phi-code")).toBe(
-			"Run: npm install -g @phi-code-admin/phi-code",
-		);
+		expect(getUpdateInstruction("@phi-code-admin/phi-code")).toBe("Run: npm install -g @phi-code-admin/phi-code");
 	});
 
 	test("self-updates bun global installs from bun pm bin", () => {

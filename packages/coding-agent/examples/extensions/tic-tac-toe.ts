@@ -17,8 +17,8 @@
  * separate variables. Only the agent cursor is ever exposed to the agent.
  */
 
-import { StringEnum } from "phi-code-ai";
 import type { ExtensionAPI, ExtensionContext, Theme, ToolExecutionMode } from "@phi-code-admin/phi-code";
+import { StringEnum } from "phi-code-ai";
 import { type Component, matchesKey, Text, truncateToWidth, visibleWidth } from "phi-code-tui";
 import { Type } from "typebox";
 

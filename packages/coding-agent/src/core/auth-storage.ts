@@ -6,6 +6,8 @@
  * try to refresh tokens simultaneously.
  */
 
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
 import {
 	findEnvKeys,
 	getEnvApiKey,
@@ -14,8 +16,6 @@ import {
 	type OAuthProviderId,
 } from "phi-code-ai";
 import { getOAuthApiKey, getOAuthProvider, getOAuthProviders } from "phi-code-ai/oauth";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { getAgentDir } from "../config.js";
 import { resolveConfigValue } from "./resolve-config-value.js";

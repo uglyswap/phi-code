@@ -20,11 +20,11 @@
  *   pi -e ./tool-override.ts
  */
 
-import type { TextContent } from "phi-code-ai";
 import { type ExtensionAPI, getAgentDir, withFileMutationQueue } from "@phi-code-admin/phi-code";
 import { constants, readFileSync } from "fs";
 import { access, appendFile, readFile } from "fs/promises";
 import { join, resolve } from "path";
+import type { TextContent } from "phi-code-ai";
 import { Type } from "typebox";
 
 const LOG_FILE = join(getAgentDir(), "read-access.log");

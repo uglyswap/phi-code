@@ -8,10 +8,10 @@
  *   npx tsx test.ts claude-sonnet-4-5-20250929 --thinking
  */
 
-import { type Api, type Context, type Model, registerApiProvider, streamSimple } from "phi-code-ai";
 import { readFileSync } from "fs";
 import { getAgentDir } from "packages/coding-agent/src/config.js";
 import { join } from "path";
+import { type Api, type Context, type Model, registerApiProvider, streamSimple } from "phi-code-ai";
 import { MODELS, streamGitLabDuo } from "./index.js";
 
 const MODEL_MAP = new Map(MODELS.map((m) => [m.id, m]));

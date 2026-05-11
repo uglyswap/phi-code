@@ -1,11 +1,8 @@
-import type { AgentMessage, AgentTool } from "phi-code-agent";
-import type {
-	AssistantMessage as AssistantMessageType,
-	ToolResultMessage as ToolResultMessageType,
-} from "phi-code-ai";
 import { html, LitElement, type TemplateResult } from "lit";
 import { property } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
+import type { AgentMessage, AgentTool } from "phi-code-agent";
+import type { AssistantMessage as AssistantMessageType, ToolResultMessage as ToolResultMessageType } from "phi-code-ai";
 import { renderMessage } from "./message-renderer-registry.js";
 
 export class MessageList extends LitElement {

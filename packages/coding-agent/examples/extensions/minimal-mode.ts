@@ -26,8 +26,8 @@ import {
 	createReadTool,
 	createWriteTool,
 } from "@phi-code-admin/phi-code";
-import { Text } from "phi-code-tui";
 import { homedir } from "os";
+import { Text } from "phi-code-tui";
 
 /**
  * Shorten a path by replacing home directory with ~

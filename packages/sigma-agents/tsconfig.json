@@ -10,7 +10,9 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "skipLibCheck": true
   },
   "include": ["src/**/*"]
 }

@@ -15,14 +15,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
-import type {
-	Agent,
-	AgentEvent,
-	AgentMessage,
-	AgentState,
-	AgentTool,
-	ThinkingLevel,
-} from "phi-code-agent";
+import type { Agent, AgentEvent, AgentMessage, AgentState, AgentTool, ThinkingLevel } from "phi-code-agent";
 import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "phi-code-ai";
 import {
 	clampThinkingLevel,

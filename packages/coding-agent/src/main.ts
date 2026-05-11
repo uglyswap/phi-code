@@ -7,9 +7,9 @@
 
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
+import chalk from "chalk";
 import { type ImageContent, modelsAreEqual } from "phi-code-ai";
 import { ProcessTerminal, setKeybindings, TUI } from "phi-code-tui";
-import chalk from "chalk";
 import { type Args, type Mode, parseArgs, printHelp } from "./cli/args.js";
 import { processFileArguments } from "./cli/file-processor.js";
 import { buildInitialMessage } from "./cli/initial-message.js";

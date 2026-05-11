@@ -1,8 +1,8 @@
-import type { Message } from "phi-code-ai";
+import { Alert } from "@mariozechner/mini-lit/dist/Alert.js";
 import type { AgentMessage, MessageRenderer } from "@mariozechner/pi-web-ui";
 import { defaultConvertToLlm, registerMessageRenderer } from "@mariozechner/pi-web-ui";
-import { Alert } from "@mariozechner/mini-lit/dist/Alert.js";
 import { html } from "lit";
+import type { Message } from "phi-code-ai";
 
 // ============================================================================
 // 1. EXTEND AppMessage TYPE VIA DECLARATION MERGING

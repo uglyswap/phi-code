@@ -4,10 +4,10 @@
  * Run with: npx tsx test/streaming-render-debug.ts
  */
 
-import type { AssistantMessage } from "phi-code-ai";
-import { ProcessTerminal, TUI } from "phi-code-tui";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
+import type { AssistantMessage } from "phi-code-ai";
+import { ProcessTerminal, TUI } from "phi-code-tui";
 import { fileURLToPath } from "url";
 import { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";

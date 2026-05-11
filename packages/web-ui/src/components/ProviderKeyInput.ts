@@ -1,9 +1,9 @@
-import { type Context, complete, getModel } from "phi-code-ai";
 import { i18n } from "@mariozechner/mini-lit";
 import { Badge } from "@mariozechner/mini-lit/dist/Badge.js";
 import { Button } from "@mariozechner/mini-lit/dist/Button.js";
 import { html, LitElement } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
+import { type Context, complete, getModel } from "phi-code-ai";
 import { getAppStorage } from "../storage/app-storage.js";
 import { applyProxyIfNeeded } from "../utils/proxy-utils.js";
 import { Input } from "./Input.js";

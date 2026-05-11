@@ -1,7 +1,7 @@
-import type { AgentMessage, AgentTool } from "phi-code-agent";
-import type { ToolResultMessage } from "phi-code-ai";
 import { html, LitElement } from "lit";
 import { property, state } from "lit/decorators.js";
+import type { AgentMessage, AgentTool } from "phi-code-agent";
+import type { ToolResultMessage } from "phi-code-ai";
 
 export class StreamingMessageContainer extends LitElement {
 	@property({ type: Array }) tools: AgentTool[] = [];

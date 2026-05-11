@@ -4,7 +4,6 @@
  * Replace everything - no discovery, explicit configuration.
  */
 
-import { getModel } from "phi-code-ai";
 import {
 	AuthStorage,
 	createAgentSession,
@@ -14,6 +13,7 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@phi-code-admin/phi-code";
+import { getModel } from "phi-code-ai";
 
 // Custom auth storage location
 const authStorage = AuthStorage.create("/tmp/my-agent/auth.json");

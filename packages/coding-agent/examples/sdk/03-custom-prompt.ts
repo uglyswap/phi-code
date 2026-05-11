@@ -4,12 +4,7 @@
  * Shows how to replace or modify the default system prompt.
  */
 
-import {
-	createAgentSession,
-	DefaultResourceLoader,
-	getAgentDir,
-	SessionManager,
-} from "@phi-code-admin/phi-code";
+import { createAgentSession, DefaultResourceLoader, getAgentDir, SessionManager } from "@phi-code-admin/phi-code";
 
 const cwd = process.cwd();
 const agentDir = getAgentDir();

@@ -20,9 +20,9 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@phi-code-admin/phi-code";
+import { spawn } from "child_process";
 import type { Component, OverlayAnchor, OverlayHandle, OverlayOptions, TUI } from "phi-code-tui";
 import { matchesKey, truncateToWidth, visibleWidth } from "phi-code-tui";
-import { spawn } from "child_process";
 
 // Global handle for toggle demo (in real code, use a more elegant pattern)
 let globalToggleHandle: OverlayHandle | null = null;

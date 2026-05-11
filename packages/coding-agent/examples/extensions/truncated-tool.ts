@@ -24,10 +24,10 @@ import {
 	truncateHead,
 	withFileMutationQueue,
 } from "@phi-code-admin/phi-code";
-import { Text } from "phi-code-tui";
 import { execSync } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
+import { Text } from "phi-code-tui";
 import { Type } from "typebox";
 
 const RgParams = Type.Object({

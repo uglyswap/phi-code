@@ -1,4 +1,3 @@
-import { getModels, getProviders, type Model, modelsAreEqual } from "phi-code-ai";
 import { icon } from "@mariozechner/mini-lit";
 import { Badge } from "@mariozechner/mini-lit/dist/Badge.js";
 import { Button } from "@mariozechner/mini-lit/dist/Button.js";
@@ -8,6 +7,7 @@ import { html, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { Brain, Image as ImageIcon } from "lucide";
+import { getModels, getProviders, type Model, modelsAreEqual } from "phi-code-ai";
 import { Input } from "../components/Input.js";
 import { getAppStorage } from "../storage/app-storage.js";
 import type { AutoDiscoveryProviderType } from "../storage/stores/custom-providers-store.js";

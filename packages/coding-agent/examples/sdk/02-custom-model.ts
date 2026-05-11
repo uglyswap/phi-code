@@ -4,8 +4,8 @@
  * Shows how to select a specific model and thinking level.
  */
 
-import { getModel } from "phi-code-ai";
 import { AuthStorage, createAgentSession, ModelRegistry } from "@phi-code-admin/phi-code";
+import { getModel } from "phi-code-ai";
 
 // Set up auth storage and model registry
 const authStorage = AuthStorage.create();

@@ -1,6 +1,4 @@
 import "@mariozechner/mini-lit/dist/ThemeToggle.js";
-import { Agent, type AgentMessage } from "phi-code-agent";
-import { getModel, type TextContent } from "phi-code-ai";
 import {
 	type AgentState,
 	ApiKeyPromptDialog,
@@ -21,6 +19,8 @@ import {
 } from "@mariozechner/pi-web-ui";
 import { html, render } from "lit";
 import { Bell, History, Plus, Settings } from "lucide";
+import { Agent, type AgentMessage } from "phi-code-agent";
+import { getModel, type TextContent } from "phi-code-ai";
 import "./app.css";
 import { icon } from "@mariozechner/mini-lit";
 import { Button } from "@mariozechner/mini-lit/dist/Button.js";
