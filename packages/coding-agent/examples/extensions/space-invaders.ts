@@ -3,7 +3,7 @@
  * Uses Kitty keyboard protocol for smooth movement (press/release detection)
  */
 
-import type { ExtensionAPI } from "phi-code";
+import type { ExtensionAPI } from "@phi-code-admin/phi-code";
 import { isKeyRelease, Key, matchesKey, visibleWidth } from "phi-code-tui";
 
 const GAME_WIDTH = 60;

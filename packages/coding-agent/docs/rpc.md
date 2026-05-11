@@ -2,7 +2,7 @@
 
 RPC mode enables headless operation of the coding agent via a JSON protocol over stdin/stdout. This is useful for embedding the agent in other applications, IDEs, or custom UIs.
 
-**Note for Node.js/TypeScript users**: If you're building a Node.js application, consider using `AgentSession` directly from `@mariozechner/pi-coding-agent` instead of spawning a subprocess. See [`src/core/agent-session.ts`](../src/core/agent-session.ts) for the API. For a subprocess-based TypeScript client, see [`src/modes/rpc/rpc-client.ts`](../src/modes/rpc/rpc-client.ts).
+**Note for Node.js/TypeScript users**: If you're building a Node.js application, consider using `AgentSession` directly from `@earendil-works/pi-coding-agent` instead of spawning a subprocess. See [`src/core/agent-session.ts`](../src/core/agent-session.ts) for the API. For a subprocess-based TypeScript client, see [`src/modes/rpc/rpc-client.ts`](../src/modes/rpc/rpc-client.ts).
 
 ## Starting RPC Mode
 
@@ -24,13 +24,24 @@ Common options:
 
 All commands support an optional `id` field for request/response correlation. If provided, the corresponding response will include the same `id`.
 
+### Framing
+
+RPC mode uses strict JSONL semantics with LF (`\n`) as the only record delimiter.
+
+This matters for clients:
+- Split records on `\n` only
+- Accept optional `\r\n` input by stripping a trailing `\r`
+- Do not use generic line readers that treat Unicode separators as newlines
+
+In particular, Node `readline` is not protocol-compliant for RPC mode because it also splits on `U+2028` and `U+2029`, which are valid inside JSON strings.
+
 ## Commands
 
 ### Prompting
 
 #### prompt
 
-Send a user prompt to the agent. Returns immediately; events stream asynchronously.
+Send a user prompt to the agent. The command response is emitted after the prompt is accepted, queued, or handled. Events continue streaming asynchronously after acceptance.
 
 ```json
 {"id": "req-1", "type": "prompt", "message": "Hello, world!"}
@@ -47,7 +58,7 @@ With images:
 {"type": "prompt", "message": "New instruction", "streamingBehavior": "steer"}
 ```
 
-- `"steer"`: Interrupt the agent mid-run. Message is delivered after current tool execution, remaining tools are skipped.
+- `"steer"`: Queue the message while the agent is running. It is delivered after the current assistant turn finishes executing its tool calls, before the next LLM call.
 - `"followUp"`: Wait until the agent finishes. Message is delivered only when agent stops.
 
 If the agent is streaming and no `streamingBehavior` is specified, the command returns an error.
@@ -61,11 +72,13 @@ Response:
 {"id": "req-1", "type": "response", "command": "prompt", "success": true}
 ```
 
+`success: true` means the prompt was accepted, queued, or handled immediately. `success: false` means the prompt was rejected before acceptance. Failures after acceptance are reported through the normal event and message stream, not as a second `response` for the same request id.
+
 The `images` field is optional. Each image uses `ImageContent` format: `{"type": "image", "data": "base64-encoded-data", "mimeType": "image/png"}`.
 
 #### steer
 
-Queue a steering message to interrupt the agent mid-run. Delivered after current tool execution, remaining tools are skipped. Skill commands and prompt templates are expanded. Extension commands are not allowed (use `prompt` instead).
+Queue a steering message while the agent is running. It is delivered after the current assistant turn finishes executing its tool calls, before the next LLM call. Skill commands and prompt templates are expanded. Extension commands are not allowed (use `prompt` instead).
 
 ```json
 {"type": "steer", "message": "Stop and do this instead"}
@@ -310,8 +323,8 @@ Control how steering messages (from `steer`) are delivered.
 ```
 
 Modes:
-- `"all"`: Deliver all steering messages at the next interruption point
-- `"one-at-a-time"`: Deliver one steering message per interruption (default)
+- `"all"`: Deliver all steering messages after the current assistant turn finishes executing its tool calls
+- `"one-at-a-time"`: Deliver one steering message per completed assistant turn (default)
 
 Response:
 ```json
@@ -453,13 +466,13 @@ The `bash` command executes immediately and returns a `BashResult`. Internally, 
 
 When the next `prompt` command is sent, all messages (including `BashExecutionMessage`) are transformed before being sent to the LLM. The `BashExecutionMessage` is converted to a `UserMessage` with this format:
 
-```
+````
 Ran `ls -la`
-\`\`\`
+```
 total 48
 drwxr-xr-x ...
-\`\`\`
 ```
+````
 
 This means:
 1. Bash output is included in the LLM context on the **next prompt**, not immediately
@@ -483,7 +496,7 @@ Response:
 
 #### get_session_stats
 
-Get token usage and cost statistics.
+Get token usage, cost statistics, and current context window usage.
 
 ```json
 {"type": "get_session_stats"}
@@ -510,10 +523,19 @@ Response:
       "cacheWrite": 5000,
       "total": 105000
     },
-    "cost": 0.45
+    "cost": 0.45,
+    "contextUsage": {
+      "tokens": 60000,
+      "contextWindow": 200000,
+      "percent": 30
+    }
   }
 }
 ```
+
+`tokens` contains assistant usage totals for the current session state. `contextUsage` contains the actual current context-window estimate used for compaction and footer display.
+
+`contextUsage` is omitted when no model or context window is available. `contextUsage.tokens` and `contextUsage.percent` are `null` immediately after compaction until a fresh post-compaction assistant response provides valid usage data.
 
 #### export_html
 
@@ -558,7 +580,7 @@ If an extension cancelled the switch:
 
 #### fork
 
-Create a new fork from a previous user message. Can be cancelled by a `session_before_fork` extension event handler. Returns the text of the message being forked from.
+Create a new fork from a previous user message on the active branch. Can be cancelled by a `session_before_fork` extension event handler. Returns the text of the message being forked from.
 
 ```json
 {"type": "fork", "entryId": "abc123"}
@@ -581,6 +603,34 @@ If an extension cancelled the fork:
   "command": "fork",
   "success": true,
   "data": {"text": "The original prompt text...", "cancelled": true}
+}
+```
+
+#### clone
+
+Duplicate the current active branch into a new session at the current position. Can be cancelled by a `session_before_fork` extension event handler.
+
+```json
+{"type": "clone"}
+```
+
+Response:
+```json
+{
+  "type": "response",
+  "command": "clone",
+  "success": true,
+  "data": {"cancelled": false}
+}
+```
+
+If an extension cancelled the clone:
+```json
+{
+  "type": "response",
+  "command": "clone",
+  "success": true,
+  "data": {"cancelled": true}
 }
 ```
 
@@ -705,8 +755,9 @@ Events are streamed to stdout as JSON lines during agent operation. Events do NO
 | `tool_execution_start` | Tool begins execution |
 | `tool_execution_update` | Tool execution progress (streaming output) |
 | `tool_execution_end` | Tool completes |
-| `auto_compaction_start` | Auto-compaction begins |
-| `auto_compaction_end` | Auto-compaction completes |
+| `queue_update` | Pending steering/follow-up queue changed |
+| `compaction_start` | Compaction begins |
+| `compaction_end` | Compaction completes |
 | `auto_retry_start` | Auto-retry begins (after transient error) |
 | `auto_retry_end` | Auto-retry completes (success or final failure) |
 | `extension_error` | Extension threw an error |
@@ -842,19 +893,32 @@ When complete:
 
 Use `toolCallId` to correlate events. The `partialResult` in `tool_execution_update` contains the accumulated output so far (not just the delta), allowing clients to simply replace their display on each update.
 
-### auto_compaction_start / auto_compaction_end
+### queue_update
 
-Emitted when automatic compaction runs (when context is nearly full).
-
-```json
-{"type": "auto_compaction_start", "reason": "threshold"}
-```
-
-The `reason` field is `"threshold"` (context getting large) or `"overflow"` (context exceeded limit).
+Emitted whenever the pending steering or follow-up queue changes.
 
 ```json
 {
-  "type": "auto_compaction_end",
+  "type": "queue_update",
+  "steering": ["Focus on error handling"],
+  "followUp": ["After that, summarize the result"]
+}
+```
+
+### compaction_start / compaction_end
+
+Emitted when compaction runs, whether manual or automatic.
+
+```json
+{"type": "compaction_start", "reason": "threshold"}
+```
+
+The `reason` field is `"manual"`, `"threshold"`, or `"overflow"`.
+
+```json
+{
+  "type": "compaction_end",
+  "reason": "threshold",
   "result": {
     "summary": "Summary of conversation...",
     "firstKeptEntryId": "abc123",
@@ -930,7 +994,7 @@ If a dialog method includes a `timeout` field, the agent-side will auto-resolve 
 
 Some `ExtensionUIContext` methods are not supported or degraded in RPC mode because they require direct TUI access:
 - `custom()` returns `undefined`
-- `setWorkingMessage()`, `setFooter()`, `setHeader()`, `setEditorComponent()`, `setToolsExpanded()` are no-ops
+- `setWorkingMessage()`, `setWorkingIndicator()`, `setFooter()`, `setHeader()`, `setEditorComponent()`, `setToolsExpanded()` are no-ops
 - `getEditorText()` returns `""`
 - `getToolsExpanded()` returns `false`
 - `pasteToEditor()` delegates to `setEditorText()` (no paste/collapse handling)
@@ -1292,13 +1356,39 @@ For a complete example of handling the extension UI protocol, see [`examples/rpc
 
 ```javascript
 const { spawn } = require("child_process");
-const readline = require("readline");
+const { StringDecoder } = require("string_decoder");
 
 const agent = spawn("pi", ["--mode", "rpc", "--no-session"]);
 
-readline.createInterface({ input: agent.stdout }).on("line", (line) => {
+function attachJsonlReader(stream, onLine) {
+    const decoder = new StringDecoder("utf8");
+    let buffer = "";
+
+    stream.on("data", (chunk) => {
+        buffer += typeof chunk === "string" ? chunk : decoder.write(chunk);
+
+        while (true) {
+            const newlineIndex = buffer.indexOf("\n");
+            if (newlineIndex === -1) break;
+
+            let line = buffer.slice(0, newlineIndex);
+            buffer = buffer.slice(newlineIndex + 1);
+            if (line.endsWith("\r")) line = line.slice(0, -1);
+            onLine(line);
+        }
+    });
+
+    stream.on("end", () => {
+        buffer += decoder.end();
+        if (buffer.length > 0) {
+            onLine(buffer.endsWith("\r") ? buffer.slice(0, -1) : buffer);
+        }
+    });
+}
+
+attachJsonlReader(agent.stdout, (line) => {
     const event = JSON.parse(line);
-    
+
     if (event.type === "message_update") {
         const { assistantMessageEvent } = event;
         if (assistantMessageEvent.type === "text_delta") {

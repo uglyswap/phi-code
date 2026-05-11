@@ -2,7 +2,8 @@
  * Extension system for lifecycle events and custom tools.
  */
 
-export type { SlashCommandInfo, SlashCommandLocation, SlashCommandSource } from "../slash-commands.js";
+export type { SlashCommandInfo, SlashCommandSource } from "../slash-commands.js";
+export type { SourceInfo } from "../source-info.js";
 export {
 	createExtensionRuntime,
 	discoverAndLoadExtensions,
@@ -19,19 +20,24 @@ export type {
 } from "./runner.js";
 export { ExtensionRunner } from "./runner.js";
 export type {
+	AfterProviderResponseEvent,
 	AgentEndEvent,
 	AgentStartEvent,
 	// Re-exports
 	AgentToolResult,
 	AgentToolUpdateCallback,
-	// App keybindings (for custom editors)
-	AppAction,
 	AppendEntryHandler,
+	// App keybindings (for custom editors)
+	AppKeybinding,
+	AutocompleteProviderFactory,
 	// Events - Tool (ToolCallEvent types)
 	BashToolCallEvent,
 	BashToolResultEvent,
 	BeforeAgentStartEvent,
 	BeforeAgentStartEventResult,
+	BeforeProviderRequestEvent,
+	BeforeProviderRequestEventResult,
+	BuildSystemPromptOptions,
 	// Context
 	CompactOptions,
 	// Events - Agent
@@ -41,6 +47,7 @@ export type {
 	ContextUsage,
 	CustomToolCallEvent,
 	CustomToolResultEvent,
+	EditorFactory,
 	EditToolCallEvent,
 	EditToolResultEvent,
 	ExecOptions,
@@ -98,6 +105,8 @@ export type {
 	// Commands
 	RegisteredCommand,
 	RegisteredTool,
+	ReplacedSessionContext,
+	ResolvedCommand,
 	// Events - Resources
 	ResourcesDiscoverEvent,
 	ResourcesDiscoverResult,
@@ -113,11 +122,9 @@ export type {
 	SessionBeforeTreeResult,
 	SessionCompactEvent,
 	SessionEvent,
-	SessionForkEvent,
 	SessionShutdownEvent,
 	// Events - Session
 	SessionStartEvent,
-	SessionSwitchEvent,
 	SessionTreeEvent,
 	SetActiveToolsHandler,
 	SetLabelHandler,
@@ -131,6 +138,8 @@ export type {
 	ToolDefinition,
 	// Events - Tool Execution
 	ToolExecutionEndEvent,
+	// Tool execution mode
+	ToolExecutionMode,
 	ToolExecutionStartEvent,
 	ToolExecutionUpdateEvent,
 	ToolInfo,
@@ -144,11 +153,13 @@ export type {
 	UserBashEvent,
 	UserBashEventResult,
 	WidgetPlacement,
+	WorkingIndicatorOptions,
 	WriteToolCallEvent,
 	WriteToolResultEvent,
 } from "./types.js";
 // Type guards
 export {
+	defineTool,
 	isBashToolResult,
 	isEditToolResult,
 	isFindToolResult,
@@ -158,9 +169,4 @@ export {
 	isToolCallEventType,
 	isWriteToolResult,
 } from "./types.js";
-export {
-	wrapRegisteredTool,
-	wrapRegisteredTools,
-	wrapToolsWithExtensions,
-	wrapToolWithExtensions,
-} from "./wrapper.js";
+export { wrapRegisteredTool, wrapRegisteredTools } from "./wrapper.js";

@@ -2,7 +2,7 @@
  * Snake game extension - play snake with /snake command
  */
 
-import type { ExtensionAPI } from "phi-code";
+import type { ExtensionAPI } from "@phi-code-admin/phi-code";
 import { matchesKey, visibleWidth } from "phi-code-tui";
 
 const GAME_WIDTH = 40;

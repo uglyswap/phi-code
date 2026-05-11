@@ -193,5 +193,13 @@ export default function smartRouterExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, _ctx) => {
 		await loadConfig();
+		// Listen for routing.json file-watcher events (emitted by keys.ts extension).
+		// This implements Q9 strategy A: auto-reload SmartRouter when routing.json
+		// changes on disk, no /routing reload command needed.
+		pi.events.on("routing_json_changed", () => {
+			loadConfig().catch(() => {
+				// If reload fails, keep the in-memory config rather than wiping it
+			});
+		});
 	});
 }

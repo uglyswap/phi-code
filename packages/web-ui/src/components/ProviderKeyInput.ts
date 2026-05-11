@@ -1,16 +1,16 @@
 import { i18n } from "@mariozechner/mini-lit";
 import { Badge } from "@mariozechner/mini-lit/dist/Badge.js";
 import { Button } from "@mariozechner/mini-lit/dist/Button.js";
-import { type Context, complete, getModel } from "phi-code-ai";
 import { html, LitElement } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
+import { type Context, complete, getModel } from "phi-code-ai";
 import { getAppStorage } from "../storage/app-storage.js";
 import { applyProxyIfNeeded } from "../utils/proxy-utils.js";
 import { Input } from "./Input.js";
 
 // Test models for each provider
 const TEST_MODELS: Record<string, string> = {
-	anthropic: "claude-3-5-haiku-20241022",
+	anthropic: "claude-haiku-4-5",
 	openai: "gpt-4o-mini",
 	google: "gemini-2.5-flash",
 	groq: "openai/gpt-oss-20b",

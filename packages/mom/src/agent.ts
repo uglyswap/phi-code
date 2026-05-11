@@ -1,5 +1,3 @@
-import { Agent, type AgentEvent } from "phi-code-agent";
-import { getModel, type ImageContent } from "phi-code-ai";
 import {
 	AgentSession,
 	AuthStorage,
@@ -11,11 +9,13 @@ import {
 	type ResourceLoader,
 	SessionManager,
 	type Skill,
-} from "phi-code";
+} from "@phi-code-admin/phi-code";
 import { existsSync, readFileSync } from "fs";
 import { mkdir, writeFile } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
+import { Agent, type AgentEvent } from "phi-code-agent";
+import { getModel, type ImageContent } from "phi-code-ai";
 import { createMomSettingsManager, syncLogToSessionManager } from "./context.js";
 import * as log from "./log.js";
 import { createExecutor, type SandboxConfig } from "./sandbox.js";
@@ -429,7 +429,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	// Create AuthStorage and ModelRegistry
 	// Auth stored outside workspace so agent can't access it
 	const authStorage = AuthStorage.create(join(homedir(), ".pi", "mom", "auth.json"));
-	const modelRegistry = new ModelRegistry(authStorage);
+	const modelRegistry = ModelRegistry.inMemory(authStorage);
 
 	// Create agent
 	const agent = new Agent({
@@ -446,7 +446,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	// Load existing messages
 	const loadedSession = sessionManager.buildSessionContext();
 	if (loadedSession.messages.length > 0) {
-		agent.replaceMessages(loadedSession.messages);
+		agent.state.messages = loadedSession.messages;
 		log.logInfo(`[${channelId}] Loaded ${loadedSession.messages.length} messages from context.jsonl`);
 	}
 
@@ -458,7 +458,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 		getAgentsFiles: () => ({ agentsFiles: [] }),
 		getSystemPrompt: () => systemPrompt,
 		getAppendSystemPrompt: () => [],
-		getPathMetadata: () => new Map(),
+		// getPathMetadata removed upstream; safe to skip for mom
 		extendResources: () => {},
 		reload: async () => {},
 	};
@@ -601,15 +601,15 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 					queue.enqueueMessage(text, "thread", "response thread", false);
 				}
 			}
-		} else if (event.type === "auto_compaction_start") {
-			log.logInfo(`Auto-compaction started (reason: ${(event as any).reason})`);
+		} else if (event.type === "compaction_start") {
+			log.logInfo(`Compaction started (reason: ${(event as any).reason ?? "unknown"})`);
 			queue.enqueue(() => ctx.respond("_Compacting context..._", false), "compaction start");
-		} else if (event.type === "auto_compaction_end") {
+		} else if (event.type === "compaction_end") {
 			const compEvent = event as any;
 			if (compEvent.result) {
-				log.logInfo(`Auto-compaction complete: ${compEvent.result.tokensBefore} tokens compacted`);
+				log.logInfo(`Compaction complete: ${compEvent.result.tokensBefore} tokens compacted`);
 			} else if (compEvent.aborted) {
-				log.logInfo("Auto-compaction aborted");
+				log.logInfo("Compaction aborted");
 			}
 		} else if (event.type === "auto_retry_start") {
 			const retryEvent = event as any;
@@ -658,7 +658,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			// This picks up any messages synced above
 			const reloadedSession = sessionManager.buildSessionContext();
 			if (reloadedSession.messages.length > 0) {
-				agent.replaceMessages(reloadedSession.messages);
+				agent.state.messages = reloadedSession.messages;
 				log.logInfo(`[${channelId}] Reloaded ${reloadedSession.messages.length} messages from context`);
 			}
 
@@ -674,7 +674,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 				ctx.users,
 				skills,
 			);
-			session.agent.setSystemPrompt(systemPrompt);
+			session.agent.state.systemPrompt = systemPrompt;
 
 			// Set up file upload function
 			setUploadFunction(async (filePath: string, title?: string) => {

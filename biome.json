@@ -33,8 +33,12 @@
 			"!**/node_modules/**/*",
 			"!**/test-sessions.ts",
 			"!**/models.generated.ts",
+			"!**/image-models.generated.ts",
 			"!packages/web-ui/src/app.css",
 			"!packages/mom/data/**/*",
+			"!packages/sigma-memory/**/*",
+			"!packages/sigma-agents/**/*",
+			"!packages/sigma-skills/**/*",
 			"!!**/node_modules"
 		]
 	}

@@ -9,6 +9,7 @@
  *   # Then /login gitlab-duo, or set GITLAB_TOKEN=glpat-...
  */
 
+import type { ExtensionAPI } from "@phi-code-admin/phi-code";
 import {
 	type Api,
 	type AssistantMessageEventStream,
@@ -21,7 +22,6 @@ import {
 	streamSimpleAnthropic,
 	streamSimpleOpenAIResponses,
 } from "phi-code-ai";
-import type { ExtensionAPI } from "phi-code";
 
 // =============================================================================
 // Constants

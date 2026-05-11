@@ -1,5 +1,5 @@
-import type { ToolResultMessage } from "phi-code-ai";
 import type { TemplateResult } from "lit";
+import type { ToolResultMessage } from "phi-code-ai";
 
 export interface ToolRenderResult {
 	content: TemplateResult;

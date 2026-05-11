@@ -1,7 +1,7 @@
-import type { AgentTool } from "phi-code-agent";
-import type { ImageContent, TextContent } from "phi-code-ai";
 import { Type } from "@sinclair/typebox";
 import { extname } from "path";
+import type { AgentTool } from "phi-code-agent";
+import type { ImageContent, TextContent } from "phi-code-ai";
 import type { Executor } from "../sandbox.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult, truncateHead } from "./truncate.js";
 

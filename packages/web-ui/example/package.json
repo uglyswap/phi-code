@@ -1,6 +1,6 @@
 {
   "name": "pi-web-ui-example",
-  "version": "1.44.3",
+  "version": "0.74.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@mariozechner/mini-lit": "^0.2.0",
-    "@mariozechner/pi-ai": "file:../../ai",
+    "phi-code-ai": "file:../../ai",
     "@mariozechner/pi-web-ui": "file:../",
     "@tailwindcss/vite": "^4.1.17",
     "lit": "^3.3.1",

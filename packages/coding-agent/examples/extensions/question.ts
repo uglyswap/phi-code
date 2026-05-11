@@ -4,9 +4,9 @@
  * Escape in editor returns to options, Escape in options cancels
  */
 
-import type { ExtensionAPI } from "phi-code";
+import type { ExtensionAPI } from "@phi-code-admin/phi-code";
 import { Editor, type EditorTheme, Key, matchesKey, Text, truncateToWidth } from "phi-code-tui";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 interface OptionWithDesc {
 	label: string;
@@ -227,7 +227,7 @@ export default function question(pi: ExtensionAPI) {
 			};
 		},
 
-		renderCall(args, theme) {
+		renderCall(args, theme, _context) {
 			let text = theme.fg("toolTitle", theme.bold("question ")) + theme.fg("muted", args.question);
 			const opts = Array.isArray(args.options) ? args.options : [];
 			if (opts.length) {
@@ -238,7 +238,7 @@ export default function question(pi: ExtensionAPI) {
 			return new Text(text, 0, 0);
 		},
 
-		renderResult(result, _options, theme) {
+		renderResult(result, _options, theme, _context) {
 			const details = result.details as QuestionDetails | undefined;
 			if (!details) {
 				const text = result.content[0];

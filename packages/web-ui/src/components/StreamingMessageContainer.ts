@@ -1,12 +1,12 @@
-import type { AgentMessage, AgentTool } from "phi-code-agent";
-import type { ToolResultMessage } from "phi-code-ai";
 import { html, LitElement } from "lit";
 import { property, state } from "lit/decorators.js";
+import type { AgentMessage, AgentTool } from "phi-code-agent";
+import type { ToolResultMessage } from "phi-code-ai";
 
 export class StreamingMessageContainer extends LitElement {
 	@property({ type: Array }) tools: AgentTool[] = [];
 	@property({ type: Boolean }) isStreaming = false;
-	@property({ type: Object }) pendingToolCalls?: Set<string>;
+	@property({ type: Object }) pendingToolCalls?: ReadonlySet<string>;
 	@property({ type: Object }) toolResultsById?: Map<string, ToolResultMessage>;
 	@property({ attribute: false }) onCostClick?: () => void;
 
