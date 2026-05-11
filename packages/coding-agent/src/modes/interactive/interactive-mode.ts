@@ -2723,6 +2723,12 @@ export class InteractiveMode {
 				this.updateEditorBorderColor();
 				break;
 
+			case "model_changed":
+				this.footer.invalidate();
+				this.updateEditorBorderColor();
+				this.ui.requestRender();
+				break;
+
 			case "message_start":
 				if (event.message.role === "custom") {
 					this.addMessageToChat(event.message);

@@ -121,6 +121,7 @@ export type AgentSessionEvent =
 	| { type: "compaction_start"; reason: "manual" | "threshold" | "overflow" }
 	| { type: "session_info_changed"; name: string | undefined }
 	| { type: "thinking_level_changed"; level: ThinkingLevel }
+	| { type: "model_changed"; model: Model<any> }
 	| {
 			type: "compaction_end";
 			reason: "manual" | "threshold" | "overflow";
@@ -1421,6 +1422,11 @@ export class AgentSession {
 		this.setThinkingLevel(thinkingLevel);
 
 		await this._emitModelSelect(model, previousModel, "set");
+
+		// Notify listeners so UI components (footer model name, editor border)
+		// refresh immediately, even when called from extensions (smart-router,
+		// orchestrator) outside the /model selector flow.
+		this._emit({ type: "model_changed", model });
 	}
 
 	/**
