@@ -415,8 +415,15 @@ _Edit this file to customize Phi Code's behavior for your project._
 	// ─── Command ─────────────────────────────────────────────────────
 
 	pi.registerCommand("phi-init", {
-		description: "Initialize Phi Code — interactive setup wizard",
+		description: "Initialize Phi Code (legacy alias — prefer /setup for the refined wizard)",
 		handler: async (args, ctx) => {
+			ctx.ui.notify(
+				"NOTE: `/phi-init` is the legacy wizard. The refined replacement is `/setup` " +
+					"(richer flow: Alibaba dual-endpoint, OpenCode Go auto-fetch, ping validation, " +
+					"separate chat/orchestration assignments, hot-reload integration). " +
+					"This legacy command still works for backwards compatibility.",
+				"info",
+			);
 			try {
 				ctx.ui.notify("╔══════════════════════════════════════╗", "info");
 				ctx.ui.notify("║     φ  Phi Code Setup Wizard        ║", "info");
