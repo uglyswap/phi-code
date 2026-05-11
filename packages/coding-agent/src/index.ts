@@ -13,6 +13,14 @@ export {
 	parseSkillBlock,
 	type SessionStats,
 } from "./core/agent-session.js";
+// Phi Code: hot-reload key store and config watcher (Q5/Q6/Q9)
+export {
+	ApiKeyStore,
+	type ApiKeyStoreOptions,
+	getApiKeyStore,
+	type ModelsConfigPersisted,
+	type ProviderConfigPersisted,
+} from "./core/api-key-store.js";
 // Auth and model registry
 export {
 	type ApiKeyCredential,
@@ -47,6 +55,7 @@ export {
 	serializeConversation,
 	shouldCompact,
 } from "./core/compaction/index.js";
+export { ConfigWatcher, getConfigWatcher } from "./core/config-watcher.js";
 export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.js";
 // Extension system
 export type {
