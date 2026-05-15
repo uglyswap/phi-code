@@ -1,6 +1,6 @@
 # Phi Code Extensions
 
-8 TypeScript extensions automatically loaded at startup.
+10 TypeScript extensions automatically loaded at startup.
 
 ## Extensions
 
@@ -14,6 +14,26 @@
 | **Web Search** | `web-search.ts` | `web_search` | `/search` | `session_start` (key detection) |
 | **Agents** | `agents.ts` | — | `/agents` | `session_start` (agent count) |
 | **Init** | `init.ts` | — | `/phi-init` | — |
+| **Setup** | `setup.ts` | — | `/setup` | — |
+| **Keys** | `keys.ts` | — | `/keys` | `session_start` (hot-reload watcher) |
+| **Models** | `models.ts` | — | `/models` | `session_start` (background catalog refresh) |
+
+## Live Model Catalogs
+
+Every cloud provider (OpenAI, Anthropic, Google, OpenRouter, Groq, Alibaba
+Coding Plan, OpenCode Go) and every local server (Ollama, LM Studio) is
+queried against its `/v1/models` endpoint at runtime. Results are cached
+in-memory for 1h and persisted to `~/.phi/agent/models.json`. When a
+provider publishes a new model:
+
+  - `/models refresh` re-fetches the catalog for every configured provider.
+  - `/models refresh <id>` refreshes a single provider.
+  - `/models` (or `/models list`) prints what is currently persisted.
+  - On every `session_start`, the `models.ts` extension does a background
+    refresh so a fresh phi-code launch already reflects upstream changes.
+
+A static fallback (`providers/live-models.ts`) ships with each release so
+the wizards still work offline.
 
 ## Benchmark Categories
 

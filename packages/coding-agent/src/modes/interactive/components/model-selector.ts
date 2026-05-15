@@ -128,7 +128,9 @@ export class ModelSelectorComponent extends Container implements Focusable {
 	private async loadModels(): Promise<void> {
 		let models: ModelItem[];
 
-		// Refresh to pick up any changes to models.json
+		// Refresh to pick up any changes to models.json (live catalogs are
+		// re-fetched at session start by the phi/models extension and on demand
+		// via the `/models refresh` slash command).
 		this.modelRegistry.refresh();
 
 		// Check for models.json errors
