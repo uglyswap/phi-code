@@ -19,6 +19,17 @@ import { homedir } from "node:os";
 
 interface ExtensionConfig {
 	enabled: boolean;
+	/**
+	 * When false (default), the smart router never changes the chat model — it
+	 * only emits an informational notification per prompt. Use `/model` to
+	 * choose the chat model; that choice is now the single source of truth
+	 * and is persisted across sessions via the settings manager.
+	 *
+	 * When true (opt-in via `/routing autoswitch on`), the router switches
+	 * the chat model to the preferred route per prompt, matching the
+	 * pre-0.75.6 behavior.
+	 */
+	autoSwitch: boolean;
 	notifyOnRecommendation: boolean;
 }
 
@@ -31,7 +42,8 @@ export default function smartRouterExtension(pi: ExtensionAPI) {
 	let router = new SmartRouter(SmartRouter.defaultConfig());
 	let extConfig: ExtensionConfig = {
 		enabled: true,
-		notifyOnRecommendation: true,
+		autoSwitch: false,
+		notifyOnRecommendation: false,
 	};
 
 	/**
@@ -95,20 +107,30 @@ export default function smartRouterExtension(pi: ExtensionAPI) {
 
 			const modelToUse = targetModel || fallbackModel;
 
-			if (modelToUse && modelToUse.id !== ctx.model?.id) {
-				// Actually switch the model
+			if (!modelToUse) {
+				if (extConfig.notifyOnRecommendation) {
+					ctx.ui.notify(
+						`Routing suggestion: ${recommendation.category} → \`${recommendation.model}\` (not in registry).`,
+						"info",
+					);
+				}
+			} else if (modelToUse.id === ctx.model?.id) {
+				// Already on the recommended model — nothing to do.
+			} else if (extConfig.autoSwitch) {
+				// Legacy opt-in behavior: actually swap the chat model.
 				const switched = await pi.setModel(modelToUse);
 				if (switched && extConfig.notifyOnRecommendation) {
 					ctx.ui.notify(
-						`🔀 ${recommendation.category} → \`${modelToUse.id}\`${modelToUse.id !== recommendation.model ? ` (fallback)` : ""}`,
-						"info"
+						`Auto-switched (${recommendation.category}) → \`${modelToUse.id}\`${modelToUse.id !== recommendation.model ? " (fallback)" : ""}`,
+						"info",
 					);
 				}
-			} else if (extConfig.notifyOnRecommendation && !modelToUse) {
-				// Model not available — just notify
+			} else if (extConfig.notifyOnRecommendation) {
+				// Default behavior: never override the user's `/model` choice. Just
+				// advertise the suggestion — the chat model stays sticky.
 				ctx.ui.notify(
-					`🔀 ${recommendation.category} → \`${recommendation.model}\` (not available, keeping current)`,
-					"info"
+					`Routing suggestion: ${recommendation.category} → \`${modelToUse.id}\`. Stay on \`${ctx.model?.id}\` (use \`/routing autoswitch on\` to auto-apply, or \`/model\` to change manually).`,
+					"info",
 				);
 			}
 		}
@@ -125,44 +147,66 @@ export default function smartRouterExtension(pi: ExtensionAPI) {
 
 			if (!arg) {
 				const routingConfig = (router as any).config as RoutingConfig;
-				let output = `**🔀 Smart Router** (powered by sigma-agents)\n\n`;
-				output += `Status: ${extConfig.enabled ? "✅ Enabled" : "❌ Disabled"}\n`;
-				output += `Notifications: ${extConfig.notifyOnRecommendation ? "On" : "Off"}\n\n`;
+				let output = `**Smart Router** (powered by sigma-agents)\n\n`;
+				output += `Status:        ${extConfig.enabled ? "enabled" : "disabled"}\n`;
+				output += `Auto-switch:   ${extConfig.autoSwitch ? "on (overrides /model per prompt)" : "off (suggestions only — /model is sticky)"}\n`;
+				output += `Notifications: ${extConfig.notifyOnRecommendation ? "on" : "off"}\n\n`;
 
 				output += `**Routes:**\n`;
 				for (const [cat, route] of Object.entries(routingConfig.routes)) {
 					output += `  **${cat}** → \`${route.preferredModel}\` (fallback: \`${route.fallback}\`) [agent: ${route.agent || "none"}]\n`;
 					output += `    Keywords: ${route.keywords.slice(0, 6).join(", ")}${route.keywords.length > 6 ? "..." : ""}\n`;
 				}
-				output += `\n  **default** → \`${routingConfig.default.model}\`\n`;
+				output += `\n  **default** → \`${routingConfig.default.model}\` (orchestrator fallback only; chat default comes from \`/model\`)\n`;
 
 				output += `\nConfig: \`${configPath}\``;
-				output += `\nCommands: \`/routing enable|disable|notify-on|notify-off|reload|test\``;
+				output += `\nCommands: \`/routing [enable|disable|autoswitch on|autoswitch off|notify-on|notify-off|reload|test]\``;
 
 				ctx.ui.notify(output, "info");
+				return;
+			}
+
+			const tokens = arg.split(/\s+/);
+			const head = tokens[0];
+
+			if (head === "autoswitch") {
+				const flag = tokens[1];
+				if (flag === "on") {
+					extConfig.autoSwitch = true;
+					ctx.ui.notify(
+						"Auto-switch enabled: the smart router will override the chat model per prompt. " +
+							"Disable with `/routing autoswitch off` if it gets in your way.",
+						"info",
+					);
+				} else if (flag === "off") {
+					extConfig.autoSwitch = false;
+					ctx.ui.notify("Auto-switch disabled. The model selected via `/model` is now sticky.", "info");
+				} else {
+					ctx.ui.notify("Usage: `/routing autoswitch on|off`", "warning");
+				}
 				return;
 			}
 
 			switch (arg) {
 				case "enable":
 					extConfig.enabled = true;
-					ctx.ui.notify("✅ Smart routing enabled.", "info");
+					ctx.ui.notify("Smart routing enabled.", "info");
 					break;
 				case "disable":
 					extConfig.enabled = false;
-					ctx.ui.notify("❌ Smart routing disabled.", "info");
+					ctx.ui.notify("Smart routing disabled.", "info");
 					break;
 				case "notify-on":
 					extConfig.notifyOnRecommendation = true;
-					ctx.ui.notify("🔔 Routing notifications enabled.", "info");
+					ctx.ui.notify("Routing notifications enabled.", "info");
 					break;
 				case "notify-off":
 					extConfig.notifyOnRecommendation = false;
-					ctx.ui.notify("🔕 Routing notifications disabled.", "info");
+					ctx.ui.notify("Routing notifications disabled.", "info");
 					break;
 				case "reload":
 					await loadConfig();
-					ctx.ui.notify("🔄 Routing config reloaded from disk.", "info");
+					ctx.ui.notify("Routing config reloaded from disk.", "info");
 					break;
 				case "test": {
 					const tests = [

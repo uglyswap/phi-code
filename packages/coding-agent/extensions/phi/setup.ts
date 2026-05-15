@@ -199,8 +199,7 @@ function buildStatusWidget(
 		lines.push(`  ${icon} ${p.displayName}${note}`);
 	}
 	lines.push("");
-	lines.push("Assignments:");
-	lines.push(`  Default chat   : ${assignments.default ?? "(not set)"}`);
+	lines.push("Orchestration roles (used by /plan — NOT chat):");
 	for (const role of ORCHESTRATION_ROLES) {
 		const a = assignments.orchestration[role.key];
 		const preferred = a?.preferred ?? "(not set)";
@@ -208,6 +207,7 @@ function buildStatusWidget(
 		lines.push(`  ${role.label.padEnd(8)} : ${preferred} / ${fallback}`);
 	}
 	lines.push("");
+	lines.push("Chat default model     : controlled via `/model` (this wizard never overrides it)");
 	lines.push(`Keys file : ${store.configPath} (chmod 0600 on Unix)`);
 	return lines;
 }
@@ -537,15 +537,22 @@ async function configureAssignments(
 		return { defaultModel: "default", orchestration: {} };
 	}
 
-	const defaultModel =
-		(await pickModelFromCatalog(ui, "Default chat model (used when no orchestration is active)", allModelIds)) ??
-		allModelIds[0];
+	ui.notify(
+		"Assigning orchestration role models. The chat default is controlled via `/model` — " +
+			"this wizard does NOT change it.",
+		"info",
+	);
+
+	// Sentinel: the orchestrator falls back to the current chat model when a
+	// route doesn't pin a specific one. We never ask the user for a "default"
+	// chat model here — `/model` owns that.
+	const defaultModel = "default";
 
 	const orchestration: Record<string, RouteAssignment> = {};
 	for (const role of ORCHESTRATION_ROLES) {
 		const preferred =
 			(await pickModelFromCatalog(ui, `${role.label} - preferred model (${role.desc})`, allModelIds)) ??
-			defaultModel;
+			allModelIds[0];
 		const fallbackOptions = allModelIds.filter((m) => m !== preferred);
 		const fallback = fallbackOptions.length > 0
 			? (await pickModelFromCatalog(ui, `${role.label} - fallback model`, fallbackOptions)) ?? preferred
@@ -590,8 +597,11 @@ export default function setupExtension(pi: ExtensionAPI) {
 			try {
 			ui.notify(
 				"**φ Phi Code Setup Wizard**\n\n" +
-					"This wizard configures providers and assigns models to agent roles.\n" +
-					"Keys are stored in `~/.phi/agent/models.json` (chmod 0600 on Unix).\n" +
+					"This wizard configures providers and assigns models to **orchestration roles** " +
+					"(used by `/plan`).\n" +
+					"The **chat default model is controlled via `/model`** and stays sticky across " +
+					"prompts — this wizard will never change it.\n\n" +
+					"Keys are stored in `~/.phi/agent/models.json` (chmod 0600 on Unix). " +
 					"Edit that file directly later to hot-reload (no restart needed).",
 				"info",
 			);
