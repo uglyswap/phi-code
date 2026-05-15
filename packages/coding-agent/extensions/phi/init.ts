@@ -369,14 +369,25 @@ _Edit this file to customize Phi Code's behavior for your project._
 		await writeModelsConfig(config);
 	}
 
-	// ─── Manual model assignment (one model per agent role) ──────────────
+	// ─── Manual model assignment (one model per orchestration role) ─────
+	//
+	// As of 0.75.6, `/phi-init` ONLY configures orchestration role models
+	// (used by `/plan` and the orchestrator). The chat default model is
+	// owned exclusively by `/model` and persisted via the settings manager.
+	// We intentionally do NOT ask "Default model" here — that would override
+	// the user's `/model` choice on every routing decision.
 
 	async function manualMode(
 		availableModels: string[],
 		ctx: any,
 	): Promise<Record<string, { preferred: string; fallback: string }>> {
-		ctx.ui.notify("Manual mode: assign a model to each task category.\n", "info");
-		const modelOptions = ["default (use current model)", ...availableModels];
+		ctx.ui.notify(
+			"Assign a model to each orchestration role.\n" +
+				"These models are used by `/plan` and the orchestrator — NOT by normal chat.\n" +
+				"The chat default model is controlled via `/model` (and stays sticky across prompts).\n",
+			"info",
+		);
+		const modelOptions = ["default (use current chat model)", ...availableModels];
 		const assignments: Record<string, { preferred: string; fallback: string }> = {};
 
 		for (const role of TASK_ROLES) {
@@ -391,9 +402,12 @@ _Edit this file to customize Phi Code's behavior for your project._
 			ctx.ui.notify(`  ${role.label}: ${preferredModel} (fallback: ${fallback})`, "info");
 		}
 
-		const defaultChoice = await ctx.ui.select("Default model (for general tasks)", modelOptions);
-		const defaultModel = defaultChoice && defaultChoice !== modelOptions[0] ? defaultChoice : "default";
-		assignments["default"] = { preferred: defaultModel, fallback: availableModels[0] || "default" };
+		// Orchestrator fallback (used only when a specific route has no model).
+		// This is NOT the chat default — `/model` controls that.
+		assignments["default"] = {
+			preferred: "default",
+			fallback: availableModels[0] || "default",
+		};
 		return assignments;
 	}
 
@@ -505,14 +519,14 @@ _Edit this file to customize Phi Code's behavior for your project._
 		handler: async (_args, ctx) => {
 			try {
 				ctx.ui.notify(
-					"NOTE: `/phi-init` is the legacy wizard. The refined replacement is `/setup` " +
-						"(richer flow: Alibaba dual-endpoint, OpenCode Go auto-fetch, ping validation, " +
-						"separate chat/orchestration assignments, hot-reload integration). " +
-						"This legacy command still works for backwards compatibility.",
+					"`/phi-init` configures **orchestration** roles only (Code / Debug / Plan / Explore / " +
+						"Test / Review — used by `/plan` and the orchestrator).\n\n" +
+						"The **chat default model** is owned exclusively by `/model` and stays sticky across " +
+						"prompts. This wizard will NOT change it.",
 					"info",
 				);
 
-				ctx.ui.notify("    Phi Code Setup Wizard", "info");
+				ctx.ui.notify("    Phi Code Setup Wizard (orchestration roles)", "info");
 
 				// 1. Detect providers (env vars + local servers + previously saved keys)
 				ctx.ui.notify("Detecting providers...\n", "info");
@@ -619,17 +633,21 @@ _Edit this file to customize Phi Code's behavior for your project._
 				ctx.ui.notify(`  Config: ${agentDir}`, "info");
 				ctx.ui.notify(`  Memory: ${memoryDir}`, "info");
 				ctx.ui.notify(`  Agents: ${agentsDir}`, "info");
-				ctx.ui.notify("\nModel Assignments:", "info");
+				ctx.ui.notify("\nOrchestration role assignments (used by `/plan`):", "info");
 				for (const role of TASK_ROLES) {
 					const a = assignments[role.key];
 					ctx.ui.notify(`  ${role.label}: \`${a.preferred}\` (fallback: \`${a.fallback}\`)`, "info");
 				}
-				ctx.ui.notify(`  Default: \`${assignments["default"].preferred}\``, "info");
+				ctx.ui.notify(
+					"\nChat default model: use `/model` (this wizard does NOT change the chat default).",
+					"info",
+				);
 				ctx.ui.notify("\nNext steps:", "info");
+				ctx.ui.notify("  - `/model` to pick the chat default model (sticky across prompts)", "info");
+				ctx.ui.notify("  - `/plan <description>` to run the orchestrator with the roles above", "info");
+				ctx.ui.notify("  - `/routing` to inspect the route table (auto-switch is OFF by default)", "info");
+				ctx.ui.notify("  - `/models refresh` to re-fetch the live model catalog", "info");
 				ctx.ui.notify("  - Edit `~/.phi/memory/AGENTS.md` with your project instructions", "info");
-				ctx.ui.notify("  - Run `/agents` to see available sub-agents", "info");
-				ctx.ui.notify("  - Run `/skills` to see available skills", "info");
-				ctx.ui.notify("  - Run `/models refresh` to re-fetch the model catalog", "info");
 				ctx.ui.notify("  - Start coding!\n", "info");
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
