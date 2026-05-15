@@ -40,6 +40,7 @@ import {
 	pingOpenCodeGo,
 	validateOpenCodeGoApiKey,
 } from "./providers/opencode-go.js";
+import { fetchLiveModels, pingProvider, toPersistedModel } from "./providers/live-models.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -176,22 +177,9 @@ function getProviderCatalog(): ProviderEntry[] {
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
 async function probeLocalProvider(provider: ProviderEntry): Promise<string[]> {
-	if (!provider.probeUrl) return [];
-	const controller = new AbortController();
-	const timeout = setTimeout(() => controller.abort(), 2_500);
-	try {
-		const res = await fetch(provider.probeUrl, {
-			signal: controller.signal,
-			headers: { Authorization: `Bearer ${provider.id === "ollama" ? "ollama" : "lm-studio"}` },
-		});
-		clearTimeout(timeout);
-		if (!res.ok) return [];
-		const data = (await res.json()) as { data?: Array<{ id?: string; name?: string }> };
-		return (data.data ?? []).map((m) => m.id ?? m.name ?? "").filter(Boolean);
-	} catch {
-		clearTimeout(timeout);
-		return [];
-	}
+	if (!provider.local) return [];
+	const result = await fetchLiveModels(provider.id, { forceRefresh: true, timeoutMs: 2_500 });
+	return result.source === "live" ? result.models.map((m) => m.id) : [];
 }
 
 function buildStatusWidget(
@@ -442,21 +430,53 @@ async function configureGenericCloud(
 		if (!proceed) return undefined;
 	}
 
+	// Persist the key immediately so a downstream fetch failure cannot lose user input.
 	store.setKey(provider.id, trimmed, {
 		baseUrl: provider.baseUrl,
 		api: provider.api,
-		models: provider.staticModels.map((id) => ({
-			id,
-			name: id,
-			reasoning: true,
-			input: ["text"] as const,
-		})),
 	});
+
+	// Optional ping for early auth diagnostics.
+	ui.setStatus("setup-ping", `Pinging ${provider.displayName}...`);
+	const ping = await pingProvider(provider.id, trimmed, 5_000).catch((err) => ({
+		ok: false,
+		error: err instanceof Error ? err.message : String(err),
+	}));
+	ui.setStatus("setup-ping", undefined);
+	if (ping.ok) {
+		ui.notify(`${provider.displayName} ping OK (200).`, "info");
+	} else {
+		ui.notify(
+			`${provider.displayName} ping failed: ${ping.error ?? "unknown"}. Key saved; you can retry with \`/keys test ${provider.id}\`.`,
+			"warning",
+		);
+	}
+
+	// Live-fetch the model catalog (falls back to the static list when offline).
+	ui.setStatus("setup-fetch", `Fetching ${provider.displayName} model list...`);
+	const live = await fetchLiveModels(provider.id, {
+		apiKey: trimmed,
+		forceRefresh: true,
+		timeoutMs: 6_000,
+	});
+	ui.setStatus("setup-fetch", undefined);
+
+	const models = (live.models.length > 0
+		? live.models
+		: provider.staticModels.map((id) => ({ id, name: id, reasoning: true }))
+	).map(toPersistedModel);
+
+	store.setKey(provider.id, trimmed, {
+		baseUrl: provider.baseUrl,
+		api: provider.api,
+		models,
+	});
+
 	ui.notify(
-		`${provider.displayName} configured: \`${maskKeyForDisplay(trimmed)}\` (${provider.staticModels.length} models)`,
+		`${provider.displayName} configured: \`${maskKeyForDisplay(trimmed)}\` (${models.length} models, source: ${live.source}${live.error ? `, ${live.error}` : ""})`,
 		"info",
 	);
-	return { providerId: provider.id, modelCount: provider.staticModels.length };
+	return { providerId: provider.id, modelCount: models.length };
 }
 
 async function configureLocal(
@@ -539,7 +559,23 @@ async function configureAssignments(
 
 // ─── Extension ───────────────────────────────────────────────────────────
 
+// One-time global guard so a stray async rejection inside the wizard never kills the TUI.
+let setupUnhandledGuard = false;
+function installSetupUnhandledRejectionGuard(): void {
+	if (setupUnhandledGuard) return;
+	setupUnhandledGuard = true;
+	process.on("unhandledRejection", (reason) => {
+		const message = reason instanceof Error ? reason.message : String(reason);
+		try {
+			process.stderr.write(`[phi-setup] swallowed unhandledRejection: ${message}\n`);
+		} catch {
+			// no-op
+		}
+	});
+}
+
 export default function setupExtension(pi: ExtensionAPI) {
+	installSetupUnhandledRejectionGuard();
 	pi.registerCommand("setup", {
 		description: "Phi Code setup wizard (refonte UX, replaces /phi-init)",
 		handler: async (_args, ctx) => {
@@ -551,6 +587,7 @@ export default function setupExtension(pi: ExtensionAPI) {
 				// empty file or missing, fine
 			}
 
+			try {
 			ui.notify(
 				"**φ Phi Code Setup Wizard**\n\n" +
 					"This wizard configures providers and assigns models to agent roles.\n" +
@@ -652,14 +689,21 @@ export default function setupExtension(pi: ExtensionAPI) {
 				const provider = catalog[providerIndex];
 
 				let result: { providerId: string; modelCount: number } | undefined;
-				if (provider.id === "alibaba-codingplan") {
-					result = await configureAlibaba(ui, store);
-				} else if (provider.id === "opencode-go") {
-					result = await configureOpenCodeGo(ui, store);
-				} else if (provider.local) {
-					result = await configureLocal(ui, store, provider);
-				} else {
-					result = await configureGenericCloud(ui, store, provider);
+				try {
+					if (provider.id === "alibaba-codingplan") {
+						result = await configureAlibaba(ui, store);
+					} else if (provider.id === "opencode-go") {
+						result = await configureOpenCodeGo(ui, store);
+					} else if (provider.local) {
+						result = await configureLocal(ui, store, provider);
+					} else {
+						result = await configureGenericCloud(ui, store, provider);
+					}
+				} catch (err) {
+					ui.notify(
+						`Provider configuration failed: ${err instanceof Error ? err.message : String(err)}`,
+						"error",
+					);
 				}
 
 				if (result) refreshAvailable();
@@ -681,12 +725,20 @@ export default function setupExtension(pi: ExtensionAPI) {
 				"**Setup complete.**\n\n" +
 					"Next steps:\n" +
 					"  - `/keys` to list/manage saved keys\n" +
+					"  - `/models refresh` to re-fetch the catalog from each provider's API\n" +
 					"  - `/routing` to inspect routing\n" +
 					"  - `/agents` to list sub-agents\n" +
 					"  - `/skills` to list skills\n" +
 					"  - Edit `~/.phi/agent/models.json` or `routing.json` directly: hot-reload kicks in",
 				"info",
 			);
+			} catch (err) {
+				ui.setWidget("setup-status", undefined);
+				ui.notify(
+					`Setup wizard error: ${err instanceof Error ? err.message : String(err)}`,
+					"error",
+				);
+			}
 		},
 	});
 }
