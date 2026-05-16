@@ -60,7 +60,7 @@
 import { EventEmitter } from 'events';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.join(__dirname, '..');
@@ -155,7 +155,10 @@ export async function loadPlugins(app, ctx) {
     }
 
     try {
-      const mod = await import(indexPath);
+      // PHI-VENDOR: on Windows, Node's ESM loader refuses raw absolute paths
+      // (e.g. "C:\foo\plugin.js") and demands a file:// URL. Convert before
+      // calling dynamic import so plugin loading works cross-platform.
+      const mod = await import(pathToFileURL(indexPath).href);
       const register = mod.default || mod.register;
       if (typeof register !== 'function') {
         ctx.log('warn', `plugin "${name}" does not export a register function, skipping`);
