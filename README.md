@@ -26,6 +26,7 @@ phi
 - [Commands](#commands)
 - [Configuration](#configuration)
 - [Build from Source](#build-from-source)
+- [Bundled browser engine](#bundled-browser-engine)
 - [Credits](#credits)
 - [License](#license)
 
@@ -44,6 +45,7 @@ Phi Code takes Pi's brilliant minimal architecture and adds what's missing for s
 | **Skills** | Community | 12 bundled coding skills loaded on demand |
 | **Pre-configured models** | BYO key | 8 Alibaba Coding Plan models included (requires API key) |
 | **Web search** | None | Brave API + DuckDuckGo fallback |
+| **Browser automation** | None | Bundled [Camoufox](https://github.com/daijro/camoufox) (anti-detect Firefox) — 10 tools, works on Cloudflare/SPA |
 
 Pi's core is untouched — only 2 lines modified out of 500+ files. Everything is additive: extensions, skills, and new packages. Upstream Pi updates merge in minutes.
 
@@ -904,6 +906,56 @@ node packages/coding-agent/dist/cli.js
 | `packages/sigma-memory` | `sigma-memory` | Memory subsystem (notes + ontology + embedded vector search) |
 | `packages/sigma-agents` | `sigma-agents` | Sub-agent routing and model profiles |
 | `packages/sigma-skills` | `sigma-skills` | Skill scanner and loader |
+| `packages/camoufox-js` | `@phi-code-admin/camoufox-js` | Vendored snapshot of [apify/camoufox-js](https://github.com/apify/camoufox-js) (MPL-2.0). Launcher + postinstall downloader for the Camoufox binary. |
+| `packages/camofox-browser` | `@phi-code-admin/camofox-browser` | Vendored snapshot of [jo-inc/camofox-browser](https://github.com/jo-inc/camofox-browser) (MIT). Express server exposing 10 OpenClaw browser tools. |
+| `packages/browser` | `@phi-code-admin/browser` | Lazy-boot wrapper exposing the 10 tools as plain ES module async functions. |
+
+---
+
+## Bundled browser engine
+
+Phi Code 0.76.0+ ships a **fully self-hosted Camoufox browser engine**.
+The `browser.ts` extension registers ten high-level tools — `browser_navigate`,
+`browser_extract`, `browser_screenshot`, `browser_search`, `browser_click`,
+`browser_type`, `browser_scroll`, `browser_snapshot`, `browser_close_tab`,
+`browser_list_tabs` — backed by an anti-detect Firefox fork that handles
+Cloudflare, JS-heavy SPAs, and most bot-detection that plain `fetch` cannot.
+
+**No third-party dependency at runtime.** The JS launcher (vendored from
+`apify/camoufox-js`, MPL-2.0) and the automation server (vendored from
+`jo-inc/camofox-browser`, MIT) are republished under `@phi-code-admin/*`.
+The Camoufox v135.0.1-beta.24 binaries are re-hosted at
+[uglyswap/phi-code/releases/binaries-v1.0.0](https://github.com/uglyswap/phi-code/releases/tag/binaries-v1.0.0)
+and downloaded once at `npm install` time into the user's standard cache
+directory:
+
+| OS | Cache location |
+|---|---|
+| macOS | `~/Library/Caches/phi-code/camoufox/v1.0.0/<platform>-<arch>/` |
+| Windows | `%LOCALAPPDATA%\phi-code\camoufox\v1.0.0\<platform>-<arch>\` |
+| Linux | `$XDG_CACHE_HOME/phi-code/camoufox/v1.0.0/<platform>-<arch>/` |
+
+The cache survives `rm -rf node_modules`. Postinstall is non-fatal: if the
+network is blocked, `npm install` still succeeds and the browser tools
+surface a clear error on first use (retry with `npx @phi-code-admin/camoufox-js fetch`).
+
+**Supported platforms (binaries shipped):**
+darwin-arm64, darwin-x64, linux-x64, linux-arm64, linux-ia32,
+win32-x64, win32-ia32.
+
+**Env vars:**
+
+| Var | Purpose |
+|---|---|
+| `PHI_BROWSER_DISABLED=1` | Turn the extension off entirely (leaves `web_search` / `fetch_url`). |
+| `CAMOUFOX_BIN_DIR=/path` | Override the cache lookup (air-gapped CI / pre-baked Docker images). |
+| `CAMOUFOX_SKIP_DOWNLOAD=1` | Skip the postinstall download. |
+| `CAMOUFOX_ALLOW_GITHUB_FETCH=1` | Fall back to the upstream `daijro/camoufox` releases instead of the re-host. |
+| `CAMOFOX_CRASH_REPORT_URL=https://...` | Re-enable crash telemetry (OFF by default in this fork). |
+
+See [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md) for the full
+vendoring contract (MPL-2.0 / MIT compliance, PHI-VENDOR markers,
+re-sync instructions).
 
 ---
 
@@ -920,6 +972,7 @@ Pi is exceptional. Its minimalist philosophy — a 200-token system prompt, 4 ba
 - 12 bundled coding skills loaded on demand
 - 8 Alibaba Coding Plan models pre-configured (works with any provider)
 - Web search integration
+- Bundled Camoufox browser engine (10 browser_* tools, anti-detect Firefox)
 
 **What we didn't touch:**
 - Pi's core agent loop
@@ -935,6 +988,9 @@ Only 2 lines modified in Pi's source — the config directory name (`.pi` → `.
 - **[Mario Zechner](https://github.com/badlogic)** — For creating Pi and releasing it under MIT. If you like Phi Code, go star [Pi](https://github.com/badlogic/pi-mono). ⭐
 - **[Alibaba Cloud](https://www.alibabacloud.com/)** — For the Coding Plan and pre-configured model support
 - **The Pi community** — For the extension ecosystem and provider integrations
+- **[daijro](https://github.com/daijro)** — For [Camoufox](https://github.com/daijro/camoufox), the anti-detect Firefox fork that powers the bundled browser engine (MPL-2.0). Re-hosted binaries: [uglyswap/phi-code/releases/binaries-v1.0.0](https://github.com/uglyswap/phi-code/releases/tag/binaries-v1.0.0).
+- **[Apify](https://github.com/apify/camoufox-js)** — For `camoufox-js`, the JS launcher we vendored (MPL-2.0).
+- **[Jo Inc](https://github.com/jo-inc/camofox-browser)** — For `camofox-browser`, the OpenClaw automation server we vendored (MIT).
 
 ---
 
