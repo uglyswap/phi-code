@@ -370,6 +370,15 @@ export class AgentSessionRuntime {
 		});
 		this.beforeSessionInvalidate?.();
 		this.session.dispose();
+		// Settings writes are queued asynchronously via SettingsManager.writeQueue.
+		// Flush them here so a /model choice (defaultProvider/defaultModel) or any
+		// other setting changed during the session is persisted before the caller
+		// calls process.exit(). Best effort — never throws.
+		try {
+			await this.session.settingsManager.flush();
+		} catch {
+			// no-op
+		}
 	}
 }
 

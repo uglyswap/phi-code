@@ -3288,6 +3288,17 @@ export class InteractiveMode {
 		await this.ui.terminal.drainInput(1000);
 
 		this.stop();
+
+		// Flush pending settings writes (defaultProvider/defaultModel from /model,
+		// theme changes, etc.) before process.exit so the user's choice survives
+		// the next session. The settings writer is async (writeQueue) so without
+		// this, process.exit(0) can race the file write and lose the update.
+		try {
+			await this.settingsManager.flush();
+		} catch {
+			// Persisting settings should never block shutdown — best effort.
+		}
+
 		await this.runtimeHost.dispose();
 		process.exit(0);
 	}
