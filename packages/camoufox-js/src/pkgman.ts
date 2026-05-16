@@ -403,7 +403,19 @@ function userCacheDir(appName: string): string {
 }
 
 export function installedVerStr(): string {
-	return Version.fromPath().fullString;
+	// PHI-VENDOR: route through camoufoxPath() so the version probe reads
+	// the phi-code-managed cache (or CAMOUFOX_BIN_DIR override) first, and
+	// only falls back to the legacy INSTALL_DIR when nothing else is set.
+	// Without this, utils.ts:600 -> Version.fromPath() always hit the old
+	// `~/.cache/camoufox` location and threw "Version information not
+	// found" even when the binary was correctly installed in
+	// `~/.cache/phi-code/camoufox/v1.0.0/<platform>-<arch>/camoufox-bin`.
+	try {
+		const candidate = camoufoxPath(false);
+		return Version.fromPath(candidate).fullString;
+	} catch {
+		return Version.fromPath().fullString;
+	}
 }
 
 /**
