@@ -1,6 +1,6 @@
 {
 	"name": "@phi-code-admin/phi-code",
-	"version": "0.75.7",
+	"version": "0.76.0",
 	"description": "Coding agent CLI with persistent memory, sub-agents, intelligent routing, and orchestration",
 	"type": "module",
 	"piConfig": {
@@ -47,6 +47,7 @@
 	},
 	"dependencies": {
 		"@mariozechner/jiti": "^2.6.5",
+		"@phi-code-admin/browser": "^1.0.0",
 		"@silvia-odwyer/photon-node": "^0.3.4",
 		"chalk": "^5.5.0",
 		"cli-highlight": "^2.1.11",

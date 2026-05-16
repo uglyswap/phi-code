@@ -1,0 +1,27 @@
+{
+  "name": "@phi-code-admin/camoufox-bin-win32-ia32",
+  "version": "1.0.0",
+  "description": "Camoufox v135.0.1-beta.24 binary for win32/ia32. Bundled with @phi-code-admin/camoufox-js. MPL-2.0.",
+  "license": "MPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/uglyswap/phi-code.git",
+    "directory": "packages/camoufox-bin-win32-ia32"
+  },
+  "homepage": "https://github.com/uglyswap/phi-code/tree/main/packages/camoufox-bin-win32-ia32",
+  "bugs": {
+    "url": "https://github.com/uglyswap/phi-code/issues"
+  },
+  "files": [
+    "camoufox-bin/",
+    "LICENSE",
+    "README.md",
+    "VENDORED_FROM.md"
+  ],
+  "camoufoxBin": {
+    "upstreamVersion": "135.0.1",
+    "upstreamRelease": "beta.24",
+    "launchFile": "camoufox.exe"
+  },
+  "private": true
+}

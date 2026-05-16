@@ -1,0 +1,44 @@
+node_modules/
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Runtime
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Build
+dist/
+build/
+/plugin.js.map
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# .github/ — removed to allow CI workflow tracking
+fly.toml
+
+# Camoufox cache
+.camoufox/
+
+# Test artifacts
+test-results/
+playwright-report/

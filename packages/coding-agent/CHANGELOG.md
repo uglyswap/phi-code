@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.76.0] - 2026-05-16
+
+### Added
+
+- **Bundled browser engine.** Phi-code now ships a fully self-hosted
+  Camoufox stack as new optional dependency `@phi-code-admin/browser` and
+  a new `browser.ts` extension that registers ten high-level tools:
+  `browser_navigate`, `browser_extract`, `browser_screenshot`,
+  `browser_search`, `browser_click`, `browser_type`, `browser_scroll`,
+  `browser_snapshot`, `browser_close_tab`, `browser_list_tabs`. Backed by
+  vendored snapshots of [apify/camoufox-js](https://github.com/apify/camoufox-js)
+  (MPL-2.0) and [jo-inc/camofox-browser](https://github.com/jo-inc/camofox-browser)
+  (MIT). Camoufox v135.0.1-beta.24 binaries are re-hosted on
+  [uglyswap/phi-code releases](https://github.com/uglyswap/phi-code/releases/tag/binaries-v1.0.0)
+  and downloaded once by the camoufox-js postinstall — no runtime call to
+  daijro/camoufox.
+- New env vars: `PHI_BROWSER_DISABLED=1`, `CAMOUFOX_BIN_DIR=/path`,
+  `CAMOUFOX_SKIP_DOWNLOAD=1`, `CAMOUFOX_ALLOW_GITHUB_FETCH=1`,
+  `CAMOFOX_CRASH_REPORT_URL=https://your-relay` (crash telemetry is OFF
+  by default — see THIRD_PARTY_LICENSES.md).
+
+## [0.75.7] - 2026-05-15
+
+### Fixed
+
+- Settings flush before process.exit so `/model` persists across sessions.
+
+## [0.75.6] - 2026-05-15
+
+### Fixed
+
+- `/model` is now the single source of truth for the chat default model.
+  The smart router no longer auto-switches per prompt (autoSwitch=off by
+  default; re-enable with `/routing autoswitch on`). `/phi-init` and
+  `/setup` no longer offer "Default model" — orchestration roles only.
+
 ## [Unreleased]
 
 ### Added

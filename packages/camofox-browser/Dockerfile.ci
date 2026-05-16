@@ -1,0 +1,84 @@
+# CI/CD Dockerfile — downloads binaries during build (no bind mounts needed).
+# For local builds with pre-downloaded binaries, use the default Dockerfile + Makefile.
+
+FROM node:20-slim
+
+ARG CAMOUFOX_VERSION=135.0.1
+ARG CAMOUFOX_RELEASE=beta.24
+ARG TARGETARCH
+
+# Install dependencies for Camoufox (Firefox-based)
+RUN apt-get update && apt-get install -y \
+    # Firefox dependencies
+    libgtk-3-0 \
+    libdbus-glib-1-2 \
+    libxt6 \
+    libasound2 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxi6 \
+    libxrandr2 \
+    libxrender1 \
+    libxss1 \
+    libxtst6 \
+    # Mesa OpenGL/EGL for WebGL support (software rendering via llvmpipe)
+    libegl1-mesa \
+    libgl1-mesa-dri \
+    libgbm1 \
+    # Xvfb virtual display
+    xvfb \
+    # Fonts
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    fontconfig \
+    # Utils
+    ca-certificates \
+    curl \
+    unzip \
+    # yt-dlp runtime dependency
+    python3-minimal \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download and install Camoufox
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64) CAMOUFOX_ARCH="x86_64"; YTDLP_SUFFIX="" ;; \
+      arm64) CAMOUFOX_ARCH="arm64";   YTDLP_SUFFIX="_aarch64" ;; \
+      *) echo "Unsupported arch: ${TARGETARCH}" && exit 1 ;; \
+    esac; \
+    mkdir -p /root/.cache/camoufox; \
+    curl -fSL "https://github.com/daijro/camoufox/releases/download/v${CAMOUFOX_VERSION}-${CAMOUFOX_RELEASE}/camoufox-${CAMOUFOX_VERSION}-${CAMOUFOX_RELEASE}-lin.${CAMOUFOX_ARCH}.zip" \
+      -o /tmp/camoufox.zip; \
+    (unzip -q /tmp/camoufox.zip -d /root/.cache/camoufox || true); \
+    chmod -R 755 /root/.cache/camoufox; \
+    echo "{\"version\":\"${CAMOUFOX_VERSION}\",\"release\":\"${CAMOUFOX_RELEASE}\"}" > /root/.cache/camoufox/version.json; \
+    test -f /root/.cache/camoufox/camoufox-bin && echo "Camoufox installed successfully"; \
+    rm /tmp/camoufox.zip; \
+    curl -fSL "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux${YTDLP_SUFFIX}" \
+      -o /usr/local/bin/yt-dlp; \
+    chmod 755 /usr/local/bin/yt-dlp
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY scripts/ ./scripts/
+RUN PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --production
+
+COPY server.js ./
+COPY camofox.config.json ./
+COPY lib/ ./lib/
+COPY plugins/ ./plugins/
+COPY scripts/ ./scripts/
+
+# Install default plugin dependencies
+RUN scripts/install-plugin-deps.sh
+
+ENV NODE_ENV=production
+ENV CAMOFOX_PORT=9377
+
+EXPOSE 9377
+
+CMD ["sh", "-c", "node --max-old-space-size=${MAX_OLD_SPACE_SIZE:-128} server.js"]
