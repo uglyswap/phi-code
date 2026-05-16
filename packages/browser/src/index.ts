@@ -31,6 +31,7 @@ let serverPort: number | null = null;
 let bootPromise: Promise<{ baseUrl: string }> | null = null;
 
 const DEFAULT_USER_ID = "phi-default";
+const DEFAULT_SESSION_KEY = "phi-default-session";
 const HEALTH_TIMEOUT_MS = 30_000;
 const HEALTH_POLL_INTERVAL_MS = 250;
 
@@ -269,21 +270,32 @@ async function request<T = unknown>(pathname: string, options: RequestOptions = 
 export interface CreateTabResult {
 	tabId: string;
 	userId: string;
+	sessionKey: string;
 	url?: string;
 }
 
-/** Open a new browser tab. Returns the tab id used by the other tools. */
+/**
+ * Open a new browser tab. Returns the tab id used by the other tools.
+ *
+ * The camofox-browser REST contract requires every tab to be associated
+ * with a `userId` (logical user) AND a `sessionKey` (logical session
+ * inside that user — used to group tabs that should share cookies /
+ * fingerprints / proxies). Phi-code's chat agents only need one of each,
+ * so both default to a constant sentinel when omitted.
+ */
 export async function createTab(options: {
 	userId?: string;
+	sessionKey?: string;
 	url?: string;
 	viewport?: { width: number; height: number };
-}): Promise<CreateTabResult> {
+} = {}): Promise<CreateTabResult> {
 	const userId = options.userId ?? DEFAULT_USER_ID;
-	const body: Record<string, unknown> = { userId };
+	const sessionKey = options.sessionKey ?? DEFAULT_SESSION_KEY;
+	const body: Record<string, unknown> = { userId, sessionKey };
 	if (options.url) body.url = options.url;
 	if (options.viewport) body.viewport = options.viewport;
 	const res = await request<{ tabId: string }>("/tabs", { method: "POST", body });
-	return { tabId: res.tabId, userId, url: options.url };
+	return { tabId: res.tabId, userId, sessionKey, url: options.url };
 }
 
 export interface NavigateResult {
@@ -302,16 +314,25 @@ export async function navigate(options: {
 	url: string;
 	tabId?: string;
 	userId?: string;
+	sessionKey?: string;
 	waitUntil?: "load" | "domcontentloaded" | "networkidle";
 	timeoutMs?: number;
 }): Promise<NavigateResult> {
 	let tabId = options.tabId;
 	if (!tabId) {
-		const tab = await createTab({ userId: options.userId, url: options.url });
+		const tab = await createTab({
+			userId: options.userId,
+			sessionKey: options.sessionKey,
+			url: options.url,
+		});
 		tabId = tab.tabId;
 		return { tabId, url: options.url };
 	}
-	const body: Record<string, unknown> = { url: options.url };
+	const body: Record<string, unknown> = {
+		userId: options.userId ?? DEFAULT_USER_ID,
+		sessionKey: options.sessionKey ?? DEFAULT_SESSION_KEY,
+		url: options.url,
+	};
 	if (options.waitUntil) body.waitUntil = options.waitUntil;
 	if (options.timeoutMs) body.timeoutMs = options.timeoutMs;
 	const res = await request<{ status?: number; loadEvent?: string }>(
@@ -325,8 +346,10 @@ export async function navigate(options: {
  * Get an accessibility snapshot (DOM tree with ref ids) of the given tab.
  * Refs returned here can be used with `click`/`type`/`scroll`.
  */
-export async function snapshot(options: { tabId: string }): Promise<unknown> {
-	return await request(`/tabs/${encodeURIComponent(options.tabId)}/snapshot`);
+export async function snapshot(options: { tabId: string; userId?: string }): Promise<unknown> {
+	const userId = options.userId ?? DEFAULT_USER_ID;
+	const qs = `?userId=${encodeURIComponent(userId)}`;
+	return await request(`/tabs/${encodeURIComponent(options.tabId)}/snapshot${qs}`);
 }
 
 export interface ExtractResult {
@@ -346,6 +369,7 @@ export interface ExtractResult {
 export async function extract(options: {
 	tabId?: string;
 	userId?: string;
+	sessionKey?: string;
 	url?: string;
 	mode?: "readability" | "html" | "text";
 }): Promise<ExtractResult> {
@@ -354,19 +378,32 @@ export async function extract(options: {
 		if (!options.url) {
 			throw new Error("extract() requires either tabId or url");
 		}
-		const tab = await createTab({ userId: options.userId, url: options.url });
+		const tab = await createTab({
+			userId: options.userId,
+			sessionKey: options.sessionKey,
+			url: options.url,
+		});
 		tabId = tab.tabId;
 		// Wait for the navigation to settle before extracting.
 		await request(`/tabs/${encodeURIComponent(tabId)}/wait`, {
 			method: "POST",
-			body: { event: "load" },
+			body: { userId: options.userId ?? DEFAULT_USER_ID, event: "load" },
 		}).catch(() => {});
 	} else if (options.url) {
-		await navigate({ tabId, url: options.url });
+		await navigate({
+			tabId,
+			url: options.url,
+			userId: options.userId,
+			sessionKey: options.sessionKey,
+		});
 	}
 	const res = await request<ExtractResult>(`/tabs/${encodeURIComponent(tabId)}/extract`, {
 		method: "POST",
-		body: { mode: options.mode ?? "readability" },
+		body: {
+			userId: options.userId ?? DEFAULT_USER_ID,
+			sessionKey: options.sessionKey ?? DEFAULT_SESSION_KEY,
+			mode: options.mode ?? "readability",
+		},
 	});
 	return res;
 }
@@ -380,15 +417,16 @@ export interface ScreenshotResult {
 /** Capture a screenshot of the given tab as a base64-encoded PNG. */
 export async function screenshot(options: {
 	tabId: string;
+	userId?: string;
 	fullPage?: boolean;
 	clip?: { x: number; y: number; width: number; height: number };
 }): Promise<ScreenshotResult> {
 	const query = new URLSearchParams();
+	query.set("userId", options.userId ?? DEFAULT_USER_ID);
 	if (options.fullPage) query.set("fullPage", "1");
 	if (options.clip) query.set("clip", JSON.stringify(options.clip));
-	const qs = query.toString();
 	const res = await request<{ image?: string; mimeType?: string }>(
-		`/tabs/${encodeURIComponent(options.tabId)}/screenshot${qs ? `?${qs}` : ""}`,
+		`/tabs/${encodeURIComponent(options.tabId)}/screenshot?${query.toString()}`,
 	);
 	return {
 		tabId: options.tabId,
@@ -406,6 +444,7 @@ export async function search(options: {
 	query: string;
 	engine?: "google" | "duckduckgo" | "bing";
 	userId?: string;
+	sessionKey?: string;
 }): Promise<ExtractResult> {
 	const engine = options.engine ?? "duckduckgo";
 	const url =
@@ -414,12 +453,13 @@ export async function search(options: {
 			: engine === "bing"
 				? `https://www.bing.com/search?q=${encodeURIComponent(options.query)}`
 				: `https://duckduckgo.com/?q=${encodeURIComponent(options.query)}`;
-	return await extract({ url, userId: options.userId });
+	return await extract({ url, userId: options.userId, sessionKey: options.sessionKey });
 }
 
 /** Click an element by ref (from `snapshot`) or CSS selector. */
 export async function click(options: {
 	tabId: string;
+	userId?: string;
 	ref?: string;
 	selector?: string;
 	button?: "left" | "right" | "middle";
@@ -427,7 +467,7 @@ export async function click(options: {
 	if (!options.ref && !options.selector) {
 		throw new Error("click() requires `ref` or `selector`");
 	}
-	const body: Record<string, unknown> = {};
+	const body: Record<string, unknown> = { userId: options.userId ?? DEFAULT_USER_ID };
 	if (options.ref) body.ref = options.ref;
 	if (options.selector) body.selector = options.selector;
 	if (options.button) body.button = options.button;
@@ -441,13 +481,17 @@ export async function click(options: {
 /** Type text into a focused element (or one targeted via ref/selector). */
 export async function type(options: {
 	tabId: string;
+	userId?: string;
 	text: string;
 	ref?: string;
 	selector?: string;
 	pressEnter?: boolean;
 	delayMs?: number;
 }): Promise<{ tabId: string }> {
-	const body: Record<string, unknown> = { text: options.text };
+	const body: Record<string, unknown> = {
+		userId: options.userId ?? DEFAULT_USER_ID,
+		text: options.text,
+	};
 	if (options.ref) body.ref = options.ref;
 	if (options.selector) body.selector = options.selector;
 	if (options.pressEnter) body.pressEnter = options.pressEnter;
@@ -462,11 +506,15 @@ export async function type(options: {
 /** Scroll the page or a specific element by ref. */
 export async function scroll(options: {
 	tabId: string;
+	userId?: string;
 	direction: "up" | "down" | "left" | "right";
 	ref?: string;
 	pixels?: number;
 }): Promise<{ tabId: string }> {
-	const body: Record<string, unknown> = { direction: options.direction };
+	const body: Record<string, unknown> = {
+		userId: options.userId ?? DEFAULT_USER_ID,
+		direction: options.direction,
+	};
 	if (options.ref) body.ref = options.ref;
 	if (options.pixels) body.pixels = options.pixels;
 	await request(`/tabs/${encodeURIComponent(options.tabId)}/scroll`, {
@@ -477,8 +525,10 @@ export async function scroll(options: {
 }
 
 /** Close a single tab. The underlying browser context is kept warm. */
-export async function closeTab(options: { tabId: string }): Promise<{ tabId: string }> {
-	await request(`/tabs/${encodeURIComponent(options.tabId)}`, { method: "DELETE" });
+export async function closeTab(options: { tabId: string; userId?: string }): Promise<{ tabId: string }> {
+	const userId = options.userId ?? DEFAULT_USER_ID;
+	const qs = `?userId=${encodeURIComponent(userId)}`;
+	await request(`/tabs/${encodeURIComponent(options.tabId)}${qs}`, { method: "DELETE" });
 	return { tabId: options.tabId };
 }
 
