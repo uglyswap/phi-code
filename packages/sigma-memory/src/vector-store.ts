@@ -89,13 +89,25 @@ export class VectorStore {
 		if (this.modelPromise) return this.modelPromise;
 
 		this.modelPromise = (async () => {
-			console.log("[VectorStore] Loading embedding model (Xenova/all-MiniLM-L6-v2)...");
-			console.log("[VectorStore] First run may download the model (~23MB).");
+			// Choose the smallest quantised variant by default. The model
+			// (Xenova/all-MiniLM-L6-v2) ships in three flavours on the HF
+			// hub: fp32 (~90 MB), fp16 (~45 MB), q8 (~22 MB). On CPU — which
+			// is where phi-code's memory subsystem runs — q8 is 2-3× faster
+			// than fp32 with negligible quality loss for 384-dim sentence
+			// embeddings. Override with PHI_EMBEDDING_DTYPE=fp32|fp16|q8.
+			const requestedDtype = process.env.PHI_EMBEDDING_DTYPE;
+			const dtype: "fp32" | "fp16" | "q8" =
+				requestedDtype === "fp32" || requestedDtype === "fp16" || requestedDtype === "q8"
+					? requestedDtype
+					: "q8";
+
+			console.log(`[VectorStore] Loading embedding model (Xenova/all-MiniLM-L6-v2, dtype=${dtype})...`);
+			console.log(`[VectorStore] First run may download the model (~${dtype === "q8" ? "22" : dtype === "fp16" ? "45" : "90"}MB).`);
 
 			// Dynamic ESM import for @huggingface/transformers (ESM-only package)
 			const { pipeline: createPipeline } = await esmImport("@huggingface/transformers");
 
-			this.pipeline = await createPipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+			this.pipeline = await createPipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", { dtype });
 
 			console.log("[VectorStore] Embedding model loaded.");
 		})();
