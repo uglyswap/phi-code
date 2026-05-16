@@ -22,6 +22,10 @@
  *     user keeps the legacy `web_search` / `fetch_url` only).
  */
 
+import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "phi-code";
 
@@ -32,17 +36,64 @@ import type { ExtensionAPI } from "phi-code";
 type BrowserApi = typeof import("@phi-code-admin/browser");
 
 let cachedApi: BrowserApi | undefined;
-let importError: Error | undefined;
+
+/**
+ * Resolve `@phi-code-admin/browser` from the host phi-code installation
+ * (the binary that loaded us, via `process.argv[1]`), not from this file's
+ * location. The extension is typically copied by phi-code's postinstall
+ * into `~/.phi/agent/extensions/browser.ts`, which has no `node_modules`
+ * of its own — a plain `import("@phi-code-admin/browser")` would resolve
+ * relative to that copy and fail. Walking the resolution from
+ * `process.argv[1]` (the `phi` CLI entry, which DOES sit next to its
+ * bundled `node_modules`) finds the package every time.
+ */
+function browserPackageFromPhi(): string | undefined {
+	const cliPath = process.argv[1];
+	if (!cliPath) return undefined;
+	try {
+		const req = createRequire(pathToFileURL(cliPath));
+		return req.resolve("@phi-code-admin/browser");
+	} catch {
+		// Fall through — we'll try walking up from cliPath manually.
+	}
+	let dir = dirname(cliPath);
+	for (let depth = 0; depth < 8; depth++) {
+		const candidate = join(dir, "node_modules", "@phi-code-admin", "browser", "dist", "index.js");
+		if (existsSync(candidate)) return candidate;
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return undefined;
+}
 
 async function getBrowserApi(): Promise<BrowserApi> {
 	if (cachedApi) return cachedApi;
-	if (importError) throw importError;
+
+	// 1. Try the standard dynamic import first. This works when the extension
+	//    lives next to a `node_modules/@phi-code-admin/browser` (dev / monorepo
+	//    layouts and any setup where the user has run a fresh `npm install` in
+	//    the extension's directory).
 	try {
 		cachedApi = (await import("@phi-code-admin/browser")) as BrowserApi;
 		return cachedApi;
-	} catch (err) {
-		importError = err instanceof Error ? err : new Error(String(err));
-		throw importError;
+	} catch (firstErr) {
+		// 2. Fall back to resolving through the phi CLI binary, which always
+		//    sits next to its bundled deps even when the extension was copied
+		//    elsewhere by the postinstall script.
+		const resolved = browserPackageFromPhi();
+		if (resolved) {
+			try {
+				cachedApi = (await import(pathToFileURL(resolved).href)) as BrowserApi;
+				return cachedApi;
+			} catch (secondErr) {
+				// Re-throw the second error: it's the more informative one.
+				throw secondErr instanceof Error ? secondErr : new Error(String(secondErr));
+			}
+		}
+		// 3. No path worked. Throw the original error WITHOUT caching it, so
+		//    the user can fix their install and the next tool call retries.
+		throw firstErr instanceof Error ? firstErr : new Error(String(firstErr));
 	}
 }
 

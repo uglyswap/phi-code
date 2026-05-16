@@ -103,26 +103,60 @@ export async function ensureServer(): Promise<{ baseUrl: string }> {
 			detached: false,
 		});
 
-		// Surface crashes during boot, but never propagate to the consumer.
+		// Surface child stderr so the user can see crash reasons. Once the
+		// server has become healthy we go quiet again unless
+		// PHI_BROWSER_VERBOSE=1 is set. Boot-time crashes ALWAYS print —
+		// otherwise a silent E22-style "failed to become healthy" exception
+		// is unsurmountable from the consumer side.
+		const stderrTail: string[] = [];
+		let healthy = false;
 		child.stderr?.on("data", (chunk: Buffer) => {
-			if (process.env.PHI_BROWSER_VERBOSE) {
-				process.stderr.write(`[camofox] ${chunk}`);
+			const text = chunk.toString();
+			if (!healthy || process.env.PHI_BROWSER_VERBOSE) {
+				process.stderr.write(`[camofox] ${text}`);
 			}
+			stderrTail.push(text);
+			while (stderrTail.length > 200) stderrTail.shift();
 		});
 		child.on("exit", (code) => {
 			serverProcess = null;
 			serverPort = null;
 			bootPromise = null;
-			if (process.env.PHI_BROWSER_VERBOSE) {
+			if (!healthy || process.env.PHI_BROWSER_VERBOSE) {
 				process.stderr.write(`[camofox] server exited with code ${code}\n`);
 			}
 		});
+		// Expose stderr tail through a wrapper that promotes the listener
+		// flip — needed below when waitForHealth resolves.
+		(child as { __markHealthy?: () => void }).__markHealthy = () => {
+			healthy = true;
+		};
+		(child as { __stderrTail?: string[] }).__stderrTail = stderrTail;
 
 		serverProcess = child;
 		serverPort = port;
 
 		const baseUrl = `http://127.0.0.1:${port}`;
-		await waitForHealth(baseUrl);
+		try {
+			await waitForHealth(baseUrl);
+			(child as { __markHealthy?: () => void }).__markHealthy?.();
+		} catch (err) {
+			// Augment the health-check error with whatever the child wrote to
+			// stderr so the consumer has at least one breadcrumb to follow.
+			const tail = ((child as { __stderrTail?: string[] }).__stderrTail ?? [])
+				.join("")
+				.split(/\r?\n/)
+				.filter(Boolean)
+				.slice(-20)
+				.join("\n");
+			const original = err instanceof Error ? err.message : String(err);
+			const augmented = new Error(
+				tail
+					? `${original}\nLast stderr lines from camofox-browser child:\n${tail}`
+					: `${original}\n(no stderr captured — set PHI_BROWSER_VERBOSE=1 for more)`,
+			);
+			throw augmented;
+		}
 		return { baseUrl };
 	})();
 

@@ -1,5 +1,8 @@
-import { Camoufox, launchOptions } from 'camoufox-js';
-import { VirtualDisplay } from 'camoufox-js/dist/virtdisplay.js';
+// PHI-VENDOR: upstream imports the package as `camoufox-js`; we re-published
+// the same code under `@phi-code-admin/camoufox-js`, so the scoped import is
+// required for the npm-installed bundle to resolve.
+import { Camoufox, launchOptions } from '@phi-code-admin/camoufox-js';
+import { VirtualDisplay } from '@phi-code-admin/camoufox-js/dist/virtdisplay.js';
 import { firefox } from 'playwright-core';
 import express from 'express';
 import crypto from 'crypto';
