@@ -1,6 +1,7 @@
 import { execSync } from "node:child_process";
 import type { PathLike } from "node:fs";
 import * as fs from "node:fs";
+import { createRequire } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { Writable } from "node:stream";
@@ -31,6 +32,36 @@ const OS_MAP: { [key: string]: "mac" | "win" | "lin" } = {
 	linux: "lin",
 	win32: "win",
 };
+
+// PHI-VENDOR: Map node `process.platform`/`process.arch` tuples to the npm
+// package name of the bundled Camoufox binary. The bundled package layout
+// is published as @phi-code-admin/camoufox-bin-<platform>-<arch> and ships
+// the extracted Camoufox tree under `camoufox-bin/`. This list MUST stay
+// in sync with packages/camoufox-js/package.json#optionalDependencies and
+// with the per-platform packages under packages/camoufox-bin-*.
+const BUNDLED_BINARY_PACKAGES: ReadonlyArray<{
+	platform: NodeJS.Platform;
+	arch: string;
+	pkg: string;
+}> = [
+	{ platform: "darwin", arch: "arm64", pkg: "@phi-code-admin/camoufox-bin-darwin-arm64" },
+	{ platform: "darwin", arch: "x64", pkg: "@phi-code-admin/camoufox-bin-darwin-x64" },
+	{ platform: "linux", arch: "arm64", pkg: "@phi-code-admin/camoufox-bin-linux-arm64" },
+	{ platform: "linux", arch: "ia32", pkg: "@phi-code-admin/camoufox-bin-linux-ia32" },
+	{ platform: "linux", arch: "x64", pkg: "@phi-code-admin/camoufox-bin-linux-x64" },
+	{ platform: "win32", arch: "ia32", pkg: "@phi-code-admin/camoufox-bin-win32-ia32" },
+	{ platform: "win32", arch: "x64", pkg: "@phi-code-admin/camoufox-bin-win32-x64" },
+];
+
+/**
+ * PHI-VENDOR: When `true`, allow the upstream `daijro/camoufox` releases
+ * API fallback path. When `false` (default), only the bundled npm packages
+ * are used. Set `CAMOUFOX_ALLOW_GITHUB_FETCH=1` to opt back into the
+ * upstream-fetch behaviour preserved from apify/camoufox-js@562117321.
+ */
+const ALLOW_GITHUB_FETCH =
+	process.env.CAMOUFOX_ALLOW_GITHUB_FETCH === "1" ||
+	process.env.CAMOUFOX_ALLOW_GITHUB_FETCH === "true";
 
 function getAuthorizationHeaders(url: string): HeadersInit {
 	const githubToken = process.env.GITHUB_TOKEN;
@@ -368,24 +399,83 @@ export function installedVerStr(): string {
 	return Version.fromPath().fullString;
 }
 
+/**
+ * PHI-VENDOR: Look up the bundled Camoufox binary published as
+ * `@phi-code-admin/camoufox-bin-<platform>-<arch>` next to this package
+ * in `node_modules`. Returns the absolute path to the extracted Camoufox
+ * tree (the directory containing `version.json` and the launch binary)
+ * or `undefined` if the matching bin package isn't installed (e.g. user
+ * is on an unsupported arch, or installed with `--no-optional`).
+ *
+ * Resolution uses `createRequire` to honour the host's `node_modules`
+ * hierarchy — so this works whether camoufox-js lives in the consumer's
+ * top-level `node_modules/`, in a pnpm `.pnpm` store, in a yarn berry PnP
+ * setup, or inside the monorepo workspace symlink.
+ */
+function findBundledBinary(): string | undefined {
+	const arch = process.arch;
+	const match = BUNDLED_BINARY_PACKAGES.find(
+		(entry) => entry.platform === process.platform && entry.arch === arch,
+	);
+	if (!match) return undefined;
+
+	const require = createRequire(import.meta.url);
+	let pkgManifest: string;
+	try {
+		pkgManifest = require.resolve(`${match.pkg}/package.json`);
+	} catch {
+		return undefined;
+	}
+
+	const pkgDir = path.dirname(pkgManifest);
+	const binDir = path.join(pkgDir, "camoufox-bin");
+	if (!fs.existsSync(binDir)) return undefined;
+
+	const versionFile = path.join(binDir, "version.json");
+	if (!fs.existsSync(versionFile)) return undefined;
+
+	try {
+		if (!Version.isSupportedPath(binDir)) return undefined;
+	} catch {
+		return undefined;
+	}
+
+	return binDir;
+}
+
 export function camoufoxPath(downloadIfMissing: boolean = true): PathLike {
-	// Ensure the directory exists and is not empty
-	if (!fs.existsSync(INSTALL_DIR) || fs.readdirSync(INSTALL_DIR).length === 0) {
-		if (!downloadIfMissing) {
-			throw new Error(`Camoufox executable not found at ${INSTALL_DIR}`);
-		}
-	} else if (
-		fs.existsSync(INSTALL_DIR) &&
-		Version.isSupportedPath(INSTALL_DIR)
-	) {
-		return INSTALL_DIR;
-	} else {
+	// PHI-VENDOR: priority 1 — bundled binary from the npm optional dep.
+	// This is the default path on a clean `npm install` of phi-code: zero
+	// network access, no GitHub roundtrip.
+	const bundled = findBundledBinary();
+	if (bundled) return bundled;
+
+	// PHI-VENDOR: priority 2 — legacy `~/.cache/camoufox` install (used by
+	// `npx camoufox-js fetch` and by upstream apify/camoufox-js).
+	if (fs.existsSync(INSTALL_DIR) && fs.readdirSync(INSTALL_DIR).length > 0) {
+		if (Version.isSupportedPath(INSTALL_DIR)) return INSTALL_DIR;
 		if (!downloadIfMissing) {
 			throw new UnsupportedVersion("Camoufox executable is outdated.");
 		}
+	} else if (!downloadIfMissing) {
+		throw new Error(
+			`Camoufox binary not found. Bundled package missing for ${process.platform}-${process.arch}, ` +
+				`and ${INSTALL_DIR} is empty. Install with \`npm install @phi-code-admin/camoufox-bin-${process.platform}-${process.arch}\` ` +
+				`or set CAMOUFOX_ALLOW_GITHUB_FETCH=1 to fetch from upstream.`,
+		);
 	}
 
-	// Install and recheck
+	// PHI-VENDOR: priority 3 — opt-in upstream fetch (preserved for users
+	// who deliberately want the legacy behaviour, e.g. fork developers
+	// testing against a newer daijro/camoufox release before vendoring it).
+	if (!ALLOW_GITHUB_FETCH) {
+		throw new CamoufoxNotInstalled(
+			`Camoufox binary not found for ${process.platform}-${process.arch}.\n` +
+				`Expected package @phi-code-admin/camoufox-bin-${process.platform}-${process.arch} to be installed via npm.\n` +
+				`To enable the legacy upstream-fetch path, set CAMOUFOX_ALLOW_GITHUB_FETCH=1.`,
+		);
+	}
+
 	const fetcher = new CamoufoxFetcher();
 	fetcher.install().then(() => camoufoxPath());
 	return INSTALL_DIR;
