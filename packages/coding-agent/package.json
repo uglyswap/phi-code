@@ -1,6 +1,6 @@
 {
 	"name": "@phi-code-admin/phi-code",
-	"version": "0.76.1",
+	"version": "0.76.2",
 	"description": "Coding agent CLI with persistent memory, sub-agents, intelligent routing, and orchestration",
 	"type": "module",
 	"piConfig": {
@@ -64,7 +64,7 @@
 		"phi-code-tui": "^0.74.0",
 		"proper-lockfile": "^4.1.2",
 		"sigma-agents": "^0.1.7",
-		"sigma-memory": "^0.2.1",
+		"sigma-memory": "^0.2.2",
 		"sigma-skills": "^0.1.2",
 		"strip-ansi": "^7.1.0",
 		"typebox": "^1.1.24",
