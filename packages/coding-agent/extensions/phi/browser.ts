@@ -137,7 +137,7 @@ export default function browserExtension(pi: ExtensionAPI) {
 			),
 			timeoutMs: Type.Optional(Type.Number()),
 		}),
-		execute: async (params) => {
+		execute: async (_toolCallId, params) => {
 			const api = await getBrowserApi();
 			const res = await api.navigate(params);
 			return { content: [{ type: "text", text: jsonResult(res) }] };
@@ -169,7 +169,7 @@ export default function browserExtension(pi: ExtensionAPI) {
 				]),
 			),
 		}),
-		execute: async (params) => {
+		execute: async (_toolCallId, params) => {
 			const api = await getBrowserApi();
 			const res = await api.extract(params);
 			return { content: [{ type: "text", text: jsonResult(res) }] };
@@ -190,7 +190,7 @@ export default function browserExtension(pi: ExtensionAPI) {
 			tabId: Type.String(),
 			fullPage: Type.Optional(Type.Boolean()),
 		}),
-		execute: async (params) => {
+		execute: async (_toolCallId, params) => {
 			const api = await getBrowserApi();
 			const res = await api.screenshot(params);
 			return { content: [{ type: "text", text: jsonResult(res) }] };
@@ -219,7 +219,7 @@ export default function browserExtension(pi: ExtensionAPI) {
 				]),
 			),
 		}),
-		execute: async (params) => {
+		execute: async (_toolCallId, params) => {
 			const api = await getBrowserApi();
 			const res = await api.search(params);
 			return { content: [{ type: "text", text: jsonResult(res) }] };
@@ -251,7 +251,7 @@ export default function browserExtension(pi: ExtensionAPI) {
 				]),
 			),
 		}),
-		execute: async (params) => {
+		execute: async (_toolCallId, params) => {
 			const api = await getBrowserApi();
 			const res = await api.click(params);
 			return { content: [{ type: "text", text: jsonResult(res) }] };
@@ -277,7 +277,7 @@ export default function browserExtension(pi: ExtensionAPI) {
 			pressEnter: Type.Optional(Type.Boolean()),
 			delayMs: Type.Optional(Type.Number()),
 		}),
-		execute: async (params) => {
+		execute: async (_toolCallId, params) => {
 			const api = await getBrowserApi();
 			const res = await api.type(params);
 			return { content: [{ type: "text", text: jsonResult(res) }] };
@@ -305,7 +305,7 @@ export default function browserExtension(pi: ExtensionAPI) {
 			ref: Type.Optional(Type.String()),
 			pixels: Type.Optional(Type.Number()),
 		}),
-		execute: async (params) => {
+		execute: async (_toolCallId, params) => {
 			const api = await getBrowserApi();
 			const res = await api.scroll(params);
 			return { content: [{ type: "text", text: jsonResult(res) }] };
@@ -326,7 +326,7 @@ export default function browserExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({
 			tabId: Type.String(),
 		}),
-		execute: async (params) => {
+		execute: async (_toolCallId, params) => {
 			const api = await getBrowserApi();
 			const res = await api.snapshot(params);
 			return { content: [{ type: "text", text: jsonResult(res) }] };
@@ -344,7 +344,7 @@ export default function browserExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({
 			tabId: Type.String(),
 		}),
-		execute: async (params) => {
+		execute: async (_toolCallId, params) => {
 			const api = await getBrowserApi();
 			const res = await api.closeTab(params);
 			return { content: [{ type: "text", text: jsonResult(res) }] };
@@ -362,7 +362,7 @@ export default function browserExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({
 			userId: Type.Optional(Type.String()),
 		}),
-		execute: async (params) => {
+		execute: async (_toolCallId, params) => {
 			const api = await getBrowserApi();
 			const res = await api.listTabs(params);
 			return { content: [{ type: "text", text: jsonResult(res) }] };
