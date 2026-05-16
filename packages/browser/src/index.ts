@@ -461,10 +461,11 @@ export async function listTabs(options: { userId?: string } = {}): Promise<Liste
 	// camofox-browser exposes tabs in /metrics; for a focused listing we
 	// fall back to the underlying session endpoint when available, else
 	// derive from /metrics.
-	const metrics = await request<{ tabs?: ListedTab[] }>(
+	type TabsResp = { tabs?: ListedTab[] };
+	const metrics = await request<TabsResp>(
 		`/sessions/${encodeURIComponent(userId)}/tabs`,
-	).catch(async () => {
-		const all = await request<{ tabs?: ListedTab[] }>("/metrics").catch(() => ({}));
+	).catch(async (): Promise<TabsResp> => {
+		const all = await request<TabsResp>("/metrics").catch((): TabsResp => ({}));
 		return { tabs: Array.isArray(all.tabs) ? all.tabs : [] };
 	});
 	return metrics.tabs ?? [];

@@ -7,6 +7,7 @@
 	"bin": "dist/__main__.js",
 	"files": [
 		"dist",
+		"scripts/postinstall.mjs",
 		"LICENSE.md",
 		"NOTICE",
 		"VENDORED_FROM.md",
@@ -44,9 +45,10 @@
 		"access": "public"
 	},
 	"scripts": {
-		"build": "rimraf dist && tsc && shx cp -r src/data-files dist/data-files",
+		"build": "rimraf dist && tsc && shx cp -r src/data-files dist/data-files && shx cp scripts/postinstall.mjs dist/postinstall.mjs",
 		"test": "vitest --run",
-		"check": "biome check"
+		"check": "biome check",
+		"postinstall": "node ./dist/postinstall.mjs || true"
 	},
 	"dependencies": {
 		"adm-zip": "^0.5.16",
@@ -61,15 +63,6 @@
 		"pretty-bytes": "^7.1.0",
 		"ua-parser-js": "^2.0.2",
 		"xml2js": "^0.6.2"
-	},
-	"optionalDependencies": {
-		"@phi-code-admin/camoufox-bin-darwin-arm64": "1.0.0",
-		"@phi-code-admin/camoufox-bin-darwin-x64": "1.0.0",
-		"@phi-code-admin/camoufox-bin-linux-arm64": "1.0.0",
-		"@phi-code-admin/camoufox-bin-linux-ia32": "1.0.0",
-		"@phi-code-admin/camoufox-bin-linux-x64": "1.0.0",
-		"@phi-code-admin/camoufox-bin-win32-ia32": "1.0.0",
-		"@phi-code-admin/camoufox-bin-win32-x64": "1.0.0"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.4.10",

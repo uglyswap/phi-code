@@ -118,7 +118,7 @@
     ]
   },
   "scripts": {
-    "build": "tsc -p . || true; mkdir -p dist && cp plugin.js dist/plugin.js",
+    "build": "shx mkdir -p dist && shx cp plugin.js dist/plugin.js",
     "prepublishOnly": "npm run build",
     "start": "node server.js",
     "test": "NODE_OPTIONS='--experimental-vm-modules' jest --runInBand --forceExit",

@@ -1,6 +1,10 @@
 node_modules/
 yarn.lock
 .yarn
-scripts/
+# PHI-VENDOR: scripts/ was upstream-ignored because it held generated
+# fingerprint helpers. We use scripts/postinstall.mjs (committed) — track
+# everything except node_modules/temp downloads.
+scripts/temp/
+scripts/*.mmdb
 *.mmdb
 dist/
