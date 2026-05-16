@@ -1,0 +1,7 @@
+# VNC stack: x11vnc attaches to Camoufox's Xvfb, noVNC + websockify expose it over HTTP
+x11vnc
+novnc
+python3-websockify
+# Utilities for display detection
+net-tools
+procps
