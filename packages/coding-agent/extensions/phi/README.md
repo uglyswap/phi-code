@@ -1,6 +1,6 @@
 # Phi Code Extensions
 
-10 TypeScript extensions automatically loaded at startup.
+11 TypeScript extensions automatically loaded at startup.
 
 ## Extensions
 
@@ -17,6 +17,31 @@
 | **Setup** | `setup.ts` | — | `/setup` | — |
 | **Keys** | `keys.ts` | — | `/keys` | `session_start` (hot-reload watcher) |
 | **Models** | `models.ts` | — | `/models` | `session_start` (background catalog refresh) |
+| **Browser** | `browser.ts` | `browser_navigate`, `browser_extract`, `browser_screenshot`, `browser_search`, `browser_click`, `browser_type`, `browser_scroll`, `browser_snapshot`, `browser_close_tab`, `browser_list_tabs` | — | `session_shutdown` (kill Firefox) |
+
+## Bundled browser engine (Camoufox)
+
+The `browser.ts` extension exposes ten high-level tools backed by a
+vendored snapshot of [Camoufox](https://github.com/daijro/camoufox) v135.0.1-beta.24
+(anti-detect Firefox fork, MPL-2.0). It bypasses Cloudflare and most
+bot-detection that plain `fetch` + cheerio can't.
+
+  - Phi-code ships **its own copy** of the JS launcher and the OpenClaw
+    automation server (`@phi-code-admin/camoufox-js`,
+    `@phi-code-admin/camofox-browser`, `@phi-code-admin/browser`) so no
+    third-party-maintained npm package sits on the critical path.
+  - The Firefox binary itself is re-hosted on
+    [uglyswap/phi-code releases](https://github.com/uglyswap/phi-code/releases/tag/binaries-v1.0.0)
+    and downloaded once by the camoufox-js postinstall, cached under
+    `~/.cache/phi-code/camoufox/v1.0.0/<platform>-<arch>/` (XDG / Library /
+    LOCALAPPDATA respected). No runtime call to daijro/camoufox.
+  - `PHI_BROWSER_DISABLED=1` turns the extension off without uninstalling.
+  - `CAMOUFOX_BIN_DIR=/absolute/path` overrides the cache (air-gapped CI).
+  - `CAMOUFOX_SKIP_DOWNLOAD=1` skips the postinstall download; useful when
+    you want to ship pre-baked Docker images.
+
+The web-search cascade (`web_search`, `/search`) is unchanged — Camoufox
+is an additional capability, not a replacement.
 
 ## Live Model Catalogs
 

@@ -22,5 +22,14 @@
 		}
 	},
 	"include": ["packages/*/src/**/*", "packages/*/test/**/*", "packages/coding-agent/examples/**/*"],
-	"exclude": ["packages/web-ui/**/*", "packages/mom/**/*", "packages/pods/**/*", "**/dist/**"]
+	"exclude": [
+		"packages/web-ui/**/*",
+		"packages/mom/**/*",
+		"packages/pods/**/*",
+		"packages/camoufox-js/**/*",
+		"packages/camofox-browser/**/*",
+		"packages/camoufox-bin-*/**/*",
+		"packages/browser/**/*",
+		"**/dist/**"
+	]
 }
