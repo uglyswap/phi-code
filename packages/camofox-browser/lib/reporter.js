@@ -459,17 +459,16 @@ class RateLimiter {
 // Crash relay client
 // ============================================================================
 
-// Reports are sent to a Cloudflare Worker relay. All credentials are
-// environment secrets on the relay -- nothing sensitive ships in this package.
+// PHI-VENDOR: Crash relay endpoint defaults to empty (telemetry disabled).
+// The original upstream endpoint pointed to a Cloudflare Worker maintained
+// by Jo Inc (askjo.workers.dev). The phi-code vendored snapshot ships with
+// telemetry off by default — users who want their own relay can set
+// CAMOFOX_CRASH_REPORT_URL explicitly.
 //
-// Default endpoint: https://camofox-telemetry.askjo.workers.dev
-// Override:      CAMOFOX_CRASH_REPORT_URL=https://your-own-endpoint/report
-//
-// The relay source lives at workers/crash-reporter/index.ts in this repo.
-// Verify: GET /source returns { commit, sha256 } to compare against the repo.
-// Full source: https://github.com/jo-inc/camofox-browser/blob/main/workers/crash-reporter/index.ts
+// Upstream endpoint (for reference, not used unless re-enabled):
+//   https://camofox-telemetry.askjo.workers.dev/report
 
-const DEFAULT_RELAY_URL = 'https://camofox-telemetry.askjo.workers.dev/report';
+const DEFAULT_RELAY_URL = process.env.CAMOFOX_CRASH_REPORT_URL || '';
 const FETCH_TIMEOUT_MS = 5000;
 
 let _relayUrl = DEFAULT_RELAY_URL;
@@ -486,6 +485,10 @@ function fetchWithTimeout(url, options) {
  * Never throws -- reporter must never crash the server.
  */
 export async function sendToRelay(payload) {
+  // PHI-VENDOR: telemetry disabled by default. When CAMOFOX_CRASH_REPORT_URL
+  // is unset (the new default), this is a no-op — no network call leaves
+  // the user's machine. Set the env var explicitly to opt back in.
+  if (!_relayUrl) return false;
   try {
     const resp = await fetchWithTimeout(_relayUrl, {
       method: 'POST',
