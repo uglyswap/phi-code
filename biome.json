@@ -39,6 +39,10 @@
 			"!packages/sigma-memory/**/*",
 			"!packages/sigma-agents/**/*",
 			"!packages/sigma-skills/**/*",
+			"!packages/camoufox-js/**/*",
+			"!packages/camofox-browser/**/*",
+			"!packages/camoufox-bin-*/**/*",
+			"!packages/browser/**/*",
 			"!!**/node_modules"
 		]
 	}

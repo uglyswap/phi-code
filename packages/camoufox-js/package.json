@@ -1,0 +1,84 @@
+{
+	"name": "@phi-code-admin/camoufox-js",
+	"version": "1.0.0",
+	"description": "Phi-code vendored JS port of Camoufox (anti-detect Firefox launcher). Snapshot of apify/camoufox-js@562117321 with binary lookup via @phi-code-admin/camoufox-bin-* optional deps instead of GitHub fetch. MPL-2.0.",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"bin": "dist/__main__.js",
+	"files": [
+		"dist",
+		"scripts/postinstall.mjs",
+		"LICENSE.md",
+		"NOTICE",
+		"VENDORED_FROM.md",
+		"README.md"
+	],
+	"type": "module",
+	"keywords": [
+		"camoufox",
+		"camoufox-js",
+		"firefox",
+		"anti-detect",
+		"stealth",
+		"playwright",
+		"phi-code"
+	],
+	"author": "uglyswap (vendored from apify/camoufox-js, MPL-2.0)",
+	"contributors": [
+		"daijro (Camoufox upstream)",
+		"Apify (camoufox-js JS port)"
+	],
+	"license": "MPL-2.0",
+	"homepage": "https://github.com/uglyswap/phi-code/tree/main/packages/camoufox-js",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/uglyswap/phi-code.git",
+		"directory": "packages/camoufox-js"
+	},
+	"bugs": {
+		"url": "https://github.com/uglyswap/phi-code/issues"
+	},
+	"engines": {
+		"node": ">= 20"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"build": "rimraf dist && tsc && shx cp -r src/data-files dist/data-files && shx cp scripts/postinstall.mjs dist/postinstall.mjs",
+		"test": "vitest --run",
+		"check": "biome check",
+		"postinstall": "node ./dist/postinstall.mjs || true"
+	},
+	"dependencies": {
+		"adm-zip": "^0.5.16",
+		"better-sqlite3": "^12.2.0",
+		"cli-progress": "^3.12.0",
+		"commander": "^14.0.0",
+		"fingerprint-generator": "^2.1.66",
+		"glob": "^13.0.0",
+		"impit": "^0.13.0",
+		"language-tags": "^2.0.1",
+		"maxmind": "^5.0.0",
+		"pretty-bytes": "^7.1.0",
+		"ua-parser-js": "^2.0.2",
+		"xml2js": "^0.6.2"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.4.10",
+		"@types/adm-zip": "^0.5.7",
+		"@types/better-sqlite3": "^7.6.13",
+		"@types/cli-progress": "^3.11.6",
+		"@types/language-tags": "^1.0.4",
+		"@types/node": "^24.0.0",
+		"@types/xml2js": "^0.4.14",
+		"playwright-core": "^1.53.1",
+		"rimraf": "^6.0.1",
+		"shx": "^0.4.0",
+		"typescript": "^5.8.3",
+		"vitest": "^4.0.0"
+	},
+	"peerDependencies": {
+		"playwright-core": "*"
+	}
+}

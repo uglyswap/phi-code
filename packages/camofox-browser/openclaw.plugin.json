@@ -1,0 +1,268 @@
+{
+  "id": "@skyfallsin/camofox-browser",
+  "name": "Camofox Browser",
+  "description": "Anti-detection browser automation for AI agents using Camoufox (Firefox-based)",
+  "version": "1.10.1",
+  "envVars": {
+    "CAMOFOX_API_KEY": {
+      "description": "Secret key for the cookie-import endpoint. Cookie import is disabled when unset. Only set this if you need to import browser cookies and the server is local or access-controlled.",
+      "required": false,
+      "sensitive": true
+    },
+    "CAMOFOX_ACCESS_KEY": {
+      "description": "Global bearer token for all routes (except /health). When set, every request must include Authorization: Bearer <key>. Recommended when exposing the server beyond localhost.",
+      "required": false,
+      "sensitive": true
+    },
+    "CAMOFOX_CRASH_REPORT_ENABLED": {
+      "description": "Enable or disable anonymized crash/hang telemetry. Set to 'false' to disable all outbound telemetry.",
+      "required": false,
+      "sensitive": false,
+      "default": "true"
+    },
+    "CAMOFOX_CRASH_REPORT_URL": {
+      "description": "Telemetry endpoint URL. Override to point to a self-hosted endpoint instead of the default.",
+      "required": false,
+      "sensitive": false,
+      "default": "https://camofox-telemetry.askjo.workers.dev/report"
+    },
+    "CAMOUFOX_EXECUTABLE": {
+      "description": "External Camoufox executable to use instead of downloading the bundled browser. Compatibility aliases: CAMOUFOX_EXECUTABLE_PATH, CAMOFOX_EXECUTABLE_PATH.",
+      "required": false,
+      "sensitive": false
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "Camoufox browser server URL"
+      },
+      "port": {
+        "type": "number",
+        "description": "Server port (used if url not set)",
+        "default": 9377
+      },
+      "autoStart": {
+        "type": "boolean",
+        "description": "Auto-start the camofox-browser server with the Gateway",
+        "default": true
+      },
+      "maxSessions": {
+        "type": "number",
+        "description": "Maximum concurrent browser sessions (server default: 50)",
+        "default": 5
+      },
+      "maxTabsPerSession": {
+        "type": "number",
+        "description": "Maximum tabs per session (server default: 10)",
+        "default": 3
+      },
+      "sessionTimeoutMs": {
+        "type": "number",
+        "description": "Session inactivity timeout in milliseconds (server default: 1800000)",
+        "default": 600000
+      },
+      "browserIdleTimeoutMs": {
+        "type": "number",
+        "description": "Kill browser after this many ms with no sessions (0 = never)",
+        "default": 300000
+      },
+      "maxOldSpaceSize": {
+        "type": "number",
+        "description": "Node.js V8 heap limit in MB",
+        "default": 128
+      },
+      "apiKey": {
+        "type": "string",
+        "description": "Secret key for cookie import endpoint. Cookie import is disabled if unset. Set via CAMOFOX_API_KEY env var."
+      },
+      "accessKey": {
+        "type": "string",
+        "description": "If set, all routes (except /health) require Authorization: Bearer <key>. Set via CAMOFOX_ACCESS_KEY env var."
+      },
+      "crashReportEnabled": {
+        "type": "boolean",
+        "description": "Enable anonymized crash/hang telemetry. Set false to disable all outbound telemetry.",
+        "default": true
+      },
+      "crashReportUrl": {
+        "type": "string",
+        "description": "Telemetry endpoint URL. Override to point to a self-hosted endpoint. Set via CAMOFOX_CRASH_REPORT_URL env var.",
+        "default": "https://camofox-telemetry.askjo.workers.dev/report"
+      }
+    },
+    "additionalProperties": false
+  },
+  "telemetry": {
+    "crashReporter": {
+      "description": "Anonymized crash/hang telemetry for identifying failure patterns. All credentials are environment secrets on the endpoint -- nothing sensitive ships in this package.",
+      "enabled": true,
+      "optOut": "CAMOFOX_CRASH_REPORT_ENABLED=false",
+      "endpoint": "https://camofox-telemetry.askjo.workers.dev/report",
+      "endpointSource": "https://github.com/jo-inc/camofox-browser/blob/main/workers/crash-reporter/index.ts",
+      "endpointVerification": "https://camofox-telemetry.askjo.workers.dev/source",
+      "selfHostable": true,
+      "selfHostOverride": "CAMOFOX_CRASH_REPORT_URL",
+      "dataCollected": [
+        "error type and anonymized stack trace",
+        "node/platform version and uptime",
+        "memory and resource counters (no content)",
+        "HMAC-hashed private domains (not reversible)",
+        "public domains verbatim (e.g. cloudflare.com, amazon.com)"
+      ],
+      "dataNeverCollected": [
+        "page content or DOM",
+        "URLs with paths, query params, or credentials",
+        "cookies, tokens, API keys, or secrets",
+        "IP addresses or email addresses",
+        "user-identifiable information"
+      ]
+    }
+  },
+  "uiHints": {
+    "url": {
+      "label": "Server URL",
+      "placeholder": "http://localhost:9377"
+    },
+    "port": {
+      "label": "Server Port",
+      "placeholder": "9377"
+    },
+    "autoStart": {
+      "label": "Auto-start server with Gateway"
+    },
+    "maxSessions": {
+      "label": "Max Sessions",
+      "placeholder": "5"
+    },
+    "maxTabsPerSession": {
+      "label": "Max Tabs per Session",
+      "placeholder": "3"
+    },
+    "sessionTimeoutMs": {
+      "label": "Session Timeout (ms)",
+      "placeholder": "600000"
+    },
+    "browserIdleTimeoutMs": {
+      "label": "Browser Idle Timeout (ms)",
+      "placeholder": "300000"
+    },
+    "maxOldSpaceSize": {
+      "label": "Node Heap Limit (MB)",
+      "placeholder": "128"
+    },
+    "apiKey": {
+      "label": "Cookie Import API Key (CAMOFOX_API_KEY)",
+      "placeholder": "Leave empty to disable cookie import"
+    },
+    "accessKey": {
+      "label": "Global Access Key (CAMOFOX_ACCESS_KEY)",
+      "placeholder": "Leave empty for localhost-only access"
+    },
+    "crashReportEnabled": {
+      "label": "Enable Telemetry"
+    },
+    "crashReportUrl": {
+      "label": "Telemetry Endpoint URL",
+      "placeholder": "https://camofox-telemetry.askjo.workers.dev/report"
+    }
+  },
+  "tools": [
+    "camofox_create_tab",
+    "camofox_snapshot",
+    "camofox_click",
+    "camofox_type",
+    "camofox_navigate",
+    "camofox_scroll",
+    "camofox_screenshot",
+    "camofox_close_tab",
+    "camofox_list_tabs",
+    "camofox_import_cookies"
+  ],
+  "runtimeDependencies": {
+    "camoufox": {
+      "description": "Camoufox anti-detection browser (Firefox fork). Downloaded at install time by camoufox-js unless CAMOUFOX_EXECUTABLE points to an external bundle.",
+      "source": "https://github.com/nicedayzhu/camoufox/releases",
+      "installer": "camoufox-js (npm)",
+      "installedBy": "postinstall script: npx camoufox-js fetch, skipped when CAMOUFOX_EXECUTABLE is set",
+      "sizeApprox": "300MB",
+      "platforms": [
+        "linux-x86_64",
+        "linux-aarch64",
+        "macos-x86_64",
+        "macos-aarch64"
+      ],
+      "verifiedBy": "camoufox-js verifies download integrity via GitHub release checksums"
+    }
+  },
+  "permissions": {
+    "network": {
+      "outbound": [
+        {
+          "target": "User-specified URLs (browsed pages)",
+          "purpose": "Browser automation -- navigating to URLs the agent requests",
+          "gatedBy": "Agent request via API"
+        },
+        {
+          "target": "https://camofox-telemetry.askjo.workers.dev/report",
+          "purpose": "Anonymized crash/hang telemetry",
+          "gatedBy": "CAMOFOX_CRASH_REPORT_ENABLED (default: true, set false to disable)"
+        }
+      ],
+      "inbound": {
+        "target": "localhost:9377 (default)",
+        "purpose": "REST API for browser automation",
+        "gatedBy": "CAMOFOX_ACCESS_KEY (optional -- when set, all routes require Bearer auth)"
+      }
+    },
+    "filesystem": {
+      "read": [
+        {
+          "path": "~/.camofox/cookies/",
+          "purpose": "Read Netscape cookie files for authenticated browsing",
+          "gatedBy": "CAMOFOX_API_KEY (disabled entirely when unset)"
+        },
+        {
+          "path": "/proc/self/status (Linux only)",
+          "purpose": "Memory and resource metrics for telemetry",
+          "gatedBy": "Only read when telemetry is enabled"
+        }
+      ],
+      "write": [
+        {
+          "path": "~/.camofox/profiles/<hashed-userId>/",
+          "purpose": "Persisted session state (cookies + localStorage) so users stay logged in across restarts",
+          "gatedBy": "persistence plugin (enabled by default, disable via camofox.config.json)"
+        },
+        {
+          "path": "~/.camofox/traces/<hashed-userId>/",
+          "purpose": "Optional Playwright session traces for debugging",
+          "gatedBy": "trace: true flag on tab creation (opt-in per session, off by default)"
+        }
+      ]
+    },
+    "subprocess": [
+      {
+        "binary": "Camoufox (Firefox fork)",
+        "purpose": "The browser engine -- core functionality",
+        "isolation": "lib/launcher.js (child_process isolated from route handlers)"
+      },
+      {
+        "binary": "yt-dlp (optional)",
+        "purpose": "YouTube transcript extraction (fast path)",
+        "isolation": "plugins/youtube/youtube.js (child_process isolated from route handlers)"
+      }
+    ]
+  },
+  "securityModel": {
+    "architecture": "All process.env reads are in lib/config.js. All child_process usage is in lib/launcher.js and plugins/youtube/youtube.js. server.js has route handlers but zero process.env reads and zero child_process imports. No single file combines secrets access with network sends.",
+    "cookieImport": "DISABLED by default. Requires CAMOFOX_API_KEY to be explicitly set. Without the key, the server rejects all cookie requests with 403. Cookie files are read from a sandboxed directory (~/.camofox/cookies/) with path traversal protection.",
+    "accessControl": "CAMOFOX_ACCESS_KEY provides global bearer auth for all routes (except /health). Recommended for any non-localhost deployment.",
+    "crashReporting": "Anonymized via lib/reporter.js (L28-290). Private domains are HMAC-hashed. No page content, cookies, tokens, IPs, or user data is ever sent. Relay source is in-repo and auditable. Verification endpoint: GET /source returns commit hash and sha256.",
+    "binaryDownload": "Camoufox is downloaded at npm install time by camoufox-js unless CAMOUFOX_EXECUTABLE points to an external Camoufox bundle. Downloaded binaries come from official GitHub releases with integrity verification by camoufox-js.",
+    "sessionPersistence": "User sessions are persisted to ~/.camofox/profiles/ so authenticated browsing survives restarts. UserIds are hashed for directory names. Disable via persistence plugin config.",
+    "noEmbeddedSecrets": "Zero credentials, private keys, or tokens ship in this package. All secrets are environment variables or Cloudflare Worker secrets."
+  }
+}

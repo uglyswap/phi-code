@@ -39,3 +39,8 @@ plans/
 .pi/hf-sessions/
 .pi/hf-sessions-backup/
 collect.sh
+
+# Camoufox vendoring (feat/vendor-camoufox)
+.binaries-cache/
+vendor-staging/
+packages/camoufox-bin-*/camoufox-bin/
