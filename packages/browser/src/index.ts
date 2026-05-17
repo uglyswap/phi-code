@@ -224,6 +224,11 @@ interface RequestOptions {
 	body?: unknown;
 	headers?: Record<string, string>;
 	timeoutMs?: number;
+	/**
+	 * When `"binary"`, return the raw response body as a Uint8Array instead
+	 * of JSON-parsing it. Used for endpoints that stream `image/png` etc.
+	 */
+	responseType?: "json" | "binary";
 }
 
 async function request<T = unknown>(pathname: string, options: RequestOptions = {}): Promise<T> {
@@ -243,6 +248,29 @@ async function request<T = unknown>(pathname: string, options: RequestOptions = 
 			body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
 			signal: controller.signal,
 		});
+
+		if (options.responseType === "binary") {
+			if (!res.ok) {
+				// Even on error, the body is JSON — fall through to error parsing.
+				const text = await res.text();
+				let parsed: unknown = undefined;
+				if (text) {
+					try {
+						parsed = JSON.parse(text);
+					} catch {
+						parsed = text;
+					}
+				}
+				const message =
+					typeof parsed === "object" && parsed && "error" in parsed
+						? String((parsed as { error: unknown }).error)
+						: `HTTP ${res.status}`;
+				throw new Error(`${method} ${pathname} → ${message}`);
+			}
+			const buffer = new Uint8Array(await res.arrayBuffer());
+			return buffer as unknown as T;
+		}
+
 		const text = await res.text();
 		let parsed: unknown = undefined;
 		if (text) {
@@ -397,15 +425,49 @@ export async function extract(options: {
 			sessionKey: options.sessionKey,
 		});
 	}
-	const res = await request<ExtractResult>(`/tabs/${encodeURIComponent(tabId)}/extract`, {
-		method: "POST",
-		body: {
-			userId: options.userId ?? DEFAULT_USER_ID,
-			sessionKey: options.sessionKey ?? DEFAULT_SESSION_KEY,
-			mode: options.mode ?? "readability",
+
+	// The camofox-browser POST /tabs/:tabId/extract endpoint is a
+	// *deterministic* extractor that requires a structured `schema` of
+	// refs from a prior snapshot — it's not a Readability extractor. Phi
+	// callers expect a plain `{title, content, textContent}` blob, so we
+	// achieve that via /evaluate, running a small Readability-style script
+	// inside the page. This keeps the public API stable regardless of how
+	// the camofox-browser server evolves.
+	const mode = options.mode ?? "readability";
+	const expression = `(() => {
+		const limit = 50000;
+		const title = document.title || "";
+		const url = window.location.href || "";
+		if (${JSON.stringify(mode)} === "html") {
+			return { title, url, content: document.documentElement.outerHTML.slice(0, limit) };
+		}
+		if (${JSON.stringify(mode)} === "text") {
+			return { title, url, textContent: (document.body && document.body.innerText || "").slice(0, limit) };
+		}
+		// readability-light: strip nav/footer/header/aside, keep <main>/<article>/body.
+		const clone = document.cloneNode(true);
+		clone.querySelectorAll("script,style,noscript,iframe,nav,footer,header,aside,svg,form").forEach((el) => el.remove());
+		const root = clone.querySelector("main") || clone.querySelector("article") || clone.body || clone;
+		const text = (root.innerText || root.textContent || "").replace(/\\n{3,}/g, "\\n\\n").trim();
+		const excerpt = text.slice(0, 240);
+		return {
+			title,
+			url,
+			content: root.innerHTML ? root.innerHTML.slice(0, limit) : undefined,
+			textContent: text.slice(0, limit),
+			excerpt,
+			length: text.length,
+		};
+	})()`;
+
+	const evalRes = await request<{ ok?: boolean; result?: ExtractResult }>(
+		`/tabs/${encodeURIComponent(tabId)}/evaluate`,
+		{
+			method: "POST",
+			body: { userId: options.userId ?? DEFAULT_USER_ID, expression },
 		},
-	});
-	return res;
+	);
+	return evalRes.result ?? {};
 }
 
 export interface ScreenshotResult {
@@ -419,19 +481,22 @@ export async function screenshot(options: {
 	tabId: string;
 	userId?: string;
 	fullPage?: boolean;
-	clip?: { x: number; y: number; width: number; height: number };
 }): Promise<ScreenshotResult> {
 	const query = new URLSearchParams();
 	query.set("userId", options.userId ?? DEFAULT_USER_ID);
-	if (options.fullPage) query.set("fullPage", "1");
-	if (options.clip) query.set("clip", JSON.stringify(options.clip));
-	const res = await request<{ image?: string; mimeType?: string }>(
+	// The server expects `fullPage=true` (string match), not `=1`.
+	if (options.fullPage) query.set("fullPage", "true");
+	// The camofox-browser screenshot endpoint streams a raw `image/png`
+	// body, not a JSON envelope. Pull it as a Uint8Array and base64-encode
+	// here so the result is JSON-safe for the tool result channel.
+	const bytes = await request<Uint8Array>(
 		`/tabs/${encodeURIComponent(options.tabId)}/screenshot?${query.toString()}`,
+		{ responseType: "binary" },
 	);
 	return {
 		tabId: options.tabId,
-		mimeType: res.mimeType ?? "image/png",
-		bytesBase64: res.image ?? "",
+		mimeType: "image/png",
+		bytesBase64: Buffer.from(bytes).toString("base64"),
 	};
 }
 
