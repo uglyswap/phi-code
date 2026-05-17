@@ -1,6 +1,6 @@
 {
 	"name": "@phi-code-admin/browser",
-	"version": "1.0.3",
+	"version": "1.0.4",
 	"description": "Phi-code browser automation API: lazy-start the bundled Camoufox + camofox-browser server and expose 10 high-level tools (navigate, extract, screenshot, click, type, scroll, snapshot, search, close_tab, list_tabs) as plain ES module functions. Zero external dependencies at runtime.",
 	"type": "module",
 	"main": "dist/index.js",
