@@ -1,4 +1,5 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import type { PathLike } from "node:fs";
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
@@ -305,6 +306,71 @@ export class CamoufoxFetcher extends GitHubDownloader {
 		zip.extractAllTo(INSTALL_DIR.toString(), true);
 	}
 
+	/**
+	 * PHI-VENDOR: Verify the downloaded zip against the `SHA256SUMS` asset
+	 * published alongside it in the same GitHub Release. The sums file is
+	 * same-origin as the zip, so this only guards against in-transit
+	 * corruption (not a fully compromised release); it nonetheless closes the
+	 * gap where the `fetch`/auto-install path extracted and executed an
+	 * unverified binary, unlike scripts/postinstall.mjs which already verifies.
+	 *
+	 * Fails closed when a checksum IS published for the asset and does not
+	 * match. When no `SHA256SUMS` asset exists for the release (e.g. some
+	 * upstream daijro releases), it logs that integrity could not be verified
+	 * and proceeds, to preserve the opt-in legacy fetch behaviour.
+	 */
+	async verifyIntegrity(zipFilePath: string): Promise<void> {
+		const downloadUrl = this.url;
+		const assetName = decodeURIComponent(downloadUrl.split("/").pop() || "");
+		const sumsUrl = `${downloadUrl.slice(0, downloadUrl.lastIndexOf("/"))}/SHA256SUMS`;
+
+		let sumsText: string;
+		try {
+			const res = await fetch(sumsUrl, {
+				headers: getAuthorizationHeaders(sumsUrl),
+			});
+			if (!res.ok) {
+				console.warn(
+					`Skipping integrity check: SHA256SUMS not available (HTTP ${res.status}) at ${sumsUrl}.`,
+				);
+				return;
+			}
+			sumsText = await res.text();
+		} catch (e) {
+			console.warn(
+				`Skipping integrity check: failed to fetch SHA256SUMS (${e}).`,
+			);
+			return;
+		}
+
+		const expected = CamoufoxFetcher.parseSumsMap(sumsText).get(assetName);
+		if (!expected) {
+			console.warn(
+				`Skipping integrity check: SHA256SUMS does not list "${assetName}".`,
+			);
+			return;
+		}
+
+		const actual = createHash("sha256")
+			.update(fs.readFileSync(zipFilePath))
+			.digest("hex")
+			.toLowerCase();
+		if (actual !== expected.toLowerCase()) {
+			throw new Error(
+				`SHA256 mismatch for ${assetName}: expected ${expected}, got ${actual}`,
+			);
+		}
+	}
+
+	static parseSumsMap(text: string): Map<string, string> {
+		const map = new Map<string, string>();
+		for (const line of text.split(/\r?\n/)) {
+			const match = line.match(/^([0-9a-f]{64})\s+\*?(.+)$/i);
+			if (match) map.set(match[2].trim(), match[1].toLowerCase());
+		}
+		return map;
+	}
+
 	static cleanup(): boolean {
 		if (fs.existsSync(INSTALL_DIR)) {
 			fs.rmSync(INSTALL_DIR, { recursive: true });
@@ -333,11 +399,14 @@ export class CamoufoxFetcher extends GitHubDownloader {
 			await webdl(this.url, "Downloading Camoufox...", true, tempFileStream);
 			await new Promise((r) => tempFileStream.close(r));
 
+			await this.verifyIntegrity(tempFilePath);
 			await this.extractZip(tempFilePath);
 			this.setVersion();
 
 			if (OS_NAME !== "win") {
-				execSync(`chmod -R 755 ${INSTALL_DIR}`);
+				// No-shell call: avoids breaking on cache paths that contain
+				// spaces or shell metacharacters (e.g. "/Users/John Doe").
+				execFileSync("chmod", ["-R", "755", INSTALL_DIR.toString()]);
 			}
 
 			console.log("Camoufox successfully installed.");
@@ -508,9 +577,19 @@ export function camoufoxPath(downloadIfMissing: boolean = true): PathLike {
 		);
 	}
 
-	const fetcher = new CamoufoxFetcher();
-	fetcher.install().then(() => camoufoxPath());
-	return INSTALL_DIR;
+	// PHI-VENDOR: opt-in upstream fetch. camoufoxPath() is synchronous, so we
+	// cannot await the async install here without rippling `async` through
+	// every call site (getPath/launchPath). Returning INSTALL_DIR before the
+	// download completes used to make the first launch always fail with
+	// CamoufoxNotInstalled while a background download ran silently. Instead,
+	// fail loudly with an actionable message and let the user re-run after the
+	// explicit `fetch` command (which awaits install()) has populated the dir.
+	throw new CamoufoxNotInstalled(
+		`Camoufox binary not found for ${process.platform}-${process.arch}.\n` +
+			`CAMOUFOX_ALLOW_GITHUB_FETCH is set, but the binary is not installed yet.\n` +
+			`Run: npx @phi-code-admin/camoufox-js fetch  (downloads ~hundreds of MB from the daijro upstream),\n` +
+			`then re-run once the download completes.`,
+	);
 }
 
 export function getPath(file: string): string {

@@ -35,6 +35,7 @@ import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFi
 import { homedir, platform as osPlatform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
+import AdmZip from "adm-zip";
 
 const RELEASE_TAG = "binaries-v1.0.0";
 const UPSTREAM_VERSION = "135.0.1";
@@ -123,17 +124,13 @@ async function fetchSumsMap() {
 }
 
 function unzipTo(zipPath, destDir) {
+	// Extract with adm-zip (no shell) to avoid command-injection via paths
+	// that contain quotes/metacharacters (e.g. a Windows user "O'Brien" or an
+	// attacker-influenced LOCALAPPDATA/TMP). adm-zip 0.5.16+ is path-traversal
+	// hardened, and the archive itself is SHA256-verified before this call.
 	mkdirSync(destDir, { recursive: true });
-	if (process.platform === "win32") {
-		const psZip = zipPath.replace(/\//g, "\\");
-		const psDest = destDir.replace(/\//g, "\\");
-		execSync(
-			`powershell -NoProfile -Command "Expand-Archive -Path '${psZip}' -DestinationPath '${psDest}' -Force"`,
-			{ stdio: "inherit" },
-		);
-	} else {
-		execSync(`unzip -oq "${zipPath}" -d "${destDir}"`, { stdio: "inherit" });
-	}
+	const zip = new AdmZip(zipPath);
+	zip.extractAllTo(destDir, /* overwrite */ true);
 }
 
 function writeSyntheticVersionJson(binDir) {
