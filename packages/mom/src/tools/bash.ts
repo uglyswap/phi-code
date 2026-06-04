@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { createWriteStream } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
@@ -39,7 +39,6 @@ export function createBashTool(executor: Executor): AgentTool<typeof bashSchema>
 		) => {
 			// Track output for potential temp file writing
 			let tempFilePath: string | undefined;
-			let tempFileStream: ReturnType<typeof createWriteStream> | undefined;
 
 			const result = await executor.exec(command, { timeout, signal });
 			let output = "";
@@ -51,12 +50,21 @@ export function createBashTool(executor: Executor): AgentTool<typeof bashSchema>
 
 			const totalBytes = Buffer.byteLength(output, "utf-8");
 
-			// Write to temp file if output exceeds limit
+			// Write to temp file if output exceeds limit. Await the write and
+			// handle errors so a disk-full/permission failure degrades gracefully
+			// instead of crashing the process on an unhandled stream 'error', and
+			// so the path is only referenced once the file is fully flushed.
 			if (totalBytes > DEFAULT_MAX_BYTES) {
-				tempFilePath = getTempFilePath();
-				tempFileStream = createWriteStream(tempFilePath);
-				tempFileStream.write(output);
-				tempFileStream.end();
+				const candidatePath = getTempFilePath();
+				try {
+					await writeFile(candidatePath, output, "utf-8");
+					tempFilePath = candidatePath;
+				} catch (error) {
+					tempFilePath = undefined;
+					console.error(
+						`Failed to save full bash output to temp file: ${error instanceof Error ? error.message : String(error)}`,
+					);
+				}
 			}
 
 			// Apply tail truncation
@@ -75,15 +83,18 @@ export function createBashTool(executor: Executor): AgentTool<typeof bashSchema>
 				// Build actionable notice
 				const startLine = truncation.totalLines - truncation.outputLines + 1;
 				const endLine = truncation.totalLines;
+				const fullOutputNote = tempFilePath
+					? ` Full output: ${tempFilePath}`
+					: " (full output could not be saved)";
 
 				if (truncation.lastLinePartial) {
 					// Edge case: last line alone > 50KB
 					const lastLineSize = formatSize(Buffer.byteLength(output.split("\n").pop() || "", "utf-8"));
-					outputText += `\n\n[Showing last ${formatSize(truncation.outputBytes)} of line ${endLine} (line is ${lastLineSize}). Full output: ${tempFilePath}]`;
+					outputText += `\n\n[Showing last ${formatSize(truncation.outputBytes)} of line ${endLine} (line is ${lastLineSize}).${fullOutputNote}]`;
 				} else if (truncation.truncatedBy === "lines") {
-					outputText += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines}. Full output: ${tempFilePath}]`;
+					outputText += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines}.${fullOutputNote}]`;
 				} else {
-					outputText += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${tempFilePath}]`;
+					outputText += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit).${fullOutputNote}]`;
 				}
 			}
 

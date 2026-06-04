@@ -6,7 +6,7 @@ import { createEditTool } from "./edit.js";
 import { createReadTool } from "./read.js";
 import { createWriteTool } from "./write.js";
 
-export { setUploadFunction } from "./attach.js";
+export { setUploadFunction, setWorkspaceRoot } from "./attach.js";
 
 export function createMomTools(executor: Executor): AgentTool<any>[] {
 	return [

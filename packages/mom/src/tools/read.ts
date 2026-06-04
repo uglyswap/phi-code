@@ -65,19 +65,37 @@ export function createReadTool(executor: Executor): AgentTool<typeof readSchema>
 				};
 			}
 
-			// Get total line count first
-			const countResult = await executor.exec(`wc -l < ${shellEscape(path)}`, { signal });
+			// Get total line count first. `wc -l` counts newline characters, which
+			// equals the line count for a file that ends in a newline, but is one
+			// short for a file with no trailing newline (N newlines => N+1 lines).
+			// Detect the trailing newline via the last byte and only add 1 when it
+			// is absent, so the reported totals and bounds check are not off by one.
+			const countResult = await executor.exec(
+				`wc -l < ${shellEscape(path)}; printf x; tail -c1 ${shellEscape(path)}`,
+				{ signal },
+			);
 			if (countResult.code !== 0) {
 				throw new Error(countResult.stderr || `Failed to read file: ${path}`);
 			}
-			const totalFileLines = Number.parseInt(countResult.stdout.trim(), 10) + 1; // wc -l counts newlines, not lines
+			// stdout is "<newline-count>\n" followed by the literal "x" marker and
+			// then the file's last byte. Split on the LAST "x" so a file whose own
+			// last byte is "x" cannot corrupt the parse: everything after the
+			// marker is exactly the last byte (empty for an empty file).
+			const markerIndex = countResult.stdout.lastIndexOf("x");
+			const newlineCountStr = markerIndex >= 0 ? countResult.stdout.slice(0, markerIndex) : countResult.stdout;
+			const lastBytePart = markerIndex >= 0 ? countResult.stdout.slice(markerIndex + 1) : "";
+			const newlineCount = Number.parseInt(newlineCountStr.trim(), 10) || 0;
+			const endsWithNewline = lastBytePart === "\n";
+			// Empty file => 0 lines; otherwise add 1 only when there is no trailing newline.
+			const totalFileLines = newlineCount === 0 && lastBytePart === "" ? 0 : newlineCount + (endsWithNewline ? 0 : 1);
 
 			// Apply offset if specified (1-indexed)
 			const startLine = offset ? Math.max(1, offset) : 1;
 			const startLineDisplay = startLine;
 
-			// Check if offset is out of bounds
-			if (startLine > totalFileLines) {
+			// Check if an explicit offset is out of bounds. Without an offset we
+			// always read from line 1 (a 0-line empty file must still read cleanly).
+			if (offset !== undefined && startLine > totalFileLines) {
 				throw new Error(`Offset ${offset} is beyond end of file (${totalFileLines} lines total)`);
 			}
 

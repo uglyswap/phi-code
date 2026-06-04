@@ -21,7 +21,7 @@ import * as log from "./log.js";
 import { createExecutor, type SandboxConfig } from "./sandbox.js";
 import type { ChannelInfo, SlackContext, UserInfo } from "./slack.js";
 import type { ChannelStore } from "./store.js";
-import { createMomTools, setUploadFunction } from "./tools/index.js";
+import { createMomTools, setUploadFunction, setWorkspaceRoot } from "./tools/index.js";
 
 // Hardcoded model for now - TODO: make configurable (issue #63)
 const model = getModel("anthropic", "claude-sonnet-4-5");
@@ -681,6 +681,10 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 				const hostPath = translateToHostPath(filePath, channelDir, workspacePath, channelId);
 				await ctx.uploadFile(hostPath, title);
 			});
+			// Constrain the attach tool to the actual workspace root (container
+			// path in docker mode, host path in host mode) so its guard enforces
+			// correctly in both modes instead of rejecting legitimate host paths.
+			setWorkspaceRoot(workspacePath);
 
 			// Reset per-run state
 			runState.ctx = ctx;
