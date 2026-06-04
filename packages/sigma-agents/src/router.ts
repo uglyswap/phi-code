@@ -16,8 +16,13 @@ export class SmartRouter {
 		const lowerPrompt = prompt.toLowerCase();
 		const categories: TaskCategory[] = [];
 
+		if (!this.config?.routes) {
+			return "general";
+		}
+
 		// Check each category
 		for (const [category, route] of Object.entries(this.config.routes)) {
+			if (!Array.isArray(route?.keywords)) continue;
 			const hasKeyword = route.keywords.some((keyword) => lowerPrompt.includes(keyword.toLowerCase()));
 
 			if (hasKeyword) {
@@ -69,11 +74,67 @@ export class SmartRouter {
 	static async loadConfig(configPath: string): Promise<RoutingConfig> {
 		try {
 			const content = await readFile(configPath, "utf8");
-			return JSON.parse(content);
+			const parsed: unknown = JSON.parse(content);
+
+			if (!SmartRouter.validateRoutingConfig(parsed)) {
+				console.warn(
+					`Invalid routing config structure in ${configPath}; falling back to defaults`,
+				);
+				return SmartRouter.defaultConfig();
+			}
+
+			return parsed;
 		} catch {
 			// File doesn't exist yet — use defaults silently
 			return SmartRouter.defaultConfig();
 		}
+	}
+
+	/**
+	 * Valide la structure d'une RoutingConfig chargée depuis un fichier non fiable.
+	 * Fail-safe : retourne false sur toute incohérence structurelle.
+	 */
+	static validateRoutingConfig(config: unknown): config is RoutingConfig {
+		if (typeof config !== "object" || config === null) {
+			return false;
+		}
+
+		const candidate = config as Record<string, unknown>;
+
+		const routes = candidate.routes;
+		if (typeof routes !== "object" || routes === null) {
+			return false;
+		}
+
+		for (const route of Object.values(routes as Record<string, unknown>)) {
+			if (typeof route !== "object" || route === null) {
+				return false;
+			}
+			const r = route as Record<string, unknown>;
+			if (typeof r.preferredModel !== "string" || typeof r.fallback !== "string") {
+				return false;
+			}
+			if (!(r.agent === null || typeof r.agent === "string")) {
+				return false;
+			}
+			if (!Array.isArray(r.keywords) || !r.keywords.every((k) => typeof k === "string")) {
+				return false;
+			}
+		}
+
+		const defaults = candidate.default;
+		if (typeof defaults !== "object" || defaults === null) {
+			return false;
+		}
+		const d = defaults as Record<string, unknown>;
+		if (typeof d.model !== "string") {
+			return false;
+		}
+		if (!(d.agent === null || typeof d.agent === "string")) {
+			return false;
+		}
+
+		return true;
 	}
 
 	/**

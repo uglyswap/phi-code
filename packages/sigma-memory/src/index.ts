@@ -46,7 +46,9 @@ export class SigmaMemory {
 				});
 			}
 		} catch (error) {
-			// Notes search failed silently
+			// Surface the failure on a debug channel rather than swallowing it,
+			// so a broken notes subsystem is diagnosable instead of looking empty.
+			console.debug(`[SigmaMemory] notes search failed: ${error instanceof Error ? error.message : String(error)}`);
 		}
 
 		// Search in ontology
@@ -72,7 +74,9 @@ export class SigmaMemory {
 				}
 			}
 		} catch (error) {
-			// Ontology search failed silently
+			// Surface the failure on a debug channel rather than swallowing it,
+			// so a broken ontology subsystem is diagnosable instead of looking empty.
+			console.debug(`[SigmaMemory] ontology search failed: ${error instanceof Error ? error.message : String(error)}`);
 		}
 
 		// Vector similarity search
@@ -87,7 +91,9 @@ export class SigmaMemory {
 				});
 			}
 		} catch (error) {
-			// Vector search failed silently
+			// Surface the failure on a debug channel rather than swallowing it,
+			// so a broken vector subsystem is diagnosable instead of looking empty.
+			console.debug(`[SigmaMemory] vector search failed: ${error instanceof Error ? error.message : String(error)}`);
 		}
 
 		// Sort by score descending

@@ -10,13 +10,22 @@ export class SkillScanner {
 	}
 
 	/**
+	 * Répertoire global des skills (~/.phi/agent/skills/).
+	 * Exposé pour éviter que SkillLoader n'accède au champ privé par index.
+	 */
+	get globalDir(): string {
+		return this.config.globalDir;
+	}
+
+	/**
 	 * Scanne tous les répertoires et charge les skills
 	 */
 	scan(): Skill[] {
 		const skills: Skill[] = [];
+		const seen = new Set<string>();
 
-		// Scan all three possible directories
-		const dirs = [this.config.globalDir, this.config.projectDir, this.config.bundledDir];
+		// Scan in precedence order: project > global > bundled (keep-first wins)
+		const dirs = [this.config.projectDir, this.config.globalDir, this.config.bundledDir];
 
 		for (const dir of dirs) {
 			if (!fs.existsSync(dir)) continue;
@@ -27,7 +36,8 @@ export class SkillScanner {
 				if (entry.isDirectory()) {
 					const skillPath = path.join(dir, entry.name);
 					const skill = this.loadSkill(skillPath);
-					if (skill) {
+					if (skill && !seen.has(skill.name)) {
+						seen.add(skill.name);
 						skills.push(skill);
 					}
 				}

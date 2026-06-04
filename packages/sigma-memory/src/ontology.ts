@@ -1,5 +1,5 @@
 import { randomBytes } from "crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import type {
 	MemoryConfig,
@@ -17,6 +17,9 @@ export class OntologyManager {
 	private entities: Map<string, OntologyEntity> = new Map();
 	private relations: Map<string, OntologyRelation> = new Map();
 	private loaded = false;
+	// mtime (ms) of graph.jsonl at the last load; used to detect external
+	// writes (another instance/process) and reload instead of serving stale data.
+	private lastMtimeMs = 0;
 
 	constructor(config: MemoryConfig) {
 		this.config = config;
@@ -36,6 +39,19 @@ export class OntologyManager {
 	}
 
 	private loadGraph(): void {
+		// Invalidate the cache when the on-disk file is newer than our last
+		// load (another instance/process appended), so reads do not serve
+		// stale in-memory state across instances.
+		if (this.loaded && existsSync(this.graphPath)) {
+			try {
+				if (statSync(this.graphPath).mtimeMs > this.lastMtimeMs) {
+					this.loaded = false;
+				}
+			} catch {
+				// stat failed (race on removal); keep current cache
+			}
+		}
+
 		if (this.loaded) return;
 
 		this.entities.clear();
@@ -43,7 +59,14 @@ export class OntologyManager {
 
 		if (!existsSync(this.graphPath)) {
 			this.loaded = true;
+			this.lastMtimeMs = 0;
 			return;
+		}
+
+		try {
+			this.lastMtimeMs = statSync(this.graphPath).mtimeMs;
+		} catch {
+			this.lastMtimeMs = 0;
 		}
 
 		const content = readFileSync(this.graphPath, "utf8");
@@ -103,6 +126,13 @@ export class OntologyManager {
 		this.ensureDirectories();
 		const line = JSON.stringify(entry) + "\n";
 		appendFileSync(this.graphPath, line, "utf8");
+		// Record the new mtime so our own write does not look like an external
+		// change and force a needless reload on the next read.
+		try {
+			this.lastMtimeMs = statSync(this.graphPath).mtimeMs;
+		} catch {
+			// best-effort; a failed stat just means the next read may reload
+		}
 	}
 
 	/**

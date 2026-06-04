@@ -6,11 +6,13 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "clean": "rm -rf dist",
+    "clean": "shx rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build",
     "test": "node --test dist/test/*.test.js"
   },
   "dependencies": {},
   "devDependencies": {
+    "shx": "^0.4.0",
     "typescript": "^5.4.0"
   },
   "repository": {

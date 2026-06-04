@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
 import { dirname } from "path";
 import initSqlJs, { type Database } from "sql.js";
 import type { VectorSearchResult } from "./types.js";
@@ -52,10 +52,20 @@ export class VectorStore {
 		// Initialize sql.js (loads WASM automatically)
 		const SQL = await initSqlJs();
 
-		// Load existing DB or create a new one
+		// Load existing DB or create a new one. If the on-disk image is
+		// corrupt (e.g. a previous crash left a truncated file), fall back to
+		// a fresh DB so the store self-heals rather than staying permanently
+		// dead behind a swallowed catch upstream.
 		if (existsSync(this.dbPath)) {
-			const fileBuffer = readFileSync(this.dbPath);
-			this.db = new SQL.Database(fileBuffer);
+			try {
+				const fileBuffer = readFileSync(this.dbPath);
+				this.db = new SQL.Database(fileBuffer);
+			} catch (error) {
+				console.warn(
+					`[VectorStore] Failed to load existing DB at ${this.dbPath} (${error instanceof Error ? error.message : String(error)}); starting from a fresh database.`,
+				);
+				this.db = new SQL.Database();
+			}
 		} else {
 			this.db = new SQL.Database();
 		}
@@ -131,7 +141,13 @@ export class VectorStore {
 		if (!this.db) return;
 		const data = this.db.export();
 		const buffer = Buffer.from(data);
-		writeFileSync(this.dbPath, buffer);
+		// Write to a sibling temp file then atomically rename into place.
+		// rename is atomic on the same filesystem, so a crash/power loss
+		// leaves either the previous or the new full image, never a
+		// truncated/corrupted vectors.db.
+		const tmpPath = `${this.dbPath}.tmp-${process.pid}`;
+		writeFileSync(tmpPath, buffer);
+		renameSync(tmpPath, this.dbPath);
 	}
 
 	/**
