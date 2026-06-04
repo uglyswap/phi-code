@@ -53,6 +53,7 @@
 		"get-east-asian-width": "^1.4.0"
 	},
 	"overrides": {
+		"impit": "^0.14.1",
 		"rimraf": "6.1.2",
 		"gaxios": {
 			"rimraf": "6.1.2"
