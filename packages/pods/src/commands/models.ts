@@ -8,6 +8,27 @@ import { getModelConfig, getModelName, isKnownModel } from "../model-configs.js"
 import { sshExec } from "../ssh.js";
 import type { Pod } from "../types.js";
 
+// Les identifiants name/modelId sont interpoles dans des commandes shell
+// executees a distance via SSH (chemins /tmp/*_${name}.sh, logs, etc.). Sans
+// validation, un nom comme `x;rm -rf ~` ou `$(...)` injecte des commandes
+// arbitraires sur le pod. On impose une allowlist stricte (anti command injection).
+const MODEL_NAME_RE = /^[A-Za-z0-9._-]+$/;
+const MODEL_ID_RE = /^[A-Za-z0-9._\-/]+$/;
+
+const assertSafeModelName = (name: string): void => {
+	if (!MODEL_NAME_RE.test(name)) {
+		console.error(chalk.red(`Nom de modele invalide '${name}' : caracteres autorises [A-Za-z0-9._-]`));
+		process.exit(1);
+	}
+};
+
+const assertSafeModelId = (modelId: string): void => {
+	if (!MODEL_ID_RE.test(modelId)) {
+		console.error(chalk.red(`Model id invalide '${modelId}' : caracteres autorises [A-Za-z0-9._-/]`));
+		process.exit(1);
+	}
+};
+
 /**
  * Get the pod to use (active or override)
  */
@@ -86,6 +107,9 @@ export const startModel = async (
 		gpus?: number;
 	},
 ) => {
+	assertSafeModelId(modelId);
+	assertSafeModelName(name);
+
 	const { name: podName, pod } = getPod(options.pod);
 
 	// Validation
@@ -416,6 +440,7 @@ WRAPPER
  * Stop a model
  */
 export const stopModel = async (name: string, options: { pod?: string }) => {
+	assertSafeModelName(name);
 	const { name: podName, pod } = getPod(options.pod);
 
 	const model = pod.models[name];
@@ -556,6 +581,7 @@ export const listModels = async (options: { pod?: string }) => {
  * View model logs
  */
 export const viewLogs = async (name: string, options: { pod?: string }) => {
+	assertSafeModelName(name);
 	const { name: podName, pod } = getPod(options.pod);
 
 	const model = pod.models[name];
