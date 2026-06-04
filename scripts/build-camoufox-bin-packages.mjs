@@ -17,8 +17,11 @@
  * platform) — only the package.json + README.md + LICENSE live in git.
  * The binary is added at publish time by this script.
  *
- * Idempotent: re-running the script overwrites the extracted tree but
- * preserves the package metadata files (so manual fixes survive).
+ * Idempotent: re-running the script overwrites the extracted tree. README.md /
+ * VENDORED_FROM.md are preserved if present (manual fixes survive), but
+ * package.json is regenerated every run (the publish-critical metadata is
+ * merged over any existing file) so the committed metadata cannot silently
+ * diverge from buildPackageJson() — e.g. a stale `private: true` blocking publish.
  *
  * Usage:
  *   node scripts/build-camoufox-bin-packages.mjs           # all platforms
@@ -80,33 +83,70 @@ function writeFileIfMissing(filePath, content) {
 	return true;
 }
 
+// Cross-platform directory size in bytes (pure Node, no `du` dependency).
+// `du` is unavailable on Windows, where this script supports extraction via
+// PowerShell Expand-Archive — using `du` there would crash the run.
+function dirSizeBytes(dir) {
+	let total = 0;
+	for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+		const entryPath = path.join(dir, entry.name);
+		if (entry.isDirectory()) {
+			total += dirSizeBytes(entryPath);
+		} else if (entry.isFile()) {
+			total += fs.statSync(entryPath).size;
+		}
+	}
+	return total;
+}
+
 function buildPackageJson({ pkg, os: osName, cpu, launch }) {
-	return JSON.stringify(
-		{
-			name: `@phi-code-admin/${pkg}`,
-			version: PACKAGE_VERSION,
-			description: `Camoufox v${UPSTREAM_VERSION}-${UPSTREAM_RELEASE} binary for ${osName}/${cpu}. Bundled with @phi-code-admin/camoufox-js. MPL-2.0.`,
-			license: "MPL-2.0",
-			repository: {
-				type: "git",
-				url: "git+https://github.com/uglyswap/phi-code.git",
-				directory: `packages/${pkg}`,
-			},
-			homepage: `https://github.com/uglyswap/phi-code/tree/main/packages/${pkg}`,
-			bugs: { url: "https://github.com/uglyswap/phi-code/issues" },
-			os: [osName],
-			cpu: [cpu],
-			files: ["camoufox-bin/", "LICENSE", "README.md", "VENDORED_FROM.md"],
-			publishConfig: { access: "public" },
-			camoufoxBin: {
-				upstreamVersion: UPSTREAM_VERSION,
-				upstreamRelease: UPSTREAM_RELEASE,
-				launchFile: launch,
-			},
+	return {
+		name: `@phi-code-admin/${pkg}`,
+		version: PACKAGE_VERSION,
+		description: `Camoufox v${UPSTREAM_VERSION}-${UPSTREAM_RELEASE} binary for ${osName}/${cpu}. Bundled with @phi-code-admin/camoufox-js. MPL-2.0.`,
+		license: "MPL-2.0",
+		repository: {
+			type: "git",
+			url: "git+https://github.com/uglyswap/phi-code.git",
+			directory: `packages/${pkg}`,
 		},
-		null,
-		2,
-	) + "\n";
+		homepage: `https://github.com/uglyswap/phi-code/tree/main/packages/${pkg}`,
+		bugs: { url: "https://github.com/uglyswap/phi-code/issues" },
+		os: [osName],
+		cpu: [cpu],
+		files: ["camoufox-bin/", "LICENSE", "README.md", "VENDORED_FROM.md"],
+		publishConfig: { access: "public" },
+		camoufoxBin: {
+			upstreamVersion: UPSTREAM_VERSION,
+			upstreamRelease: UPSTREAM_RELEASE,
+			launchFile: launch,
+		},
+	};
+}
+
+// Regenerate the package.json metadata on every run instead of writing it only
+// when missing. writeFileIfMissing left committed metadata silently diverging
+// from buildPackageJson() — e.g. a stale `private: true` (which makes
+// `npm publish` refuse the package) or missing os/cpu/publishConfig filters.
+// We merge the generated block over any existing file so manual extra fields
+// survive, but always force the publish-critical fields (and drop `private`,
+// which is never part of the generated metadata and blocks publishing).
+function writePackageJson(filePath, target) {
+	let existing = {};
+	if (fs.existsSync(filePath)) {
+		try {
+			existing = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+		} catch (e) {
+			console.warn(`  WARNING: could not parse existing ${filePath}, regenerating from scratch: ${e.message}`);
+			existing = {};
+		}
+	}
+	const generated = buildPackageJson(target);
+	const merged = { ...existing, ...generated };
+	// `private` blocks `npm publish`; the generated metadata is publishable.
+	delete merged.private;
+	fs.mkdirSync(path.dirname(filePath), { recursive: true });
+	fs.writeFileSync(filePath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
 }
 
 function buildReadme({ pkg, os: osName, cpu }) {
@@ -224,7 +264,8 @@ function main() {
 		}
 
 		const written = [];
-		if (writeFileIfMissing(path.join(pkgDir, "package.json"), buildPackageJson(target))) written.push("package.json");
+		writePackageJson(path.join(pkgDir, "package.json"), target);
+		written.push("package.json");
 		if (writeFileIfMissing(path.join(pkgDir, "README.md"), buildReadme(target))) written.push("README.md");
 		if (writeFileIfMissing(path.join(pkgDir, "VENDORED_FROM.md"), buildVendoredFrom(target))) written.push("VENDORED_FROM.md");
 
@@ -236,9 +277,7 @@ function main() {
 			written.push("LICENSE");
 		}
 
-		const sizeMb = (
-			execSync(`du -sm "${binDir}"`).toString().split(/\s+/)[0]
-		);
+		const sizeMb = Math.round(dirSizeBytes(binDir) / (1024 * 1024));
 		console.log(`  size    = ${sizeMb} MB`);
 		if (written.length) console.log(`  wrote   = ${written.join(", ")}`);
 	}
