@@ -9,6 +9,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /**
+ * Escape a value for safe inclusion inside single quotes in a POSIX shell
+ * command. Wraps the result in single quotes and replaces any embedded single
+ * quote with the '\'' sequence so the value cannot break out of the quoting or
+ * inject shell syntax (e.g. a path or token containing a single quote).
+ */
+const shellQuote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
+
+/**
  * List all pods
  */
 export const listPods = () => {
@@ -108,14 +116,16 @@ export const setupPod = async (
 	}
 	console.log(chalk.green("✓ Setup script copied"));
 
-	// Build setup command
-	let setupCmd = `bash /tmp/pod_setup.sh --models-path '${modelsPath}' --hf-token '${hfToken}' --vllm-api-key '${vllmApiKey}'`;
+	// Build setup command. Every interpolated value (paths and secrets) is passed
+	// through shellQuote so a value containing a single quote cannot break the
+	// quoting or inject shell syntax on the remote host.
+	let setupCmd = `bash /tmp/pod_setup.sh --models-path ${shellQuote(modelsPath)} --hf-token ${shellQuote(hfToken)} --vllm-api-key ${shellQuote(vllmApiKey)}`;
 	if (options.mount) {
-		setupCmd += ` --mount '${options.mount}'`;
+		setupCmd += ` --mount ${shellQuote(options.mount)}`;
 	}
 	// Add vLLM version flag
 	const vllmVersion = options.vllm || "release";
-	setupCmd += ` --vllm '${vllmVersion}'`;
+	setupCmd += ` --vllm ${shellQuote(vllmVersion)}`;
 
 	// Run setup script
 	console.log("");

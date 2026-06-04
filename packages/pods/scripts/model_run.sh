@@ -52,7 +52,11 @@ echo "✅ Model download complete"
 echo ""
 
 # Build vLLM command
-VLLM_CMD="vllm serve '$MODEL_ID' --port $PORT --api-key '$PI_API_KEY'"
+# Pass the API key via the environment (vLLM reads VLLM_API_KEY) rather than as
+# a CLI flag, so the secret never appears in the echoed command, the log file,
+# or the process command line (ps).
+export VLLM_API_KEY="$PI_API_KEY"
+VLLM_CMD="vllm serve '$MODEL_ID' --port $PORT"
 if [ -n "$VLLM_ARGS" ]; then
     VLLM_CMD="$VLLM_CMD $VLLM_ARGS"
 fi
