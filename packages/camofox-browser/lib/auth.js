@@ -13,7 +13,9 @@
  * Policy (accessKeyMiddleware / global):
  *   - If CAMOFOX_ACCESS_KEY is set, require Bearer match on all routes except
  *     /health, cookie import (when CAMOFOX_API_KEY set), and /stop (when CAMOFOX_ADMIN_KEY set).
- *   - If not set, pass through (backward-compatible).
+ *   - If no key (access nor api) is set AND NODE_ENV === production, fail closed:
+ *     reject every non-/health request with 503 instead of fail-open passthrough.
+ *   - Otherwise (non-production, no key), pass through (backward-compatible).
  */
 
 import crypto from 'crypto';
@@ -101,17 +103,30 @@ export function requireAuth(config, options = {}) {
  * When a route's dedicated key is NOT configured, the access-key middleware
  * does NOT exempt it -- defense-in-depth prevents unprotected endpoints.
  *
- * When CAMOFOX_ACCESS_KEY is not set, passes through (backward-compatible).
+ * When no key is configured: in production this fails closed (503 for every
+ * non-/health request) so a network-exposed deployment is never an open,
+ * unauthenticated browser-control service; outside production it passes through
+ * (backward-compatible for local development).
  *
- * @param {object} config - Must have { accessKey }; optionally { apiKey, adminKey }
+ * @param {object} config - Must have { accessKey }; optionally { apiKey, adminKey, nodeEnv }
  * @returns {function} Express middleware (req, res, next)
  */
 export function accessKeyMiddleware(config) {
   return function accessKeyCheck(req, res, next) {
-    if (!config.accessKey) return next();
-
-    // Exempt healthcheck
+    // Exempt healthcheck unconditionally so liveness probes always work.
     if (req.path === '/health') return next();
+
+    if (!config.accessKey) {
+      // Fail closed in production when no credential at all is configured.
+      // Without this, an exposed deployment would serve the entire
+      // browser-driving surface with zero authentication.
+      if (config.nodeEnv === 'production' && !config.apiKey) {
+        return res.status(503).json({
+          error: 'Server is not configured for authenticated access. Set CAMOFOX_ACCESS_KEY (or CAMOFOX_API_KEY) before serving in production.',
+        });
+      }
+      return next();
+    }
 
     // Exempt routes with their own dedicated auth -- but only when their key is configured.
     // If the dedicated key is NOT set, the access key gates the route (defense-in-depth).

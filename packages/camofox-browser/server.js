@@ -6,6 +6,7 @@ import { VirtualDisplay } from '@phi-code-admin/camoufox-js/dist/virtdisplay.js'
 import { firefox } from 'playwright-core';
 import express from 'express';
 import crypto from 'crypto';
+import net from 'net';
 import fs from 'fs';
 import os from 'os';
 import { expandMacro } from './lib/macros.js';
@@ -210,11 +211,55 @@ function sendError(res, err, extraFields = {}) {
   res.status(status).json(body);
 }
 
+// SSRF guard: returns true when an IPv4/IPv6 address belongs to a range that
+// must never be reachable from the browser agent (loopback, link-local, the
+// cloud-metadata endpoint, RFC1918, CGNAT, ULA, unspecified/multicast).
+// Kept self-contained (no external dep) and best-effort: it blocks IP literals
+// and obviously-internal hostnames before navigation. DNS-rebinding still needs
+// proxy-level egress control, but this closes the trivial SSRF-via-literal vector.
+function isBlockedIp(address) {
+  const family = net.isIP(address);
+  if (family === 4) {
+    const parts = address.split('.').map(n => parseInt(n, 10));
+    if (parts.length !== 4 || parts.some(n => Number.isNaN(n) || n < 0 || n > 255)) return true;
+    const [a, b] = parts;
+    if (a === 0) return true;                      // 0.0.0.0/8 (unspecified)
+    if (a === 127) return true;                    // loopback
+    if (a === 10) return true;                     // RFC1918
+    if (a === 172 && b >= 16 && b <= 31) return true; // RFC1918
+    if (a === 192 && b === 168) return true;       // RFC1918
+    if (a === 169 && b === 254) return true;       // link-local + metadata (169.254.169.254)
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64/10
+    if (a >= 224) return true;                     // multicast/reserved (224.0.0.0+)
+    return false;
+  }
+  if (family === 6) {
+    const norm = address.toLowerCase().replace(/^\[|\]$/g, '');
+    // IPv4-mapped (::ffff:a.b.c.d) -> re-check the embedded IPv4
+    const mapped = norm.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped) return isBlockedIp(mapped[1]);
+    if (norm === '::1' || norm === '::') return true; // loopback / unspecified
+    if (norm.startsWith('fe80')) return true;         // link-local
+    if (norm.startsWith('fc') || norm.startsWith('fd')) return true; // ULA fc00::/7
+    if (norm.startsWith('ff')) return true;           // multicast
+    if (norm.startsWith('fd00:ec2')) return true;     // AWS IPv6 metadata
+    return false;
+  }
+  return false;
+}
+
 function validateUrl(url) {
   try {
     const parsed = new URL(url);
     if (!ALLOWED_URL_SCHEMES.includes(parsed.protocol)) {
       return `Blocked URL scheme: ${parsed.protocol} (only http/https allowed)`;
+    }
+    const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+      return `Blocked host: ${parsed.hostname} (internal/metadata addresses are not allowed)`;
+    }
+    if (net.isIP(hostname) && isBlockedIp(hostname)) {
+      return `Blocked host: ${parsed.hostname} (internal/metadata addresses are not allowed)`;
     }
     return null;
   } catch {
@@ -4340,7 +4385,7 @@ app.get('/tabs/:tabId/stats', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-app.post('/tabs/:tabId/evaluate', express.json({ limit: '1mb' }), async (req, res) => {
+app.post('/tabs/:tabId/evaluate', authMiddleware(), express.json({ limit: '1mb' }), async (req, res) => {
   try {
     const { userId, expression } = req.body;
     if (!userId) return res.status(400).json({ error: 'userId is required' });
@@ -5963,7 +6008,16 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 // Fly's auto_stop_machines=false + min_machines_running=2 handles scaling.
 
 const PORT = CONFIG.port;
-pluginEvents.emit('server:starting', { port: PORT });
+// Bind host: default to loopback so the browser-control API is not exposed on
+// the LAN/container network out of the box. Container/cloud deploys must set
+// CAMOFOX_HOST=0.0.0.0 explicitly (the platform controls ingress there).
+const HOST = (process.env.CAMOFOX_HOST || '127.0.0.1').trim();
+// Loud warning when binding to a non-loopback interface without any auth key.
+if (HOST !== '127.0.0.1' && HOST !== '::1' && HOST !== 'localhost'
+  && !CONFIG.accessKey && !CONFIG.apiKey) {
+  log('warn', 'binding to non-loopback host without CAMOFOX_ACCESS_KEY/CAMOFOX_API_KEY -- browser-control API is exposed unauthenticated', { host: HOST });
+}
+pluginEvents.emit('server:starting', { port: PORT, host: HOST });
 
 // Load plugins before starting the server
 const pluginCtx = {
@@ -5996,15 +6050,15 @@ const loadedPlugins = await loadPlugins(app, pluginCtx);
 // --- OpenAPI docs (after all routes are registered) ---
 mountDocs(app);
 
-const server = app.listen(PORT, async () => {
+const server = app.listen(PORT, HOST, async () => {
   startMemoryReporter();
   refreshActiveTabsGauge();
   refreshTabLockQueueDepth();
   pluginEvents.emit('server:started', { port: PORT, pid: process.pid, plugins: loadedPlugins });
   if (FLY_MACHINE_ID) {
-    log('info', 'server started (fly)', { port: PORT, pid: process.pid, machineId: FLY_MACHINE_ID, nodeVersion: process.version });
+    log('info', 'server started (fly)', { port: PORT, host: HOST, pid: process.pid, machineId: FLY_MACHINE_ID, nodeVersion: process.version });
   } else {
-    log('info', 'server started', { port: PORT, pid: process.pid, nodeVersion: process.version });
+    log('info', 'server started', { port: PORT, host: HOST, pid: process.pid, nodeVersion: process.version });
   }
   const tmpCleanup = cleanupOrphanedTempFiles({ tmpDir: os.tmpdir() });
   if (tmpCleanup.removed > 0) {

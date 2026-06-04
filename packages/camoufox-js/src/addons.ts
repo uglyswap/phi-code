@@ -6,7 +6,15 @@ import { getAsBooleanFromENV } from "./utils.js";
 
 export const DefaultAddons = {
 	/**
-	 * Default addons to be downloaded
+	 * Default addons to be downloaded.
+	 *
+	 * SECURITY: `UBO` resolves to a rolling "latest.xpi" served by
+	 * addons.mozilla.org. The archive is fetched over HTTPS and extracted with
+	 * no additional checksum/signature verification, so its integrity relies
+	 * solely on TLS to addons.mozilla.org. Because AMO serves a moving target,
+	 * a static SHA256 pin would break on every uBlock update; pin a specific
+	 * versioned xpi URL plus its hash if stronger integrity is required. The
+	 * add-on runs inside the launched browser.
 	 */
 	UBO: "https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/latest.xpi",
 };
@@ -44,7 +52,12 @@ export async function addDefaultAddons(
 }
 
 /**
- * Downloads and extracts an addon from a given URL to a specified path
+ * Downloads and extracts an addon from a given URL to a specified path.
+ *
+ * SECURITY: the downloaded archive is not checksum- or signature-verified;
+ * integrity relies on TLS to the source (see DefaultAddons). Extraction via
+ * unzip() (adm-zip) is zip-slip safe, so the residual risk is a tampered
+ * add-on if TLS to the source is compromised.
  */
 export async function downloadAndExtract(
 	url: string,

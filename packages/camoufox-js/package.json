@@ -48,7 +48,7 @@
 		"build": "rimraf dist && tsc && shx cp -r src/data-files dist/data-files && shx cp scripts/postinstall.mjs dist/postinstall.mjs",
 		"test": "vitest --run",
 		"check": "biome check",
-		"postinstall": "node ./dist/postinstall.mjs || true"
+		"postinstall": "node ./scripts/postinstall.mjs || true"
 	},
 	"dependencies": {
 		"adm-zip": "^0.5.16",
