@@ -86,7 +86,7 @@ export class SkillLoader {
 	installSkill(source: string, targetDir?: string): boolean {
 		try {
 			// Determine target directory (default: globalDir)
-			const targetBase = targetDir || this.scanner["config"].globalDir;
+			const targetBase = targetDir || this.scanner.globalDir;
 			const skillName = path.basename(source);
 			const targetPath = path.join(targetBase, skillName);
 

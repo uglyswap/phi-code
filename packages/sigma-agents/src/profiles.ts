@@ -15,6 +15,10 @@ export class ModelProfiler {
 			if (Array.isArray(data.profiles)) {
 				this.profiles.clear();
 				for (const profile of data.profiles) {
+					if (!ModelProfiler.isValidProfile(profile)) {
+						console.warn("Skipping invalid profile entry");
+						continue;
+					}
 					this.profiles.set(profile.id, profile);
 				}
 			}
@@ -77,6 +81,40 @@ export class ModelProfiler {
 		for (const profile of defaultProfiles) {
 			this.profiles.set(profile.id, profile);
 		}
+	}
+
+	/**
+	 * Valide la forme d'un profile chargé depuis un JSON non fiable.
+	 * Empêche les entrées sans id (qui s'écraseraient sous la clé undefined)
+	 * et les champs malformés qui feraient planter getBestForTask.
+	 */
+	static isValidProfile(profile: unknown): profile is ModelProfile {
+		if (typeof profile !== "object" || profile === null) {
+			return false;
+		}
+
+		const p = profile as Record<string, unknown>;
+
+		if (typeof p.id !== "string" || p.id.length === 0) {
+			return false;
+		}
+		if (typeof p.provider !== "string") {
+			return false;
+		}
+		if (p.speed !== "fast" && p.speed !== "medium" && p.speed !== "slow") {
+			return false;
+		}
+		if (p.quality !== "high" && p.quality !== "medium" && p.quality !== "low") {
+			return false;
+		}
+		if (!Array.isArray(p.strengths) || !p.strengths.every((s) => typeof s === "string")) {
+			return false;
+		}
+		if (typeof p.maxTokens !== "number" || typeof p.supportsTools !== "boolean") {
+			return false;
+		}
+
+		return true;
 	}
 
 	/**
