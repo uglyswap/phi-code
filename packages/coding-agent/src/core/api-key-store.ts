@@ -18,8 +18,8 @@
 
 import { EventEmitter } from "node:events";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
+import { getModelsPath } from "../config.js";
 
 export interface ProviderConfigPersisted {
 	baseUrl?: string;
@@ -47,7 +47,7 @@ export class ApiKeyStore extends EventEmitter {
 
 	constructor(options: ApiKeyStoreOptions = {}) {
 		super();
-		this.configPath = options.configPath ?? join(homedir(), ".phi", "agent", "models.json");
+		this.configPath = options.configPath ?? getModelsPath();
 	}
 
 	/**
@@ -157,13 +157,17 @@ export class ApiKeyStore extends EventEmitter {
 	 *   4. Apply chmod 0600 on Unix (silently skip on Windows)
 	 */
 	private persist(): void {
+		const isPosix = process.platform !== "win32";
 		const parent = dirname(this.configPath);
-		mkdirSync(parent, { recursive: true });
+		mkdirSync(parent, isPosix ? { recursive: true, mode: 0o700 } : { recursive: true });
 		const tmpPath = `${this.configPath}.tmp`;
 		const payload = `${JSON.stringify(this.config, null, 2)}\n`;
-		writeFileSync(tmpPath, payload, "utf-8");
+		// Write the tmp file with restrictive perms from the start so the plaintext
+		// key is never world-readable on disk (mode is still subject to umask, hence
+		// the belt-and-suspenders chmod below after the rename).
+		writeFileSync(tmpPath, payload, isPosix ? { encoding: "utf-8", mode: 0o600 } : "utf-8");
 		renameSync(tmpPath, this.configPath);
-		if (process.platform !== "win32") {
+		if (isPosix) {
 			try {
 				chmodSync(this.configPath, 0o600);
 			} catch {

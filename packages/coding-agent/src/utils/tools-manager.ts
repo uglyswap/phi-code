@@ -1,7 +1,17 @@
 import chalk from "chalk";
 import { spawnSync } from "child_process";
+import { createHash } from "crypto";
 import extractZip from "extract-zip";
-import { chmodSync, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "fs";
+import {
+	chmodSync,
+	createReadStream,
+	createWriteStream,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	renameSync,
+	rmSync,
+} from "fs";
 import { arch, platform } from "os";
 import { join } from "path";
 import { Readable } from "stream";
@@ -104,8 +114,14 @@ export function getToolPath(tool: "fd" | "rg"): string | null {
 	return null;
 }
 
-// Fetch latest release version from GitHub
-async function getLatestVersion(repo: string): Promise<string> {
+interface ReleaseInfo {
+	version: string;
+	// Map of asset name -> expected SHA-256 hex digest (when published by GitHub).
+	digests: Map<string, string>;
+}
+
+// Fetch latest release info (version + per-asset SHA-256 digests) from GitHub.
+async function getLatestRelease(repo: string): Promise<ReleaseInfo> {
 	const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
 		headers: { "User-Agent": `${APP_NAME}-coding-agent` },
 		signal: AbortSignal.timeout(NETWORK_TIMEOUT_MS),
@@ -115,8 +131,30 @@ async function getLatestVersion(repo: string): Promise<string> {
 		throw new Error(`GitHub API error: ${response.status}`);
 	}
 
-	const data = (await response.json()) as { tag_name: string };
-	return data.tag_name.replace(/^v/, "");
+	const data = (await response.json()) as {
+		tag_name: string;
+		assets?: Array<{ name?: string; digest?: string | null }>;
+	};
+
+	const digests = new Map<string, string>();
+	for (const asset of data.assets ?? []) {
+		// GitHub publishes the digest as "sha256:<hex>" on release assets.
+		if (asset.name && typeof asset.digest === "string") {
+			const match = /^sha256:([a-f0-9]{64})$/i.exec(asset.digest.trim());
+			if (match) {
+				digests.set(asset.name, match[1].toLowerCase());
+			}
+		}
+	}
+
+	return { version: data.tag_name.replace(/^v/, ""), digests };
+}
+
+// Compute the SHA-256 hex digest of a file by streaming it (bounded memory).
+async function sha256OfFile(filePath: string): Promise<string> {
+	const hash = createHash("sha256");
+	await pipeline(createReadStream(filePath), hash);
+	return hash.digest("hex").toLowerCase();
 }
 
 // Download a file from URL
@@ -167,8 +205,9 @@ async function downloadTool(tool: "fd" | "rg"): Promise<string> {
 	const plat = platform();
 	const architecture = arch();
 
-	// Get latest version
-	const version = await getLatestVersion(config.repo);
+	// Get latest release info (version + per-asset digests)
+	const release = await getLatestRelease(config.repo);
+	const version = release.version;
 
 	// Get asset name for this platform
 	const assetName = config.getAssetName(version, plat, architecture);
@@ -186,6 +225,25 @@ async function downloadTool(tool: "fd" | "rg"): Promise<string> {
 
 	// Download
 	await downloadFile(downloadUrl, archivePath);
+
+	// Verify integrity against the SHA-256 digest published by GitHub for this
+	// asset before extracting/chmod'ing/executing it. The digest is fetched from
+	// the GitHub releases API (same origin as the asset), so this protects against
+	// transport corruption and tampered cached/proxied responses; it is not a
+	// defense against a fully compromised GitHub release. We fail closed when a
+	// digest is published but does not match, and require one for the asset.
+	const expectedDigest = release.digests.get(assetName);
+	if (!expectedDigest) {
+		rmSync(archivePath, { force: true });
+		throw new Error(`No SHA-256 digest published for asset ${assetName}; refusing to install unverified binary`);
+	}
+	const actualDigest = await sha256OfFile(archivePath);
+	if (actualDigest !== expectedDigest) {
+		rmSync(archivePath, { force: true });
+		throw new Error(
+			`Checksum mismatch for ${assetName}: expected ${expectedDigest}, got ${actualDigest}; refusing to install`,
+		);
+	}
 
 	// Extract into a unique temp directory. fd and rg downloads can run concurrently
 	// during startup, so sharing a fixed directory causes races.
