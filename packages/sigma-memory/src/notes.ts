@@ -1,6 +1,5 @@
-import { execSync } from "child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "fs";
-import { join, resolve } from "path";
+import { join, resolve, sep } from "path";
 import type { MemoryConfig, Note } from "./types.js";
 
 export class NotesManager {
@@ -23,12 +22,25 @@ export class NotesManager {
 	}
 
 	/**
+	 * Résout un nom de fichier note en chemin absolu en garantissant qu'il
+	 * reste à l'intérieur du dossier notes (protection anti path traversal).
+	 */
+	private resolveNotePath(filename: string): string {
+		const base = resolve(this.notesDir);
+		const target = resolve(base, filename);
+		if (target !== base && !target.startsWith(base + sep)) {
+			throw new Error(`Invalid note filename (path traversal blocked): ${filename}`);
+		}
+		return target;
+	}
+
+	/**
 	 * Écrit dans un fichier .md (date du jour si pas de nom)
 	 */
 	write(content: string, filename?: string): void {
 		const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
 		const file = filename || `${today}.md`;
-		const filePath = join(this.notesDir, file);
+		const filePath = this.resolveNotePath(file);
 
 		writeFileSync(filePath, content, "utf8");
 	}
@@ -37,7 +49,7 @@ export class NotesManager {
 	 * Lit un fichier
 	 */
 	read(filename: string): string {
-		const filePath = join(this.notesDir, filename);
+		const filePath = this.resolveNotePath(filename);
 		if (!existsSync(filePath)) {
 			throw new Error(`File not found: ${filename}`);
 		}
@@ -55,7 +67,7 @@ export class NotesManager {
 		return readdirSync(this.notesDir)
 			.filter((file) => file.endsWith(".md"))
 			.map((file) => {
-				const filePath = join(this.notesDir, file);
+				const filePath = this.resolveNotePath(file);
 				const stats = statSync(filePath);
 				return {
 					name: file,
@@ -76,46 +88,23 @@ export class NotesManager {
 
 		const results: Array<{ file: string; line: number; content: string }> = [];
 
-		try {
-			// Utilise grep pour une recherche efficace
-			const grepResult = execSync(
-				`grep -n "${query.replace(/"/g, '\\"')}" "${this.notesDir}"/*.md 2>/dev/null || true`,
-				{ encoding: "utf8" },
-			);
-
-			if (grepResult.trim()) {
-				const lines = grepResult.trim().split("\n");
-				for (const line of lines) {
-					const match = line.match(/^(.+?):(\d+):(.+)$/);
-					if (match) {
-						const [, fullPath, lineNumber, content] = match;
-						const filename = fullPath.replace(this.notesDir + "/", "");
-						results.push({
-							file: filename,
-							line: parseInt(lineNumber),
-							content: content.trim(),
-						});
-					}
+		// Recherche full-text en JS pur : aucun shell, donc aucune injection de
+		// commande possible, et fonctionne sur toutes les plateformes (y compris
+		// Windows, qui n'a ni grep ni la syntaxe 2>/dev/null || true).
+		const needle = query.toLowerCase();
+		const files = readdirSync(this.notesDir).filter((f) => f.endsWith(".md"));
+		for (const file of files) {
+			const filePath = join(this.notesDir, file);
+			const content = readFileSync(filePath, "utf8");
+			content.split("\n").forEach((line, index) => {
+				if (line.toLowerCase().includes(needle)) {
+					results.push({
+						file,
+						line: index + 1,
+						content: line.trim(),
+					});
 				}
-			}
-		} catch (error) {
-			// Fallback to JavaScript search if grep fails
-			const files = readdirSync(this.notesDir).filter((f) => f.endsWith(".md"));
-			for (const file of files) {
-				const filePath = join(this.notesDir, file);
-				const content = readFileSync(filePath, "utf8");
-				const lines = content.split("\n");
-
-				lines.forEach((line, index) => {
-					if (line.toLowerCase().includes(query.toLowerCase())) {
-						results.push({
-							file,
-							line: index + 1,
-							content: line.trim(),
-						});
-					}
-				});
-			}
+			});
 		}
 
 		return results;
@@ -149,7 +138,7 @@ export class NotesManager {
 	append(content: string, filename?: string): void {
 		const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
 		const file = filename || `${today}.md`;
-		const filePath = join(this.notesDir, file);
+		const filePath = this.resolveNotePath(file);
 
 		// Add blank line if file exists and doesn't end with one
 		if (existsSync(filePath)) {
