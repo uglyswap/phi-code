@@ -20,6 +20,15 @@ export function parseSandboxArg(value: string): SandboxConfig {
 
 export async function validateSandbox(config: SandboxConfig): Promise<void> {
 	if (config.type === "host") {
+		// The host sandbox runs file tools via POSIX utilities (base64, wc, cat,
+		// tail, printf, mkdir -p) and `sh -c`, none of which exist under `cmd /c`
+		// on Windows. Fail fast with a clear message instead of silently breaking
+		// every read/write/edit at runtime; point the user to the docker sandbox.
+		if (process.platform === "win32") {
+			console.error("Error: the 'host' sandbox is not supported on Windows (relies on POSIX shell utilities).");
+			console.error("Use the docker sandbox instead, e.g. --sandbox=docker:mom-sandbox");
+			process.exit(1);
+		}
 		return;
 	}
 
@@ -103,11 +112,24 @@ export interface ExecResult {
 
 class HostExecutor implements Executor {
 	async exec(command: string, options?: ExecOptions): Promise<ExecResult> {
-		return new Promise((resolve, reject) => {
-			const shell = process.platform === "win32" ? "cmd" : "sh";
-			const shellArgs = process.platform === "win32" ? ["/c"] : ["-c"];
+		const shell = process.platform === "win32" ? "cmd" : "sh";
+		const shellArgs = process.platform === "win32" ? ["/c"] : ["-c"];
+		return this.spawnAndCollect(shell, [...shellArgs, command], options);
+	}
 
-			const child = spawn(shell, [...shellArgs, command], {
+	/**
+	 * Spawn a program with an explicit argv array (no host shell). Each argument
+	 * is passed as a discrete token on both Windows and POSIX, so no shell
+	 * quoting/escaping is involved. Used by the docker path to avoid routing a
+	 * `sh -c '...'` string through `cmd /c` on Windows.
+	 */
+	execFile(cmd: string, args: string[], options?: ExecOptions): Promise<ExecResult> {
+		return this.spawnAndCollect(cmd, args, options);
+	}
+
+	private spawnAndCollect(cmd: string, args: string[], options?: ExecOptions): Promise<ExecResult> {
+		return new Promise((resolve, reject) => {
+			const child = spawn(cmd, args, {
 				detached: true,
 				stdio: ["ignore", "pipe", "pipe"],
 			});
@@ -180,10 +202,13 @@ class DockerExecutor implements Executor {
 	constructor(private container: string) {}
 
 	async exec(command: string, options?: ExecOptions): Promise<ExecResult> {
-		// Wrap command for docker exec
-		const dockerCmd = `docker exec ${this.container} sh -c ${shellEscape(command)}`;
+		// Invoke docker directly with an argv array so no host shell quoting is
+		// involved. With spawn's argv form, `command` reaches `sh -c` intact on
+		// both Windows and POSIX (no `cmd /c` tokenization or single-quote
+		// mangling), unlike building a `sh -c '...'` string and running it
+		// through the host shell.
 		const hostExecutor = new HostExecutor();
-		return hostExecutor.exec(dockerCmd, options);
+		return hostExecutor.execFile("docker", ["exec", this.container, "sh", "-c", command], options);
 	}
 
 	getWorkspacePath(_hostPath: string): string {
