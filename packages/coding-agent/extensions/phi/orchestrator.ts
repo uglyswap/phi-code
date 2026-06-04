@@ -750,14 +750,24 @@ Tag the note with relevant keywords for vector search.
 			const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || '');
 			return content.includes('401') && (content.includes('invalid access token') || content.includes('token expired') || content.includes('Unauthorized'));
 		});
-		if (hasAuthError || (toolCallCount === 0 && messages.length > 0)) {
-			const errorMsg = hasAuthError ? 'API authentication error (401)' : 'Phase produced 0 tool calls — possible API or model error';
-			ctx.ui.notify(`\n❌ **Orchestrator aborted:** ${errorMsg}\nCheck your API key and model configuration.`, "error");
+		// Only a genuine auth failure (401) is fatal — abort the whole workflow.
+		if (hasAuthError) {
+			ctx.ui.notify(`\n❌ **Orchestrator aborted:** API authentication error (401)\nCheck your API key and model configuration.`, "error");
 			setOrchestrationActive(false);
 			phasePending = false;
 			deactivateAgent();
 			if (phaseTimeoutId) { clearTimeout(phaseTimeoutId); phaseTimeoutId = null; }
 			return;
+		}
+
+		// A phase that made 0 tool calls is NOT fatal: a model may legitimately
+		// answer with text only (e.g. an inline plan). Warn and continue rather
+		// than killing phases 2-5, mirroring the graceful phase-timeout path.
+		if (toolCallCount === 0 && messages.length > 0) {
+			ctx.ui.notify(`\n⚠️ **Phase made 0 tool calls** — it may have responded with text only. Continuing to the next phase.`, "warning");
+			if (phaseQueue.length > 0) {
+				phaseQueue[0].instruction += `\n\n**Note:** The previous phase made 0 tool calls and may have responded with text only. Make sure you actually call the required tools.`;
+			}
 		}
 
 		// Build the summary

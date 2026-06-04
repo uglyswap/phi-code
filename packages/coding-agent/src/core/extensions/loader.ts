@@ -496,6 +496,34 @@ function isExtensionFile(name: string): boolean {
 }
 
 /**
+ * Guard against symlink-based escape/pivot during discovery.
+ *
+ * A discovered entry may be a symlink (or live under a symlinked path). We
+ * resolve its real target and the discovery directory with fs.realpathSync,
+ * then require the target to stay contained within the discovery directory.
+ * A symlink pointing outside the extensions dir (e.g. to /etc, the user home,
+ * or another project) is rejected so a cloned/untrusted workspace cannot use a
+ * symlink to make the loader execute arbitrary out-of-tree code.
+ *
+ * Fails closed: if the target cannot be resolved (dangling/inaccessible), the
+ * entry is rejected.
+ */
+function isSymlinkEscaping(dir: string, entryPath: string): boolean {
+	try {
+		const realDir = fs.realpathSync(dir);
+		const realTarget = fs.realpathSync(entryPath);
+		if (realTarget === realDir) {
+			return false;
+		}
+		const containedPrefix = realDir.endsWith(path.sep) ? realDir : realDir + path.sep;
+		return !realTarget.startsWith(containedPrefix);
+	} catch {
+		// Dangling or inaccessible symlink target: reject (fail closed).
+		return true;
+	}
+}
+
+/**
  * Resolve extension entry points from a directory.
  *
  * Checks for:
@@ -558,6 +586,12 @@ function discoverExtensionsInDir(dir: string): string[] {
 
 		for (const entry of entries) {
 			const entryPath = path.join(dir, entry.name);
+
+			// Reject symlinks whose real target escapes the discovery directory
+			// (anti symlink-escape: prevents loading arbitrary out-of-tree code).
+			if (entry.isSymbolicLink() && isSymlinkEscaping(dir, entryPath)) {
+				continue;
+			}
 
 			// 1. Direct files: *.ts or *.js
 			if ((entry.isFile() || entry.isSymbolicLink()) && isExtensionFile(entry.name)) {
