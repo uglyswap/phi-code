@@ -34,6 +34,18 @@ const CALLBACK_PATH = "/callback";
 const REDIRECT_URI = `http://localhost:${CALLBACK_PORT}${CALLBACK_PATH}`;
 const SCOPES =
 	"org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
+function createState(): string {
+	// Independent anti-CSRF nonce. Uses Web Crypto (like pkce.ts) so this stays
+	// cross-platform (Node/Bun/browser) without a top-level node:crypto import.
+	const bytes = new Uint8Array(16);
+	crypto.getRandomValues(bytes);
+	let hex = "";
+	for (const byte of bytes) {
+		hex += byte.toString(16).padStart(2, "0");
+	}
+	return hex;
+}
+
 async function getNodeApis(): Promise<NodeApis> {
 	if (nodeApis) return nodeApis;
 	if (!nodeApisPromise) {
@@ -234,10 +246,11 @@ export async function loginAnthropic(options: {
 	onManualCodeInput?: () => Promise<string>;
 }): Promise<OAuthCredentials> {
 	const { verifier, challenge } = await generatePKCE();
-	const server = await startCallbackServer(verifier);
+	const state = createState();
+	const server = await startCallbackServer(state);
 
 	let code: string | undefined;
-	let state: string | undefined;
+	let returnedState: string | undefined;
 	let redirectUriForExchange = REDIRECT_URI;
 
 	try {
@@ -249,7 +262,7 @@ export async function loginAnthropic(options: {
 			scope: SCOPES,
 			code_challenge: challenge,
 			code_challenge_method: "S256",
-			state: verifier,
+			state,
 		});
 
 		options.onAuth({
@@ -280,15 +293,15 @@ export async function loginAnthropic(options: {
 
 			if (result?.code) {
 				code = result.code;
-				state = result.state;
+				returnedState = result.state;
 				redirectUriForExchange = REDIRECT_URI;
 			} else if (manualInput) {
 				const parsed = parseAuthorizationInput(manualInput);
-				if (parsed.state && parsed.state !== verifier) {
+				if (parsed.state && parsed.state !== state) {
 					throw new Error("OAuth state mismatch");
 				}
 				code = parsed.code;
-				state = parsed.state ?? verifier;
+				returnedState = parsed.state ?? state;
 			}
 
 			if (!code) {
@@ -298,18 +311,18 @@ export async function loginAnthropic(options: {
 				}
 				if (manualInput) {
 					const parsed = parseAuthorizationInput(manualInput);
-					if (parsed.state && parsed.state !== verifier) {
+					if (parsed.state && parsed.state !== state) {
 						throw new Error("OAuth state mismatch");
 					}
 					code = parsed.code;
-					state = parsed.state ?? verifier;
+					returnedState = parsed.state ?? state;
 				}
 			}
 		} else {
 			const result = await server.waitForCode();
 			if (result?.code) {
 				code = result.code;
-				state = result.state;
+				returnedState = result.state;
 				redirectUriForExchange = REDIRECT_URI;
 			}
 		}
@@ -320,23 +333,23 @@ export async function loginAnthropic(options: {
 				placeholder: REDIRECT_URI,
 			});
 			const parsed = parseAuthorizationInput(input);
-			if (parsed.state && parsed.state !== verifier) {
+			if (parsed.state && parsed.state !== state) {
 				throw new Error("OAuth state mismatch");
 			}
 			code = parsed.code;
-			state = parsed.state ?? verifier;
+			returnedState = parsed.state ?? state;
 		}
 
 		if (!code) {
 			throw new Error("Missing authorization code");
 		}
 
-		if (!state) {
+		if (!returnedState) {
 			throw new Error("Missing OAuth state");
 		}
 
 		options.onProgress?.("Exchanging authorization code for tokens...");
-		return exchangeAuthorizationCode(code, state, verifier, redirectUriForExchange);
+		return exchangeAuthorizationCode(code, returnedState, verifier, redirectUriForExchange);
 	} finally {
 		server.server.close();
 	}

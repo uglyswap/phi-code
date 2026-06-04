@@ -207,7 +207,12 @@ export class OutputAccumulator {
 			return;
 		}
 		this.tempFilePath = defaultTempFilePath(this.tempFilePrefix);
-		this.tempFileStream = createWriteStream(this.tempFilePath);
+		// Truncated command output can contain secrets (env dumps, tokens, .env
+		// contents). Create the temp file with owner-only perms so other local
+		// users on a shared tmpdir cannot read it. The mode applies on creation;
+		// the file name is fresh each time, so there is no pre-existing file to
+		// inherit looser perms. On Windows the mode is effectively ignored.
+		this.tempFileStream = createWriteStream(this.tempFilePath, { mode: 0o600 });
 		for (const chunk of this.rawChunks) {
 			this.tempFileStream.write(chunk);
 		}

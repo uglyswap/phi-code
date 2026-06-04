@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createInterface } from "node:readline";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "fs";
 import { getOAuthProvider, getOAuthProviders } from "./utils/oauth/index.js";
 import type { OAuthCredentials, OAuthProviderId } from "./utils/oauth/types.js";
 
@@ -22,7 +22,19 @@ function loadAuth(): Record<string, { type: "oauth" } & OAuthCredentials> {
 }
 
 function saveAuth(auth: Record<string, { type: "oauth" } & OAuthCredentials>): void {
-	writeFileSync(AUTH_FILE, JSON.stringify(auth, null, 2), "utf-8");
+	// The file holds long-lived OAuth access/refresh tokens, so it must never be
+	// group/other-readable. Create it with restrictive perms from the start (still
+	// subject to umask), then chmod 0600 explicitly because writeFileSync does not
+	// change the mode of a pre-existing file. chmod is a no-op on Windows.
+	const isPosix = process.platform !== "win32";
+	writeFileSync(AUTH_FILE, JSON.stringify(auth, null, 2), isPosix ? { encoding: "utf-8", mode: 0o600 } : "utf-8");
+	if (isPosix) {
+		try {
+			chmodSync(AUTH_FILE, 0o600);
+		} catch {
+			// chmod may fail on some filesystems (eg WSL); non-critical
+		}
+	}
 }
 
 async function login(providerId: OAuthProviderId): Promise<void> {
