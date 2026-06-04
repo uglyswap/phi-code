@@ -611,7 +611,10 @@ export async function discoverAndLoadExtensions(
 	addPaths(discoverExtensionsInDir(globalExtDir));
 
 	// 2b. Bundled Phi Code extensions (shipped with the package)
-	const bundledExtDir = path.resolve(path.join(__dirname, "..", "..", "..", "extensions", "phi"));
+	// __dirname n'existe pas en ESM : on le derive de import.meta.url (sinon
+	// Reference: __dirname is not defined au chargement des extensions).
+	const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+	const bundledExtDir = path.resolve(path.join(moduleDir, "..", "..", "..", "extensions", "phi"));
 	if (fs.existsSync(bundledExtDir)) {
 		addPaths(discoverExtensionsInDir(bundledExtDir));
 	}
