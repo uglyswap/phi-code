@@ -42,6 +42,11 @@ function run(cmd, options = {}) {
 	}
 }
 
+// NOTE: packages are versioned independently (see scripts/sync-versions.js).
+// This derives the single git-tag / changelog version from packages/ai, which
+// may differ from a given package's published version (e.g. coding-agent). The
+// tag is a repo-level marker, not a per-package version. Adjust the source here
+// if the team adopts a different headline-version policy.
 function getVersion() {
 	const pkg = JSON.parse(readFileSync("packages/ai/package.json", "utf-8"));
 	return pkg.version;
@@ -164,30 +169,45 @@ console.log("Updating CHANGELOG.md files...");
 updateChangelogsForRelease(version);
 console.log();
 
-// 4. Commit and tag
+// 4. Preflight publish (dry-run) BEFORE any irreversible git state.
+// Catches build/check/registry-scope/permission errors before the commit + tag
+// are created, so an aborted publish never leaves a dangling tag + version bump.
+console.log("Preflight: dry-run publish...");
+run("npm run publish:dry");
+console.log();
+
+// 5. Commit and tag
 console.log("Committing and tagging...");
 stageChangedFiles();
 run(`git commit -m "Release v${version}"`);
 run(`git tag v${version}`);
 console.log();
 
-// 5. Publish
+// 6. Publish (with rollback of the local commit + tag on failure)
 console.log("Publishing to npm...");
-run("npm run publish");
+try {
+	execSync("npm run publish", { encoding: "utf-8", stdio: "inherit" });
+} catch {
+	console.error("\nPublish failed. Rolling back local tag and release commit...");
+	run(`git tag -d v${version}`, { ignoreError: true });
+	run("git reset --hard HEAD~1", { ignoreError: true });
+	console.error("Rolled back. Re-run the release after resolving the publish error.");
+	process.exit(1);
+}
 console.log();
 
-// 6. Add new [Unreleased] sections
+// 7. Add new [Unreleased] sections
 console.log("Adding [Unreleased] sections for next cycle...");
 addUnreleasedSection();
 console.log();
 
-// 7. Commit
+// 8. Commit
 console.log("Committing changelog updates...");
 stageChangedFiles();
 run(`git commit -m "Add [Unreleased] section for next cycle"`);
 console.log();
 
-// 8. Push
+// 9. Push
 console.log("Pushing to remote...");
 run("git push origin main");
 run(`git push origin v${version}`);
