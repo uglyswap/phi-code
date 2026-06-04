@@ -18,7 +18,7 @@
  */
 
 import type { ExtensionAPI } from "phi-code";
-import { writeFile, mkdir, copyFile, readdir, readFile } from "node:fs/promises";
+import { writeFile, mkdir, copyFile, readdir, readFile, chmod } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
@@ -337,6 +337,15 @@ _Edit this file to customize Phi Code's behavior for your project._
 	async function writeModelsConfig(config: { providers: Record<string, any> }): Promise<void> {
 		await mkdir(agentDir, { recursive: true });
 		await writeFile(modelsJsonPath, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
+		// models.json contient des cles API en clair : restreindre l'acces au
+		// proprietaire (no-op sur Windows, ou les permissions POSIX n'existent pas).
+		if (process.platform !== "win32") {
+			try {
+				await chmod(modelsJsonPath, 0o600);
+			} catch {
+				/* best-effort : certains systemes de fichiers ne supportent pas chmod */
+			}
+		}
 	}
 
 	async function persistProviderKey(

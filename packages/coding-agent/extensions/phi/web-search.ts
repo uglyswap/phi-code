@@ -10,6 +10,8 @@
  * Optional: set BRAVE_API_KEY for Brave Search as extra fallback.
  */
 
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "phi-code";
 
@@ -342,15 +344,82 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 		}
 	}
 
-	async function fetchUrl(url: string, maxLength: number = 8000): Promise<string> {
-		const response = await fetch(url, {
-			headers: {
-				"User-Agent": randomUA(),
-				"Accept": "text/html,application/xhtml+xml,text/plain,application/json",
-			},
-			signal: AbortSignal.timeout(HTTP_TIMEOUT),
-		});
+	// ─── Garde SSRF ──────────────────────────────────────────────────────────
+	// Bloque les IP privees / loopback / link-local / metadata cloud pour que le
+	// tool fetch_url (URL choisie par le LLM, parfois issue de contenu non fiable)
+	// ne puisse pas atteindre localhost, le reseau interne ou 169.254.169.254.
+	function isBlockedIp(ip: string): boolean {
+		const family = isIP(ip);
+		if (family === 4) {
+			const o = ip.split(".").map(Number);
+			if (o[0] === 127 || o[0] === 10 || o[0] === 0) return true; // loopback / 10/8 / 0/8
+			if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return true; // 172.16/12
+			if (o[0] === 192 && o[1] === 168) return true; // 192.168/16
+			if (o[0] === 169 && o[1] === 254) return true; // link-local + metadata cloud
+			if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return true; // CGNAT 100.64/10
+			return false;
+		}
+		if (family === 6) {
+			const a = ip.toLowerCase();
+			if (a === "::1" || a === "::") return true; // loopback / unspecified
+			if (a.startsWith("::ffff:")) return isBlockedIp(a.slice(7)); // IPv4-mapped
+			if (a.startsWith("fc") || a.startsWith("fd")) return true; // fc00::/7 ULA
+			if (a.startsWith("fe80") || a.startsWith("fe9") || a.startsWith("fea") || a.startsWith("feb")) return true; // link-local
+			return false;
+		}
+		return false;
+	}
 
+	async function assertPublicUrl(rawUrl: string): Promise<void> {
+		let u: URL;
+		try {
+			u = new URL(rawUrl);
+		} catch {
+			throw new Error(`URL invalide: ${rawUrl}`);
+		}
+		if (u.protocol !== "http:" && u.protocol !== "https:") {
+			throw new Error(`Schema d'URL non autorise (${u.protocol}); seuls http et https sont permis`);
+		}
+		const host = u.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+		if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".internal") || host.endsWith(".local")) {
+			throw new Error(`Hote interne bloque (SSRF): ${host}`);
+		}
+		if (isIP(host)) {
+			if (isBlockedIp(host)) throw new Error(`Adresse IP interne bloquee (SSRF): ${host}`);
+			return;
+		}
+		// Resout l'hote et rejette si une IP resolue est interne. Note: ne protege
+		// pas a 100% du DNS-rebinding (le fetch resout de nouveau), mais bloque les
+		// cas usuels (metadata cloud, localhost, RFC1918) fournis par le LLM.
+		const addrs = await lookup(host, { all: true });
+		for (const a of addrs) {
+			if (isBlockedIp(a.address)) {
+				throw new Error(`Hote resolvant vers une IP interne bloquee (SSRF): ${host} -> ${a.address}`);
+			}
+		}
+	}
+
+	async function fetchUrl(url: string, maxLength: number = 8000): Promise<string> {
+		// Valide l'URL initiale ET chaque saut de redirection (redirect manuel),
+		// sinon une redirection 30x vers une cible interne contournerait la garde.
+		let currentUrl = url;
+		let response: Response | undefined;
+		for (let hop = 0; hop < 6; hop++) {
+			await assertPublicUrl(currentUrl);
+			response = await fetch(currentUrl, {
+				headers: {
+					"User-Agent": randomUA(),
+					"Accept": "text/html,application/xhtml+xml,text/plain,application/json",
+				},
+				redirect: "manual",
+				signal: AbortSignal.timeout(HTTP_TIMEOUT),
+			});
+			const location = response.status >= 300 && response.status < 400 ? response.headers.get("location") : null;
+			if (!location) break;
+			currentUrl = new URL(location, currentUrl).toString();
+		}
+
+		if (!response) throw new Error("Aucune reponse HTTP");
 		if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
 
 		const contentType = response.headers.get("content-type") || "";
