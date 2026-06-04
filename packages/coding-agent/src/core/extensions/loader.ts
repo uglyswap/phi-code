@@ -637,8 +637,13 @@ export async function discoverAndLoadExtensions(
 	};
 
 	// 1. Project-local extensions: cwd/.phi/extensions/ (or cwd/.pi/extensions/ for Pi compat)
-	const localExtDir = path.join(cwd, CONFIG_DIR_NAME, "extensions");
-	addPaths(discoverExtensionsInDir(localExtDir));
+	// These run arbitrary code from the *current workspace*, so opening an
+	// untrusted repo would auto-execute its extensions. Allow opting out via
+	// PHI_DISABLE_PROJECT_EXTENSIONS=1 (global/bundled extensions still load).
+	if (process.env.PHI_DISABLE_PROJECT_EXTENSIONS !== "1") {
+		const localExtDir = path.join(cwd, CONFIG_DIR_NAME, "extensions");
+		addPaths(discoverExtensionsInDir(localExtDir));
+	}
 
 	// 2. Global extensions: agentDir/extensions/
 	const globalExtDir = path.join(agentDir, "extensions");
