@@ -10,6 +10,12 @@ const { homedir } = require("os");
 const agentDir = join(homedir(), ".phi", "agent");
 const packageDir = __dirname.replace(/[\\/]scripts$/, "");
 
+// Opt-out / CI guard: skip the home-directory scaffolding under CI or sandbox
+// installs (and when explicitly disabled) to avoid polluting ~/.phi there.
+if (process.env.PHI_SKIP_POSTINSTALL || process.env.CI) {
+	process.exit(0);
+}
+
 // 1. Copy extensions, agents, skills
 const copies = [
   { src: "extensions/phi", dest: join(agentDir, "extensions"), label: "extensions" },
@@ -23,13 +29,23 @@ for (const { src, dest, label } of copies) {
   mkdirSync(dest, { recursive: true });
   const files = readdirSync(srcDir);
   let copied = 0;
+  const failures = [];
   for (const file of files) {
     try {
       cpSync(join(srcDir, file), join(dest, file), { recursive: true, force: true });
       copied++;
-    } catch (e) { /* skip */ }
+    } catch (e) {
+      failures.push({ file, err: e && e.message ? e.message : String(e) });
+    }
   }
   if (copied > 0) console.log(`  Φ Installed ${copied} ${label} to ${dest}`);
+  // Surface failures without re-throwing (must not fail the npm install).
+  if (failures.length > 0) {
+    console.warn(`  ⚠ ${failures.length} ${label} failed to install (run with PHI_POSTINSTALL_DEBUG=1 for details)`);
+    if (process.env.PHI_POSTINSTALL_DEBUG) {
+      for (const f of failures) console.warn(`    - ${f.file}: ${f.err}`);
+    }
+  }
 }
 
 // 2. Make sigma packages resolvable from ~/.phi/agent/extensions/

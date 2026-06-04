@@ -15,7 +15,7 @@
  * it appear everywhere without restarting Phi Code.
  */
 
-import { ApiKeyStore, type ExtensionAPI, getApiKeyStore } from "phi-code";
+import { ApiKeyStore, type ConfigWatcher, type ExtensionAPI, getApiKeyStore, getConfigWatcher } from "phi-code";
 import { fetchLiveModels, peekCache, resetLiveModelsCache, toPersistedModel } from "./providers/live-models.js";
 
 const PROVIDER_DISPLAY: Record<string, string> = {
@@ -44,6 +44,7 @@ interface RefreshOutcome {
 
 async function refreshOne(
 	store: ApiKeyStore,
+	watcher: ConfigWatcher,
 	providerId: string,
 ): Promise<RefreshOutcome> {
 	const stored = store.getProvider(providerId);
@@ -96,6 +97,11 @@ async function refreshOne(
 		return { provider: providerId, source: "skipped", count: 0, error: "unknown baseUrl" };
 	}
 
+	// Mute the config watcher so it does not echo this programmatic write back
+	// as a models_json_changed event (which would trigger a spurious reload +
+	// "Keys reloaded" notification). Mute per-write because refresh loops can
+	// exceed the ignore window between providers (cf. keys.ts).
+	watcher.muteForWrite("models_json_changed");
 	store.setKey(providerId, stored?.apiKey ?? "local", {
 		baseUrl,
 		api: stored?.api,
@@ -107,6 +113,7 @@ async function refreshOne(
 
 export default function modelsExtension(pi: ExtensionAPI) {
 	const store = getApiKeyStore();
+	const watcher = getConfigWatcher();
 
 	pi.registerCommand("models", {
 		description: "List or refresh the live model catalog (use `/models refresh` after a provider adds a new model)",
@@ -183,7 +190,7 @@ export default function modelsExtension(pi: ExtensionAPI) {
 		void (async () => {
 			let changed = 0;
 			for (const id of providers) {
-				const outcome = await refreshOne(store, id).catch(() => undefined);
+				const outcome = await refreshOne(store, watcher, id).catch(() => undefined);
 				if (outcome && outcome.source === "live" && outcome.count > 0) changed++;
 			}
 			if (changed > 0) {
@@ -214,7 +221,7 @@ export default function modelsExtension(pi: ExtensionAPI) {
 
 		const outcomes: RefreshOutcome[] = [];
 		for (const id of providers) {
-			const outcome = await refreshOne(store, id).catch((err) => ({
+			const outcome = await refreshOne(store, watcher, id).catch((err) => ({
 				provider: id,
 				source: "skipped" as const,
 				count: 0,
