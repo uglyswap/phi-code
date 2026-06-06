@@ -680,4 +680,58 @@ _Edit this file to customize Phi Code's behavior for your project._
 			}
 		},
 	});
+
+	// ─── /plan-models : lightweight per-role model reconfiguration ─────
+	// Standalone alternative to re-running the full /phi-init wizard. Sources the
+	// model list from the already-loaded model registry (no provider probing),
+	// shows the current routing, and lets you reassign each /plan role with the
+	// same provider-qualified picker (id [provider]).
+	pi.registerCommand("plan-models", {
+		description: "Reconfigure the per-role models used by /plan (provider-qualified, cross-provider)",
+		handler: async (_args, ctx) => {
+			try {
+				const registryModels: Array<{ provider?: string; id?: string }> =
+					ctx.modelRegistry?.getAvailable?.() || [];
+				const available: Array<{ ref: string; display: string }> = [];
+				const seen = new Set<string>();
+				for (const m of registryModels) {
+					if (!m?.provider || !m?.id) continue;
+					const ref = `${m.provider}/${m.id}`;
+					if (seen.has(ref)) continue;
+					seen.add(ref);
+					available.push({ ref, display: `${m.id} [${m.provider}]` });
+				}
+				if (available.length === 0) {
+					ctx.ui.notify(
+						"No configured models found. Add a provider via `/phi-init` or `/setup` first.",
+						"warning",
+					);
+					return;
+				}
+
+				// Show the current per-role assignment as the starting point.
+				let current: { routes?: Record<string, { preferredModel?: string; fallback?: string }> } = {};
+				try {
+					current = JSON.parse(await readFile(join(agentDir, "routing.json"), "utf-8"));
+				} catch {
+					/* no routing config yet */
+				}
+				const currentLines = TASK_ROLES.map((r) => {
+					const route = current.routes?.[r.key];
+					return `  ${r.label}: ${route?.preferredModel || "default"} (fallback: ${route?.fallback || "default"})`;
+				}).join("\n");
+				ctx.ui.notify(`Current /plan models:\n${currentLines}\n`, "info");
+
+				const assignments = await manualMode(available, ctx);
+
+				await ensureDirs();
+				const routing = createRouting(assignments);
+				await writeFile(join(agentDir, "routing.json"), JSON.stringify(routing, null, 2), "utf-8");
+				ctx.ui.notify("Updated `~/.phi/agent/routing.json`. `/plan` will use these per-role models.", "info");
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				ctx.ui.notify(`/plan-models failed: ${message}`, "error");
+			}
+		},
+	});
 }
