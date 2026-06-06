@@ -8,10 +8,12 @@ import {
 	getSelfUpdateUnavailableInstruction,
 	PACKAGE_NAME,
 	type SelfUpdateCommand,
+	VERSION,
 } from "./config.js";
 import { DefaultPackageManager } from "./core/package-manager.js";
 import { SettingsManager } from "./core/settings-manager.js";
 import { shouldUseWindowsShell } from "./utils/child-process.js";
+import { isNewerPackageVersion } from "./utils/version-check.js";
 
 export type PackageCommand = "install" | "remove" | "update" | "list";
 
@@ -291,12 +293,31 @@ interface SelfUpdatePlan {
 	shouldRun: boolean;
 }
 
-async function getSelfUpdatePlan(_force: boolean): Promise<SelfUpdatePlan> {
-	// Always reinstall the latest @phi-code-admin/phi-code from the registry.
-	// The previous flow queried pi.dev (the upstream Pi endpoint), which reported
-	// the upstream package name (@earendil-works/pi-coding-agent) and an unrelated
-	// version line, so `phi update` installed the wrong package. The install
-	// command targets @latest, so a plain reinstall is correct and idempotent.
+async function getSelfUpdatePlan(force: boolean): Promise<SelfUpdatePlan> {
+	if (force) {
+		return { packageName: PACKAGE_NAME, shouldRun: true };
+	}
+	try {
+		// Check the npm registry for the latest @phi-code-admin/phi-code. (The old
+		// flow queried pi.dev, the upstream Pi endpoint, which reported the upstream
+		// package name and an unrelated version line.) Skipping the reinstall when
+		// already current also avoids the Windows EBUSY where the running phi
+		// process holds its own native .node modules locked during `npm install -g`.
+		const response = await fetch(`https://registry.npmjs.org/${PACKAGE_NAME}/latest`, {
+			headers: { accept: "application/json" },
+			signal: AbortSignal.timeout(10000),
+		});
+		if (response.ok) {
+			const data = (await response.json()) as { version?: unknown };
+			const latest = typeof data.version === "string" ? data.version.trim() : "";
+			if (latest && !isNewerPackageVersion(latest, VERSION)) {
+				console.log(chalk.green(`${APP_NAME} is already up to date (v${VERSION})`));
+				return { packageName: PACKAGE_NAME, shouldRun: false };
+			}
+		}
+	} catch {
+		// Registry/network error: fall through and attempt the update anyway.
+	}
 	return { packageName: PACKAGE_NAME, shouldRun: true };
 }
 
