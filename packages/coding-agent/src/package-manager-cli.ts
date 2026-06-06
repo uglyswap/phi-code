@@ -8,12 +8,10 @@ import {
 	getSelfUpdateUnavailableInstruction,
 	PACKAGE_NAME,
 	type SelfUpdateCommand,
-	VERSION,
 } from "./config.js";
 import { DefaultPackageManager } from "./core/package-manager.js";
 import { SettingsManager } from "./core/settings-manager.js";
 import { shouldUseWindowsShell } from "./utils/child-process.js";
-import { getLatestPiRelease, isNewerPackageVersion } from "./utils/version-check.js";
 
 export type PackageCommand = "install" | "remove" | "update" | "list";
 
@@ -293,23 +291,13 @@ interface SelfUpdatePlan {
 	shouldRun: boolean;
 }
 
-async function getSelfUpdatePlan(force: boolean): Promise<SelfUpdatePlan> {
-	if (force) {
-		return { packageName: PACKAGE_NAME, shouldRun: true };
-	}
-
-	try {
-		const latestRelease = await getLatestPiRelease(VERSION);
-		const packageName = latestRelease?.packageName ?? PACKAGE_NAME;
-		if (!latestRelease || packageName !== PACKAGE_NAME || isNewerPackageVersion(latestRelease.version, VERSION)) {
-			return { packageName, shouldRun: true };
-		}
-	} catch {
-		return { packageName: PACKAGE_NAME, shouldRun: true };
-	}
-
-	console.log(chalk.green(`${APP_NAME} is already up to date (v${VERSION})`));
-	return { packageName: PACKAGE_NAME, shouldRun: false };
+async function getSelfUpdatePlan(_force: boolean): Promise<SelfUpdatePlan> {
+	// Always reinstall the latest @phi-code-admin/phi-code from the registry.
+	// The previous flow queried pi.dev (the upstream Pi endpoint), which reported
+	// the upstream package name (@earendil-works/pi-coding-agent) and an unrelated
+	// version line, so `phi update` installed the wrong package. The install
+	// command targets @latest, so a plain reinstall is correct and idempotent.
+	return { packageName: PACKAGE_NAME, shouldRun: true };
 }
 
 async function runSelfUpdate(command: SelfUpdateCommand): Promise<void> {
