@@ -34,8 +34,6 @@ import {
 	type Component,
 	Container,
 	fuzzyFilter,
-	getCapabilities,
-	hyperlink,
 	Loader,
 	type LoaderIndicatorOptions,
 	Markdown,
@@ -3582,44 +3580,16 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	showNewVersionNotification(newVersion: string): void {
-		const action = theme.fg("accent", `${APP_NAME} update`);
-		const updateInstruction = theme.fg("muted", `New version ${newVersion} is available. Run `) + action;
-		const changelogUrl = "https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/CHANGELOG.md";
-		const changelogLink = getCapabilities().hyperlinks
-			? hyperlink(theme.fg("accent", "open changelog"), changelogUrl)
-			: theme.fg("accent", changelogUrl);
-		const changelogLine = theme.fg("muted", "Changelog: ") + changelogLink;
-
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
-		this.chatContainer.addChild(
-			new Text(
-				`${theme.bold(theme.fg("warning", "Update Available"))}\n${updateInstruction}\n${changelogLine}`,
-				1,
-				0,
-			),
-		);
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
-		this.ui.requestRender();
+	showNewVersionNotification(_newVersion: string): void {
+		// Update notifications are intentionally disabled: the inherited self-update
+		// flow points at the upstream Pi package (earendil-works/pi-coding-agent),
+		// not phi-code, so the "Update Available" prompt was misleading and `phi
+		// update` broke the install. Re-enable only once self-update targets
+		// @phi-code-admin/phi-code.
 	}
 
-	showPackageUpdateNotification(packages: string[]): void {
-		const action = theme.fg("accent", `${APP_NAME} update`);
-		const updateInstruction = theme.fg("muted", "Package updates are available. Run ") + action;
-		const packageLines = packages.map((pkg) => `- ${pkg}`).join("\n");
-
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
-		this.chatContainer.addChild(
-			new Text(
-				`${theme.bold(theme.fg("warning", "Package Updates Available"))}\n${updateInstruction}\n${theme.fg("muted", "Packages:")}\n${packageLines}`,
-				1,
-				0,
-			),
-		);
-		this.chatContainer.addChild(new DynamicBorder((text) => theme.fg("warning", text)));
-		this.ui.requestRender();
+	showPackageUpdateNotification(_packages: string[]): void {
+		// Disabled together with showNewVersionNotification (see above).
 	}
 
 	/**
