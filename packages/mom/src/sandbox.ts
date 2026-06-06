@@ -240,7 +240,9 @@ function killProcessTree(pid: number): void {
 	}
 }
 
-function shellEscape(s: string): string {
+// Kept for reference; per-file shellEscape copies are used in read/edit/write.
+// Prefixed with _ to mark intentionally unused (biome noUnusedVariables).
+function _shellEscape(s: string): string {
 	// Escape for passing to sh -c
 	return `'${s.replace(/'/g, "'\\''")}'`;
 }

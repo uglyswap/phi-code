@@ -1,6 +1,6 @@
 {
   "name": "@phi-code-admin/camofox-browser",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Phi-code vendored headless browser automation library (snapshot of jo-inc/camofox-browser@c9a90daf, MIT). 10 OpenClaw browser tools exposed as ES module functions; legacy Express server kept opt-in.",
   "type": "module",
   "main": "server.js",

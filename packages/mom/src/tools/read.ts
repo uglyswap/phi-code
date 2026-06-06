@@ -87,7 +87,8 @@ export function createReadTool(executor: Executor): AgentTool<typeof readSchema>
 			const newlineCount = Number.parseInt(newlineCountStr.trim(), 10) || 0;
 			const endsWithNewline = lastBytePart === "\n";
 			// Empty file => 0 lines; otherwise add 1 only when there is no trailing newline.
-			const totalFileLines = newlineCount === 0 && lastBytePart === "" ? 0 : newlineCount + (endsWithNewline ? 0 : 1);
+			const totalFileLines =
+				newlineCount === 0 && lastBytePart === "" ? 0 : newlineCount + (endsWithNewline ? 0 : 1);
 
 			// Apply offset if specified (1-indexed)
 			const startLine = offset ? Math.max(1, offset) : 1;
