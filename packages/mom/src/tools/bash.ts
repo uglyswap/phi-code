@@ -83,9 +83,7 @@ export function createBashTool(executor: Executor): AgentTool<typeof bashSchema>
 				// Build actionable notice
 				const startLine = truncation.totalLines - truncation.outputLines + 1;
 				const endLine = truncation.totalLines;
-				const fullOutputNote = tempFilePath
-					? ` Full output: ${tempFilePath}`
-					: " (full output could not be saved)";
+				const fullOutputNote = tempFilePath ? ` Full output: ${tempFilePath}` : " (full output could not be saved)";
 
 				if (truncation.lastLinePartial) {
 					// Edge case: last line alone > 50KB

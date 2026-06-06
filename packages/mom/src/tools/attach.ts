@@ -1,6 +1,6 @@
 import { realpathSync } from "node:fs";
 import { Type } from "@sinclair/typebox";
-import { basename, resolve as resolvePath, sep as pathSep } from "path";
+import { basename, sep as pathSep, resolve as resolvePath } from "path";
 import type { AgentTool } from "phi-code-agent";
 
 // This will be set by the agent before running
