@@ -12,12 +12,6 @@
   "bugs": {
     "url": "https://github.com/uglyswap/phi-code/issues"
   },
-  "os": [
-    "darwin"
-  ],
-  "cpu": [
-    "x64"
-  ],
   "files": [
     "camoufox-bin/",
     "LICENSE",
