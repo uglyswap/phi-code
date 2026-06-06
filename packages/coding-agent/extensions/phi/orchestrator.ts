@@ -562,15 +562,32 @@ Tag the note with relevant keywords for vector search.
 	}
 
 	/**
+	 * Resolve a routing.json model reference to an available model.
+	 * Accepts a provider-qualified "provider/id" reference (so the same model id
+	 * offered by several providers can be disambiguated) and falls back to a bare
+	 * "id" for legacy configs. Splits on the FIRST slash only, since some model
+	 * ids themselves contain slashes (e.g. OpenRouter "anthropic/claude-...").
+	 */
+	function resolveModelRef(available: any[], ref: string): any | undefined {
+		if (!ref) return undefined;
+		const slash = ref.indexOf("/");
+		if (slash > 0) {
+			const provider = ref.slice(0, slash);
+			const id = ref.slice(slash + 1);
+			const qualified = available.find((m: any) => m.provider === provider && m.id === id);
+			if (qualified) return qualified;
+		}
+		return available.find((m: any) => m.id === ref);
+	}
+
+	/**
 	 * Switch model for the current phase.
 	 */
 	async function switchModelForPhase(phase: OrchestratorPhase, ctx: any): Promise<string> {
 		const available = ctx.modelRegistry?.getAvailable?.() || [];
-		const preferred = available.find((m: any) => m.id === phase.model);
-		const fallback = available.find((m: any) => m.id === phase.fallback);
-		const target = preferred || fallback;
+		const target = resolveModelRef(available, phase.model) || resolveModelRef(available, phase.fallback);
 
-		if (target && target.id !== ctx.model?.id) {
+		if (target && (target.id !== ctx.model?.id || target.provider !== ctx.model?.provider)) {
 			const switched = await pi.setModel(target);
 			if (switched) return target.id;
 		}

@@ -516,23 +516,25 @@ async function configureLocal(
 async function pickModelFromCatalog(
 	ui: ExtensionUIContext,
 	prompt: string,
-	allModelIds: string[],
+	models: Array<{ ref: string; display: string }>,
 ): Promise<string | undefined> {
-	if (allModelIds.length === 0) {
+	if (models.length === 0) {
 		ui.notify("No models available. Configure a provider first.", "warning");
 		return undefined;
 	}
-	const options = ["(keep default)", ...allModelIds];
+	const KEEP = "(keep default)";
+	const options = [KEEP, ...models.map((m) => m.display)];
 	const choice = await ui.select(prompt, options);
-	if (!choice || choice === options[0]) return undefined;
-	return choice;
+	if (!choice || choice === KEEP) return undefined;
+	// Map the displayed "id [provider]" back to the canonical "provider/id" ref.
+	return models.find((m) => m.display === choice)?.ref;
 }
 
 async function configureAssignments(
 	ui: ExtensionUIContext,
-	allModelIds: string[],
+	models: Array<{ ref: string; display: string }>,
 ): Promise<{ defaultModel: string; orchestration: Record<string, RouteAssignment> }> {
-	if (allModelIds.length === 0) {
+	if (models.length === 0) {
 		ui.notify("No models available for assignment. Configure a provider first.", "warning");
 		return { defaultModel: "default", orchestration: {} };
 	}
@@ -551,11 +553,11 @@ async function configureAssignments(
 	const orchestration: Record<string, RouteAssignment> = {};
 	for (const role of ORCHESTRATION_ROLES) {
 		const preferred =
-			(await pickModelFromCatalog(ui, `${role.label} - preferred model (${role.desc})`, allModelIds)) ??
-			allModelIds[0];
-		const fallbackOptions = allModelIds.filter((m) => m !== preferred);
-		const fallback = fallbackOptions.length > 0
-			? (await pickModelFromCatalog(ui, `${role.label} - fallback model`, fallbackOptions)) ?? preferred
+			(await pickModelFromCatalog(ui, `${role.label} - preferred model (${role.desc})`, models)) ??
+			models[0].ref;
+		const fallbackModels = models.filter((m) => m.ref !== preferred);
+		const fallback = fallbackModels.length > 0
+			? (await pickModelFromCatalog(ui, `${role.label} - fallback model`, fallbackModels)) ?? preferred
 			: preferred;
 		orchestration[role.key] = { preferred, fallback };
 		ui.notify(`  ${role.label}: ${preferred} / ${fallback}`, "info");
@@ -675,17 +677,23 @@ export default function setupExtension(pi: ExtensionAPI) {
 				}
 
 				if (action === "Assign models to agent roles") {
-					const allModelIds: string[] = [];
+					const allModels: Array<{ ref: string; display: string }> = [];
+					const seenRefs = new Set<string>();
 					for (const p of catalog) {
 						const stored = store.getProvider(p.id);
 						if (!stored) continue;
 						const models = Array.isArray(stored.models) ? stored.models : [];
 						for (const m of models) {
 							const id = (m as { id?: string }).id;
-							if (typeof id === "string" && !allModelIds.includes(id)) allModelIds.push(id);
+							if (typeof id !== "string") continue;
+							// Provider-qualified ref so the same id from different providers stays distinct.
+							const ref = `${p.id}/${id}`;
+							if (seenRefs.has(ref)) continue;
+							seenRefs.add(ref);
+							allModels.push({ ref, display: `${id} [${p.id}]` });
 						}
 					}
-					const { defaultModel, orchestration } = await configureAssignments(ui, allModelIds);
+					const { defaultModel, orchestration } = await configureAssignments(ui, allModels);
 					assignments.default = defaultModel;
 					assignments.orchestration = orchestration;
 					refreshAvailable();

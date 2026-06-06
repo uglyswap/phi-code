@@ -196,13 +196,22 @@ async function detectLocalProviders(providers: DetectedProvider[]): Promise<void
 	);
 }
 
-function getAllAvailableModels(providers: DetectedProvider[]): string[] {
-	const ids = new Set<string>();
+function getAllAvailableModels(providers: DetectedProvider[]): Array<{ ref: string; display: string }> {
+	const out: Array<{ ref: string; display: string }> = [];
+	const seen = new Set<string>();
 	for (const p of providers) {
 		if (!p.available) continue;
-		for (const id of p.models) ids.add(id);
+		for (const id of p.models) {
+			// Provider-qualified reference ("provider/id") so the same model id
+			// offered by several providers stays distinct, and the provider is
+			// visible at selection. No cross-provider dedup (only exact dupes).
+			const ref = `${p.id}/${id}`;
+			if (seen.has(ref)) continue;
+			seen.add(ref);
+			out.push({ ref, display: `${id} [${p.id}]` });
+		}
 	}
-	return [...ids];
+	return out;
 }
 
 // ─── Routing Presets ─────────────────────────────────────────────────────
@@ -387,25 +396,32 @@ _Edit this file to customize Phi Code's behavior for your project._
 	// the user's `/model` choice on every routing decision.
 
 	async function manualMode(
-		availableModels: string[],
+		availableModels: Array<{ ref: string; display: string }>,
 		ctx: any,
 	): Promise<Record<string, { preferred: string; fallback: string }>> {
 		ctx.ui.notify(
 			"Assign a model to each orchestration role.\n" +
 				"These models are used by `/plan` and the orchestrator — NOT by normal chat.\n" +
-				"The chat default model is controlled via `/model` (and stays sticky across prompts).\n",
+				"The chat default model is controlled via `/model` (and stays sticky across prompts).\n" +
+				"Each option shows its provider as `model-id [provider]`, so the same model from\n" +
+				"different providers stays distinct.\n",
 			"info",
 		);
-		const modelOptions = ["default (use current chat model)", ...availableModels];
+		// Display strings carry the provider badge; map them back to the canonical
+		// "provider/id" reference that gets persisted into routing.json.
+		const DEFAULT_OPTION = "default (use current chat model)";
+		const refByDisplay = new Map<string, string>([[DEFAULT_OPTION, "default"]]);
+		for (const m of availableModels) refByDisplay.set(m.display, m.ref);
+		const modelOptions = [DEFAULT_OPTION, ...availableModels.map((m) => m.display)];
 		const assignments: Record<string, { preferred: string; fallback: string }> = {};
 
 		for (const role of TASK_ROLES) {
 			const chosen = await ctx.ui.select(`${role.label} — ${role.desc}`, modelOptions);
-			const preferredModel = chosen && chosen !== modelOptions[0] ? chosen : "default";
+			const preferredModel = refByDisplay.get(chosen) ?? "default";
 
 			const fallbackOptions = modelOptions.filter((m) => m !== chosen);
 			const fallbackChoice = await ctx.ui.select(`Fallback for ${role.label}`, fallbackOptions);
-			const fallback = fallbackChoice && fallbackChoice !== modelOptions[0] ? fallbackChoice : "default";
+			const fallback = refByDisplay.get(fallbackChoice) ?? "default";
 
 			assignments[role.key] = { preferred: preferredModel, fallback };
 			ctx.ui.notify(`  ${role.label}: ${preferredModel} (fallback: ${fallback})`, "info");
@@ -415,7 +431,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 		// This is NOT the chat default — `/model` controls that.
 		assignments["default"] = {
 			preferred: "default",
-			fallback: availableModels[0] || "default",
+			fallback: availableModels[0]?.ref || "default",
 		};
 		return assignments;
 	}
