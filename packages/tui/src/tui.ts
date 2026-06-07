@@ -447,6 +447,23 @@ export class TUI extends Container {
 		this.terminal.hideCursor();
 		this.queryCellSize();
 		this.requestRender();
+
+		// Windows has no startup SIGWINCH (see Terminal.start()), so the first
+		// frame can be laid out against a stale/early console size and stays wrong
+		// until the user manually resizes the window. Defer a re-measure + forced
+		// full re-render so the first usable frame matches the real terminal.
+		if (process.platform === "win32") {
+			setImmediate(() => {
+				if (this.stopped) return;
+				try {
+					(process.stdout as unknown as { _refreshSize?: () => void })._refreshSize?.();
+				} catch {
+					// Internal size refresh unavailable; the forced render below still
+					// re-reads process.stdout.columns/rows.
+				}
+				this.requestRender(true);
+			});
+		}
 	}
 
 	addInputListener(listener: InputListener): () => void {
