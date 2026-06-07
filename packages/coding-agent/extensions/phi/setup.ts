@@ -35,6 +35,7 @@ import {
 import {
 	OPENCODE_GO_AUTH_URL,
 	OPENCODE_GO_ENV_VAR,
+	buildOpenCodeGoAnthropicProviderConfig,
 	buildOpenCodeGoProviderConfig,
 	getOpenCodeGoModels,
 	pingOpenCodeGo,
@@ -385,8 +386,20 @@ async function configureOpenCodeGo(
 		models: config.models,
 	});
 
+	// Qwen / MiniMax are only served via the Anthropic-compatible endpoint on
+	// OpenCode Go, so they go to a separate provider (the OpenAI shim 401s them).
+	const anthConfig = buildOpenCodeGoAnthropicProviderConfig(trimmed, models);
+	if (anthConfig.models.length > 0) {
+		store.setKey("opencode-go-anthropic", trimmed, {
+			baseUrl: anthConfig.baseUrl,
+			api: anthConfig.api,
+			models: anthConfig.models,
+		});
+	}
+
 	ui.notify(
-		`OpenCode Go configured: \`${maskKeyForDisplay(trimmed)}\` (${models.length} models)`,
+		`OpenCode Go configured: \`${maskKeyForDisplay(trimmed)}\` ` +
+			`(${config.models.length} OpenAI-compat + ${anthConfig.models.length} Anthropic-compat models)`,
 		"info",
 	);
 	return { providerId: "opencode-go", modelCount: models.length };

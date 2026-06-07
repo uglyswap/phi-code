@@ -23,6 +23,7 @@ import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
 import { fetchLiveModels, pingProvider, toPersistedModel } from "./providers/live-models.js";
+import { isOpenCodeGoAnthropicModel, OPENCODE_GO_ANTHROPIC_BASE_URL } from "./providers/opencode-go.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -387,6 +388,24 @@ _Edit this file to customize Phi Code's behavior for your project._
 		await writeModelsConfig(config);
 	}
 
+	// OpenCode Go's Qwen/MiniMax models must be persisted under a separate
+	// Anthropic-compatible provider (the OpenAI shim 401s them).
+	async function persistOpenCodeGoAnthropic(
+		apiKey: string,
+		models: ReturnType<typeof toPersistedModel>[],
+	): Promise<void> {
+		const config = await readModelsConfig();
+		const existing = config.providers["opencode-go-anthropic"] ?? {};
+		config.providers["opencode-go-anthropic"] = {
+			...existing,
+			baseUrl: OPENCODE_GO_ANTHROPIC_BASE_URL,
+			api: "anthropic-messages",
+			apiKey,
+			models,
+		};
+		await writeModelsConfig(config);
+	}
+
 	// ─── Manual model assignment (one model per orchestration role) ─────
 	//
 	// As of 0.75.6, `/phi-init` ONLY configures orchestration role models
@@ -519,7 +538,24 @@ _Edit this file to customize Phi Code's behavior for your project._
 
 		const persistedModels = live.models.map(toPersistedModel);
 		try {
-			await persistProviderModels(provider, persistedModels);
+			if (provider.id === "opencode-go") {
+				// Qwen/MiniMax are only served via the Anthropic-compatible endpoint;
+				// GLM/Kimi/DeepSeek/Mimo/Hy3 use the OpenAI shim. Persist them as two
+				// providers so neither family hits a "not supported for format" 401.
+				const openaiModels = persistedModels.filter((m) => !isOpenCodeGoAnthropicModel(m.id));
+				const anthropicModels = persistedModels.filter((m) => isOpenCodeGoAnthropicModel(m.id));
+				provider.models = openaiModels.map((m) => m.id);
+				await persistProviderModels(provider, openaiModels);
+				if (anthropicModels.length > 0) {
+					await persistOpenCodeGoAnthropic(trimmed, anthropicModels);
+					ctx.ui.notify(
+						`OpenCode Go: ${anthropicModels.length} Qwen/MiniMax model(s) routed via the Anthropic-compatible provider \`opencode-go-anthropic\` (assign them with \`/plan-models\` or \`/model\`).`,
+						"info",
+					);
+				}
+			} else {
+				await persistProviderModels(provider, persistedModels);
+			}
 		} catch (err) {
 			ctx.ui.notify(
 				`Failed to write provider models to ${modelsJsonPath}: ${err instanceof Error ? err.message : String(err)}`,
