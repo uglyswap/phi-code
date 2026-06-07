@@ -10,6 +10,14 @@ import type { VectorSearchResult } from "./types.js";
  */
 const esmImport = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<any>;
 
+// The vector store initializes and loads its embedding model in the background
+// while the TUI is up. Writing to stdout/stderr directly corrupts the input
+// line, so these diagnostics are opt-in (set PHI_MEMORY_VERBOSE=1 or PHI_DEBUG=1).
+const VERBOSE = process.env.PHI_MEMORY_VERBOSE === "1" || process.env.PHI_DEBUG === "1";
+function vlog(message: string): void {
+	if (VERBOSE) console.error(message);
+}
+
 /**
  * Self-contained vector store using sql.js (SQLite via WebAssembly) and
  * @huggingface/transformers for local embeddings.
@@ -61,7 +69,7 @@ export class VectorStore {
 				const fileBuffer = readFileSync(this.dbPath);
 				this.db = new SQL.Database(fileBuffer);
 			} catch (error) {
-				console.warn(
+				vlog(
 					`[VectorStore] Failed to load existing DB at ${this.dbPath} (${error instanceof Error ? error.message : String(error)}); starting from a fresh database.`,
 				);
 				this.db = new SQL.Database();
@@ -111,15 +119,15 @@ export class VectorStore {
 					? requestedDtype
 					: "q8";
 
-			console.log(`[VectorStore] Loading embedding model (Xenova/all-MiniLM-L6-v2, dtype=${dtype})...`);
-			console.log(`[VectorStore] First run may download the model (~${dtype === "q8" ? "22" : dtype === "fp16" ? "45" : "90"}MB).`);
+			vlog(`[VectorStore] Loading embedding model (Xenova/all-MiniLM-L6-v2, dtype=${dtype})...`);
+			vlog(`[VectorStore] First run may download the model (~${dtype === "q8" ? "22" : dtype === "fp16" ? "45" : "90"}MB).`);
 
 			// Dynamic ESM import for @huggingface/transformers (ESM-only package)
 			const { pipeline: createPipeline } = await esmImport("@huggingface/transformers");
 
 			this.pipeline = await createPipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", { dtype });
 
-			console.log("[VectorStore] Embedding model loaded.");
+			vlog("[VectorStore] Embedding model loaded.");
 		})();
 
 		await this.modelPromise;
