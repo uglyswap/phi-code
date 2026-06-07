@@ -462,8 +462,8 @@ Edit `~/.phi/agent/routing.json`:
   "routes": {
     "code": {
       "keywords": ["implement", "create", "build", "refactor"],
-      "preferredModel": "your-preferred-model",
-      "fallback": "your-fallback-model",
+      "preferredModel": "anthropic/claude-opus-4-7",
+      "fallback": "alibaba-codingplan/glm-5",
       "agent": "code"
     }
   },
@@ -472,6 +472,12 @@ Edit `~/.phi/agent/routing.json`:
   }
 }
 ```
+
+`preferredModel` / `fallback` use a **provider-qualified** `"provider/id"` reference, so the same
+model id offered by several providers (e.g. `glm-5` from both the OpenAI-compatible and
+Anthropic-compatible Alibaba endpoints) is disambiguated, and `/plan` can mix models from
+different providers across its 5 phases. A bare `"id"` (legacy) still resolves. The `/phi-init`
+and `/plan-models` pickers write these references for you and show the provider per model.
 
 ---
 
@@ -665,7 +671,8 @@ Commands are typed in the Phi Code terminal with a `/` prefix.
 
 | Command | Extension | Description |
 |---------|-----------|-------------|
-| `/phi-init` | init | Interactive setup wizard — detect providers, assign models to agents |
+| `/phi-init` | init | Interactive setup wizard — detect providers, assign a **provider-qualified** model to each orchestration role (mix providers freely; the provider is shown next to each model) |
+| `/plan-models` | init | Reassign the per-role `/plan` models without re-running the full wizard — provider-qualified picker (`id [provider]`), sourced from the loaded model registry (no re-probing) |
 | `/benchmark` | benchmark | Test models across 6 categories (code-gen, debug, planning, tool-calling, speed, orchestration) |
 | `/benchmark all` | benchmark | Run benchmark on ALL available models |
 | `/benchmark results` | benchmark | Show saved results with leaderboard and category breakdown |
@@ -760,6 +767,7 @@ The `apiKey` field accepts either a literal key or an environment variable name 
 | `GOOGLE_API_KEY` | Google/Gemini models |
 | `OPENROUTER_API_KEY` | OpenRouter (300+ models) |
 | `GROQ_API_KEY` | Groq (fast inference) |
+| `PHI_DISABLE_PROJECT_EXTENSIONS` | Set to `1` to skip auto-loading project-local extensions (`cwd/.phi/extensions`), e.g. when opening an untrusted repo (global and bundled extensions still load) |
 
 ---
 
