@@ -23,6 +23,10 @@ export const OPENCODE_GO_AUTH_URL = "https://opencode.ai/auth";
 export const OPENCODE_GO_MODELS_URL = "https://opencode.ai/zen/go/v1/models";
 export const OPENCODE_GO_OPENAI_URL = "https://opencode.ai/zen/go/v1/chat/completions";
 export const OPENCODE_GO_ANTHROPIC_URL = "https://opencode.ai/zen/go/v1/messages";
+// Base URL for the Anthropic SDK (which appends "/v1/messages"). Qwen and
+// MiniMax models on OpenCode Go are ONLY served via this Anthropic-compatible
+// endpoint; the OpenAI shim returns 401 "not supported for format oa-compat".
+export const OPENCODE_GO_ANTHROPIC_BASE_URL = "https://opencode.ai/zen/go";
 
 export interface OpenCodeGoModel {
 	id: string;
@@ -184,19 +188,50 @@ export async function pingOpenCodeGo(apiKey: string, timeoutMs = 5_000): Promise
  * when the user wants to override defaults (e.g., add a new model
  * not yet in models.generated.ts).
  */
+/**
+ * On OpenCode Go, Qwen and MiniMax models are only served via the Anthropic-
+ * compatible Messages endpoint (/v1/messages); GLM, Kimi, DeepSeek, Mimo and Hy3
+ * use the OpenAI-compatible shim (/v1/chat/completions). Calling a Qwen/MiniMax
+ * model through the OpenAI format yields a 401 "not supported for format oa-compat".
+ */
+export function isOpenCodeGoAnthropicModel(id: string): boolean {
+	return /^(qwen|minimax)/i.test(id);
+}
+
+function toPersistedOpenCodeGoModel(m: OpenCodeGoModel) {
+	return {
+		id: m.id,
+		name: m.name ?? m.id,
+		reasoning: true,
+		input: ["text"] as const,
+		contextWindow: m.contextWindow ?? 128_000,
+		maxTokens: m.maxTokens ?? 16_384,
+	};
+}
+
+/**
+ * OpenAI-compatible provider entry (GLM / Kimi / DeepSeek / Mimo / Hy3).
+ * Qwen/MiniMax are intentionally excluded — see buildOpenCodeGoAnthropicProviderConfig.
+ */
 export function buildOpenCodeGoProviderConfig(apiKey: string, models: OpenCodeGoModel[]) {
 	return {
 		baseUrl: "https://opencode.ai/zen/go/v1",
 		api: "openai-completions" as const,
 		apiKey,
-		models: models.map((m) => ({
-			id: m.id,
-			name: m.name ?? m.id,
-			reasoning: true,
-			input: ["text"] as const,
-			contextWindow: m.contextWindow ?? 128_000,
-			maxTokens: m.maxTokens ?? 16_384,
-		})),
+		models: models.filter((m) => !isOpenCodeGoAnthropicModel(m.id)).map(toPersistedOpenCodeGoModel),
+	};
+}
+
+/**
+ * Anthropic-compatible provider entry for OpenCode Go's Qwen / MiniMax models.
+ * `models` is empty when the list contains none.
+ */
+export function buildOpenCodeGoAnthropicProviderConfig(apiKey: string, models: OpenCodeGoModel[]) {
+	return {
+		baseUrl: OPENCODE_GO_ANTHROPIC_BASE_URL,
+		api: "anthropic-messages" as const,
+		apiKey,
+		models: models.filter((m) => isOpenCodeGoAnthropicModel(m.id)).map(toPersistedOpenCodeGoModel),
 	};
 }
 
