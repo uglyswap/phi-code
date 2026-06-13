@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.77.2] - 2026-06-13
+
+### Changed
+
+- **Unified, dynamic context-window resolution across all providers.** A single
+  `inferContextWindow(modelId, apiValue, providerId)` resolver now backs both the
+  generic live-models path and the OpenCode Go path, replacing the duplicated flat
+  `128k` fallbacks. When a provider API omits the window, it is inferred by model
+  family (Qwen/MiniMax 1M, Gemini 1-2M, Kimi 256k, GLM/MiMo 200k, GPT-5 400k,
+  Claude 200k) instead of collapsing to 128k.
+- **Background model refresh now covers the OpenCode Go provider pair.** The
+  session-start refresh (and `/models refresh`) previously skipped
+  `opencode-go-anthropic` entirely and did not split Qwen/MiniMax onto the
+  Anthropic endpoint. It now refreshes both `opencode-go` and
+  `opencode-go-anthropic` from the shared catalog, so large-context models
+  (e.g. `qwen3.7-plus`) self-correct to their real window on the next session
+  without re-running `/setup`.
+
 ## [0.77.1] - 2026-06-13
 
 ### Fixed
