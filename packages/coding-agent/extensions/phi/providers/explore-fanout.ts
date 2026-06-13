@@ -65,6 +65,15 @@ export function isRateLimited(text: string): boolean {
 	return /\b429\b|rate.?limit(ed)?|too many requests|overloaded|quota exceeded|resource exhausted/i.test(text);
 }
 
+/** Strip the model's reasoning blocks so they do not pollute the merged brief. */
+export function stripThinking(text: string): string {
+	return text
+		.replace(/<think>[\s\S]*?<\/think>/gi, "")
+		.replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
+}
+
 /** Run one sub-explorer. Never throws; always resolves to an ExplorerResult. */
 function runOneExplorer(spec: ExplorerSpec, opts: FanoutOptions): Promise<ExplorerResult> {
 	return new Promise((resolve) => {
@@ -175,7 +184,10 @@ export async function runExploreFanout(
 		if (batchResults.some((r) => r.rateLimited)) concurrency = 1;
 	}
 	const ok = results.filter((r) => r.ok && r.text.trim());
-	const merged = ok.map((r) => `### Exploration — ${r.focus}\n${r.text.trim()}`).join("\n\n");
+	const merged = ok
+		.map((r) => `### Exploration — ${r.focus}\n${stripThinking(r.text)}`)
+		.filter((block) => block.trim().length > 0)
+		.join("\n\n");
 	return { results, merged, rateLimited: results.some((r) => r.rateLimited) };
 }
 
