@@ -28,6 +28,7 @@ import {
 	isTransientError,
 	parsePhaseVerdict,
 } from "./providers/orchestrator-helpers.js";
+import { defaultExplorerSpecs, READONLY_EXPLORER_TOOLS, runExploreFanout } from "./providers/explore-fanout.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -1137,10 +1138,13 @@ Tag the note with relevant keywords for vector search.
 				return;
 			}
 
-			const description = rawArgs;
+			// Opt-in: `--fanout` runs a small read-only parallel exploration before
+			// phase 1 (default OFF — single-agent EXPLORE, the safe behaviour).
+			const wantFanout = /(^|\s)--fanout\b/.test(rawArgs);
+			const description = rawArgs.replace(/(^|\s)--fanout\b/g, " ").trim();
 
 			if (!description) {
-				ctx.ui.notify(`**Usage:** \`/plan <project description>\` (or \`/plan --resume\` to continue a checkpointed run)
+				ctx.ui.notify(`**Usage:** \`/plan <project description>\` (or \`/plan --resume\` to continue a checkpointed run, \`/plan --fanout <desc>\` for parallel exploration)
 
 **Examples:**
   /plan Build a REST API for user authentication with JWT
@@ -1188,6 +1192,35 @@ Tag the note with relevant keywords for vector search.
 
 			// Record orchestration start time for final summary
 			phaseStartTime = Date.now();
+
+			// Opt-in parallel EXPLORE fan-out (read-only, <=2 concurrent, sequential
+			// fallback on rate limit). Best-effort: any failure degrades to the normal
+			// single-agent EXPLORE below by simply not enriching the instruction.
+			if (wantFanout) {
+				try {
+					const available = ctx.modelRegistry?.getAvailable?.() || [];
+					const exploreModelId = resolveModelRef(available, firstPhase.model)?.id || firstPhase.model;
+					ctx.ui.notify(`\n🔭 **Parallel exploration** (read-only, up to 2 concurrent) — building a fuller map before phase 1...`, "info");
+					const fan = await runExploreFanout(defaultExplorerSpecs(description), {
+						model: exploreModelId,
+						tools: READONLY_EXPLORER_TOOLS,
+						cwd: ctx.cwd || process.cwd(),
+						concurrency: 2,
+						timeoutMs: 4 * 60 * 1000,
+					});
+					const okCount = fan.results.filter((r) => r.ok).length;
+					if (fan.merged.trim()) {
+						firstPhase.instruction =
+							`## Parallel exploration findings (${okCount} read-only sub-explorer(s))\nUse these as a starting map; verify and synthesize them into your brief, do not trust them blindly.\n\n${fan.merged}\n\n---\n${firstPhase.instruction}`;
+						ctx.ui.notify(`\n🔭 ${okCount} sub-exploration(s) merged into EXPLORE${fan.rateLimited ? " (rate limit hit — ran the rest sequentially)" : ""}.`, "info");
+					} else {
+						ctx.ui.notify(`\n🔭 Parallel exploration returned nothing usable${fan.rateLimited ? " (rate-limited)" : ""} — running the normal single-agent EXPLORE.`, "warning");
+					}
+				} catch {
+					ctx.ui.notify(`\n🔭 Parallel exploration skipped (error) — running the normal single-agent EXPLORE.`, "warning");
+				}
+			}
+
 			// Switch model and activate agent for first phase
 			const { modelId, warning } = await switchModelForPhase(firstPhase, ctx);
 			activateAgent(firstPhase, ctx);

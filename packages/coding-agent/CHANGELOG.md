@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.82.0] - 2026-06-14
+
+### Added
+
+- **Opt-in parallel EXPLORE fan-out** (`/plan --fanout <description>`). Before
+  phase 1, the orchestrator runs up to **2 concurrent read-only** sub-explorers,
+  each with a narrow mandate (architecture & reusable patterns, impacted files,
+  risks & constraints), and merges their findings into the EXPLORE context. This
+  applies the perspective-diverse pattern to the front of the pipeline so the
+  downstream phases start from a fuller, more accurate map.
+
+  Guardrails (the fan-out is best-effort and never breaks a run): default OFF
+  (single-agent EXPLORE unchanged); read-only tool set only (no write/edit/bash);
+  hard concurrency cap of 2 against the single rate-limited key; **adaptive
+  fallback to sequential** the moment a sub-explorer reports a 429 / rate limit;
+  a per-explorer timeout that kills the process; and full graceful degradation to
+  the normal EXPLORE on any error, empty result, or rate limit. Experimental: not
+  yet validated against a live proxy at scale, hence opt-in.
+
 ## [0.81.0] - 2026-06-14
 
 Marathon increment 4 (prompt-only, low risk).
