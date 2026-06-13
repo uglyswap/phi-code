@@ -64,6 +64,113 @@ function withFrontmatter(content: string, name: string): string {
 	return `---\nname: "${name}"\ndescription: "${description}"\n---\n\n${content}`;
 }
 
+/** Hard caps for the deterministic recall manifest (no LLM involved). */
+const MANIFEST_MAX_ENTRIES = 40;
+const MANIFEST_MAX_CHARS = 2000;
+const MANIFEST_DESC_MAX = 100;
+// Chars reserved for the trailing "… (N notes total …)" overflow line so the
+// final manifest still respects MANIFEST_MAX_CHARS once it is appended.
+const MANIFEST_OVERFLOW_RESERVE = 96;
+
+/**
+ * Extract a one-line summary for a single note file, deterministically.
+ *
+ * Prefers the YAML frontmatter `description:` field (written by
+ * withFrontmatter). Falls back to the first non-empty, non-frontmatter line.
+ * Returns a trimmed, single-line string truncated to MANIFEST_DESC_MAX chars.
+ */
+function summarizeNote(content: string): string {
+	const text = content.replace(/\r\n/g, "\n");
+	let body = text;
+
+	// If a frontmatter block is present, scan it for a description first.
+	if (text.startsWith("---\n")) {
+		const end = text.indexOf("\n---", 4);
+		if (end !== -1) {
+			const fm = text.slice(4, end);
+			for (const rawLine of fm.split("\n")) {
+				const m = rawLine.match(/^\s*description\s*:\s*(.+?)\s*$/);
+				if (m) {
+					// Strip surrounding quotes if present.
+					const value = m[1].replace(/^["']|["']$/g, "").trim();
+					if (value) return collapseLine(value);
+				}
+			}
+			// No description in frontmatter: summarize the body that follows it.
+			body = text.slice(end + 4);
+		}
+	}
+
+	for (const rawLine of body.split("\n")) {
+		const line = rawLine.replace(/^#+\s*/, "").trim();
+		if (line && line !== "---") {
+			return collapseLine(line);
+		}
+	}
+	return "";
+}
+
+/** Collapse internal whitespace to single spaces and truncate cleanly. */
+function collapseLine(value: string): string {
+	const flat = value.replace(/\s+/g, " ").trim();
+	return flat.length > MANIFEST_DESC_MAX ? `${flat.slice(0, MANIFEST_DESC_MAX - 1).trimEnd()}…` : flat;
+}
+
+/**
+ * Build a deterministic one-line-per-file manifest of all memory notes.
+ *
+ * Purely local: lists note files and reads their frontmatter / first line.
+ * No LLM call, no vector search. Bounded to MANIFEST_MAX_ENTRIES entries and
+ * MANIFEST_MAX_CHARS characters so it stays cheap to inject every turn.
+ *
+ * Returns an empty string when there are no notes, so callers can skip
+ * injection entirely.
+ */
+function buildMemoryManifest(sigmaMemory: SigmaMemory): string {
+	let files: Array<{ name: string; size: number; date: string }>;
+	try {
+		files = sigmaMemory.notes.list();
+	} catch {
+		return "";
+	}
+	if (files.length === 0) {
+		return "";
+	}
+
+	const lines: string[] = [];
+	let total = 0;
+	let truncated = false;
+
+	for (const file of files) {
+		if (lines.length >= MANIFEST_MAX_ENTRIES) {
+			truncated = true;
+			break;
+		}
+		let summary = "";
+		try {
+			summary = summarizeNote(sigmaMemory.notes.read(file.name));
+		} catch {
+			// Unreadable note: still list its name so the model knows it exists.
+			summary = "";
+		}
+		const entry = summary ? `- ${file.name}: ${summary}` : `- ${file.name}`;
+		if (total + entry.length + 1 > MANIFEST_MAX_CHARS - MANIFEST_OVERFLOW_RESERVE) {
+			truncated = true;
+			break;
+		}
+		lines.push(entry);
+		total += entry.length + 1;
+	}
+
+	if (lines.length === 0) {
+		return "";
+	}
+	if (truncated || lines.length < files.length) {
+		lines.push(`- … (${files.length} notes total; use memory_read/memory_search for full content)`);
+	}
+	return lines.join("\n");
+}
+
 export default function memoryExtension(pi: ExtensionAPI) {
 	// Initialize sigma-memory with embedded vector store
 	const sigmaMemory = new SigmaMemory();
@@ -244,8 +351,19 @@ export default function memoryExtension(pi: ExtensionAPI) {
 						)
 						.join("\n");
 
+					// Lead with the deterministic recall manifest (file + summary)
+					// so a no-arg memory_read surfaces what each note contains, not
+					// just file names. Falls back gracefully when empty.
+					const manifest = buildMemoryManifest(sigmaMemory);
+					const manifestSection = manifest ? `## Memory index (summaries)\n\n${manifest}\n\n` : "";
+
 					return {
-						content: [{ type: "text", text: `Available memory files (${files.length}):\n\n${fileList}` }],
+						content: [
+							{
+								type: "text",
+								text: `${manifestSection}## Available memory files (${files.length})\n\n${fileList}`,
+							},
+						],
 						details: { action: "list", fileCount: files.length },
 					};
 				}
@@ -529,10 +647,19 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		// Neutralize angle brackets so user content cannot close the
 		// <system-reminder> block early and inject trusted instructions.
 		const safe = truncated.replace(/[<>]/g, (c) => (c === "<" ? "&lt;" : "&gt;")).replace(/"/g, '\\"');
+
+		// Deterministic recall index: a one-line-per-file manifest of memory
+		// notes so the model ALWAYS sees which facts exist without having to
+		// guess and call memory_search blindly. Built locally (no LLM).
+		const manifest = buildMemoryManifest(sigmaMemory);
+		const manifestBlock = manifest
+			? `\nMEMORY INDEX (existing saved notes, read with \`memory_read <file>\`):\n${manifest}\n`
+			: "";
+
 		const reminder = `<system-reminder>
 You are about to respond to a new user message:
 "${safe}"
-
+${manifestBlock}
 REMINDER (project rule, applies every turn):
 1. Call \`memory_search\` FIRST with keywords from the user's intent. Recent
    project context, prior decisions, and saved learnings are accessible

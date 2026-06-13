@@ -20,14 +20,14 @@ import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "phi-code";
 import { writeFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import {
 	extractBlockingFindings,
 	extractHandoff,
 	isTransientError,
 	parsePhaseVerdict,
-} from "./orchestrator-helpers.js";
+} from "./providers/orchestrator-helpers.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -229,6 +229,9 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		// When true, switchModelForPhase resolves the fallback model first (used on retry
 		// to swap to a different model family rather than re-hit the one that just failed).
 		useFallback?: boolean;
+		// 0..4 for the five base phases (explore..review); undefined for synthetic
+		// phases (the review fix + re-review). Used to checkpoint resume position.
+		baseIndex?: number;
 	}
 
 	let phaseQueue: OrchestratorPhase[] = [];
@@ -251,6 +254,8 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	let currentPhase: OrchestratorPhase | null = null;
 	// Timestamp shared by all phase report file names in the current run.
 	let currentRunTs = "";
+	// The original /plan description, kept so a checkpoint can be resumed.
+	let currentDescription = "";
 	// Hard cap: at most one REVIEW->fix->re-REVIEW cycle per run.
 	let reviewFixRounds = 0;
 	// Set true right before an INTERNAL ctx.abort() (phase timeout) so the
@@ -264,6 +269,41 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			if (existsSync(f)) return readFileSync(f, "utf-8");
 		} catch { /* ignore */ }
 		return null;
+	}
+
+	// ─── Resume checkpoint ───────────────────────────────────────────────
+	// A tiny JSON marker tracking POSITION in the 5 base phases, so a crashed /
+	// aborted orchestration can be resumed with `/plan --resume`. The handoff .md
+	// files hold the real content; this only records where to pick up.
+	function checkpointPath(): string {
+		return join(process.cwd(), ".phi", "plans", "orchestration-state.json");
+	}
+	function writeCheckpoint(nextBaseIndex: number): void {
+		try {
+			if (nextBaseIndex >= 5) { clearCheckpoint(); return; }
+			writeFileSync(
+				checkpointPath(),
+				JSON.stringify({ description: currentDescription, ts: currentRunTs, nextBaseIndex }, null, 2),
+				"utf-8",
+			);
+		} catch { /* best effort */ }
+	}
+	function readCheckpoint(): { description: string; ts: string; nextBaseIndex: number } | null {
+		try {
+			const p = checkpointPath();
+			if (!existsSync(p)) return null;
+			const c = JSON.parse(readFileSync(p, "utf-8"));
+			if (typeof c?.description === "string" && typeof c?.ts === "string" && typeof c?.nextBaseIndex === "number") {
+				return c;
+			}
+		} catch { /* ignore */ }
+		return null;
+	}
+	function clearCheckpoint(): void {
+		try {
+			const p = checkpointPath();
+			if (existsSync(p)) unlinkSync(p);
+		} catch { /* best effort */ }
 	}
 
 	/**
@@ -321,7 +361,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	 * Load routing config and build phase queue with model assignments + agent definitions.
 	 * Each phase now reads outputs from previous phases and writes structured outputs.
 	 */
-	function buildPhases(description: string): OrchestratorPhase[] {
+	function buildPhases(description: string, tsOverride?: string): OrchestratorPhase[] {
 		const routingPath = join(homedir(), ".phi", "agent", "routing.json");
 		let routing: any = { routes: {}, default: { model: "default" } };
 		try {
@@ -342,15 +382,15 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		const test = getModel("test");
 		const review = getModel("review");
 
-		const ts = timestamp();
-		currentRunTs = ts; // shared by all phase report file names this run
+		const ts = tsOverride || timestamp();
+		currentRunTs = ts; // shared by all phase report file names this run (or resumed)
 		// Inject runtime info so agents can adapt to the host OS
 		const shellNote = process.platform === 'win32'
 			? `\nShell: bash (Git Bash), NOT cmd.exe. Always use Unix syntax: rm not del, test -f not if exist, / not \\\\`
 			: '';
 		const runtimeInfo = `\n\nRuntime: ${process.platform} (${process.arch})${shellNote}`;
 
-		return [
+		const phases: OrchestratorPhase[] = [
 			{
 				key: "explore", label: "🔍 Phase 1 — EXPLORE", model: explore.preferred, fallback: explore.fallback,
 				agent: loadAgentDef("explore"),
@@ -573,7 +613,7 @@ After testing, use \`memory_write\` to save test results, bugs found, and lesson
 
 **Project Request:** ${description}
 
-**Step 1:** Get the diff to review. Run \`git diff\` (and \`git status\`) if it is a git repo; otherwise read the files listed in the progress/handoff reports. Skip test/fixture hunks.
+**Step 1:** Get the diff to review. Run \`git diff\` and \`git diff --stat\` (and \`git status\`) if it is a git repo; otherwise read the files listed in the progress/handoff reports. Skip test/fixture hunks. **Scale your effort to the diff size:** a small diff (under ~50 changed lines) gets one focused precision pass, bias to high confidence, at most 4 findings; a large diff gets all three angles below plus the verification step. Never spend so long that you risk the phase time limit.
 **Step 2:** Review in SEQUENTIAL ANGLES (do all in this one turn, no sub-agents). Collect raw candidates first, judge after:
    - **Angle 1 - Correctness:** read the diff line by line. What behaviour did it change or remove? Off-by-one, null/undefined, wrong condition, broken invariant.
    - **Angle 2 - Cross-file:** grep the callers and callees of changed symbols. Did a signature/return/contract change break a caller elsewhere?
@@ -615,6 +655,8 @@ Tag the note with relevant keywords for vector search.
 - Save any new architectural decisions or patterns discovered` + runtimeInfo + COMMON_PHASE_RULES,
 			},
 		];
+		phases.forEach((p, i) => { p.baseIndex = i; });
+		return phases;
 	}
 
 	/**
@@ -752,6 +794,7 @@ Tag the note with relevant keywords for vector search.
 			// All phases done — clean up and notify
 			setOrchestrationActive(false);
 			phasePending = false;
+			clearCheckpoint();
 			deactivateAgent();
 			// Restore the user's model so /plan does not overwrite their /model choice.
 			if (originalModel) {
@@ -1027,6 +1070,12 @@ Tag the note with relevant keywords for vector search.
 			}
 		} catch { /* verdict logic is best-effort */ }
 
+		// Checkpoint resume position after each base phase (synthetic fix/re-review
+		// phases have no baseIndex and do not advance it).
+		if (currentPhase && typeof currentPhase.baseIndex === "number") {
+			writeCheckpoint(currentPhase.baseIndex + 1);
+		}
+
 		// Phase complete — chain to next
 		completedPhases++;
 		phasePending = false;
@@ -1038,10 +1087,51 @@ Tag the note with relevant keywords for vector search.
 	pi.registerCommand("plan", {
 		description: "Plan AND execute a project — 5 phases, each with its own model from routing.json",
 		handler: async (args, ctx) => {
-			const description = args.trim();
+			const rawArgs = args.trim();
+
+			// Resume a crashed / aborted orchestration from its checkpoint.
+			if (/^(--resume|resume)\b/i.test(rawArgs)) {
+				const cp = readCheckpoint();
+				if (!cp) {
+					ctx.ui.notify("No orchestration checkpoint to resume. Start one with `/plan <description>`.", "warning");
+					return;
+				}
+				await ensurePlansDir();
+				currentDescription = cp.description;
+				// Reuse the saved timestamp so the rebuilt phases point at the same
+				// .phi/plans/*.md handoff files that the earlier run produced.
+				const rphases = buildPhases(cp.description, cp.ts);
+				const remaining = rphases.slice(Math.max(0, Math.min(5, cp.nextBaseIndex)));
+				if (remaining.length === 0) {
+					clearCheckpoint();
+					ctx.ui.notify("Checkpoint already complete — nothing to resume.", "info");
+					return;
+				}
+				setOrchestrationActive(true);
+				phasePending = true;
+				originalModel = ctx.model || null;
+				savedTools = pi.getActiveTools();
+				completedPhases = cp.nextBaseIndex;
+				skippedPhases = 0;
+				reviewFixRounds = 0;
+				internalAbort = false;
+				phaseStartTime = Date.now();
+				const firstResume = remaining[0];
+				currentPhase = firstResume;
+				phaseQueue = remaining.slice(1);
+				ctx.ui.notify(`📋 **Resuming orchestration** at ${firstResume.label} (${remaining.length} phase(s) left)\n`, "info");
+				const { modelId, warning } = await switchModelForPhase(firstResume, ctx);
+				activateAgent(firstResume, ctx);
+				ctx.ui.notify(`${firstResume.label} → \`${modelId}\``, "info");
+				if (warning) ctx.ui.notify(`\n⚠️ ${warning}`, "warning");
+				setTimeout(() => pi.sendUserMessage(firstResume.instruction, { deliverAs: "followUp" }), 200);
+				return;
+			}
+
+			const description = rawArgs;
 
 			if (!description) {
-				ctx.ui.notify(`**Usage:** \`/plan <project description>\`
+				ctx.ui.notify(`**Usage:** \`/plan <project description>\` (or \`/plan --resume\` to continue a checkpointed run)
 
 **Examples:**
   /plan Build a REST API for user authentication with JWT
@@ -1060,6 +1150,7 @@ Tag the note with relevant keywords for vector search.
 			await writeFile(join(plansDir, specFile), `# ${description}\n\n**Created:** ${new Date().toLocaleString()}\n`, "utf-8");
 
 			// Build phases with model assignments + agent definitions
+			currentDescription = description;
 			const phases = buildPhases(description);
 			phaseQueue = phases.slice(1); // Queue phases 2-5
 			setOrchestrationActive(true);
@@ -1072,9 +1163,9 @@ Tag the note with relevant keywords for vector search.
 			completedPhases = 0;
 			skippedPhases = 0;
 			reviewFixRounds = 0;
-			currentPhase = null;
 			internalAbort = false;
 			const firstPhase = phases[0];
+			currentPhase = firstPhase;
 
 			ctx.ui.notify(`📋 **Orchestrator started** — 5 phases with model routing + agent roles\n`, "info");
 

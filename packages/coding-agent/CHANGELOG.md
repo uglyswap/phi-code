@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.79.0] - 2026-06-13
+
+Marathon increment 2: resumable orchestration, productivity, deterministic recall.
+
+### Added
+
+- **`/plan --resume`.** A crashed or aborted orchestration can be resumed from a
+  tiny checkpoint (`.phi/plans/orchestration-state.json`) that records the run's
+  position. Resume rebuilds the phases with the original timestamp so the existing
+  `.phi/plans/*.md` handoff files are reused. A `BLOCKED` verdict now leaves the
+  checkpoint in place so you can fix the blocker and `/plan --resume`.
+- **`/commit` command.** Packaged, fully deterministic (no LLM): stages or commits
+  the working tree with a `[phi] ...` message derived from the staged files and the
+  last assistant turn, with a safety protocol (refuses staged `.env` / `*.pem` /
+  secrets, never `--amend`, single shell-free `git commit` call). Stages all only
+  with `/commit --all`.
+- **Deterministic memory recall.** A compact one-line-per-note memory index
+  (filename + frontmatter summary, capped at 40 entries / ~2k chars) is injected
+  every turn and returned by `memory_read`, so the model always knows what facts
+  exist instead of relying on it to call `memory_search`.
+- **Effort-calibrated REVIEW.** The review agent now scales its depth to the diff
+  size (small diff: one high-confidence pass, <=4 findings; large diff: all angles
+  + verification), staying within the phase time limit.
+
+### Fixed
+
+- **Startup warning regression (0.78.0).** The orchestrator helper module lived at
+  the top level of `extensions/phi/`, where extension auto-discovery tried to load
+  it as an extension and logged "does not export a valid factory function". Moved
+  it into `providers/` (a non-discovered subdir) where the other phi helper modules
+  live. No behaviour change.
+
+### Changed
+
+- Bash tool description now asks for an active-voice command description for the
+  TUI / logs.
+
 ## [0.78.0] - 2026-06-13
 
 Orchestration robustness + quality pass, derived from an analysis of Claude Code's
