@@ -1,0 +1,41 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"skipLibCheck": true,
+		"paths": {
+			"phi-code": [
+				"./src/index.ts"
+			],
+			"@phi-code-admin/phi-code": [
+				"./src/index.ts"
+			],
+			"@phi-code-admin/phi-code/hooks": [
+				"./src/core/hooks/index.ts"
+			],
+			"phi-code-tui": [
+				"../tui/src/index.ts"
+			],
+			"phi-code-ai": [
+				"../ai/src/index.ts"
+			],
+			"phi-code-agent": [
+				"../agent/src/index.ts"
+			],
+			"typebox": [
+				"../../node_modules/typebox"
+			]
+		}
+	},
+	"include": [
+		"extensions/phi/**/*.ts"
+	],
+	"exclude": [
+		"node_modules",
+		"dist",
+		"extensions/phi/browser.ts",
+		"extensions/phi/web-search.ts",
+		"extensions/phi/memory.ts"
+	],
+	"_note": "Typecheck for phi extensions (NOT covered by tsconfig.build, loaded via jiti at runtime). browser/web-search/memory are excluded for pre-existing optional-dep / ontology type-debt; run check:ext before changing the orchestrator or adding commands."
+}

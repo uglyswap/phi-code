@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.80.0] - 2026-06-14
+
+Marathon increment 3: context protection, productivity commands, and the
+extension type-safety gap that hid earlier bugs.
+
+### Added
+
+- **WebFetch context protection.** Large fetched/scraped web content is now
+  condensed before it enters the phase model's context: a best-effort summary via
+  a cheap model with a **guaranteed deterministic truncation fallback** (so a flaky
+  proxy never blocks the fetch). Content stays inside the `external-untrusted`
+  wrapper.
+- **`/title`** — derive a session title + kebab-case branch name from the first
+  user message (deterministic; injection-safe tokenization).
+- **`/dream`** — deterministic memory consolidation: groups exact-duplicate notes
+  and reports what could be merged (never deletes; respects non-deletion).
+- **`/agents-init`** — write a minimal `AGENTS.md` (detected package manager +
+  build/test/lint scripts) when none exists.
+- **Active re-read pointer** in compaction: the read/modified-files inventory now
+  instructs the model to re-read a dropped file with the read tool only if the
+  current step needs it (anti content-hallucination).
+- **`check:ext` typecheck** (`tsconfig.ext.json`). The `extensions/phi/` tree is
+  loaded via jiti at runtime and was outside the build tsconfig, so it was never
+  type-checked. `npm run check:ext` now covers the orchestrator + commands.
+
+### Fixed
+
+- **Orchestrator type errors hidden by the untyped-extensions gap.** The
+  transient-error retry helper was called with a too-strict signature, plus three
+  pre-existing loose spots in `orchestrator.ts` (nullable agent, dynamic message
+  scanning, a tool result missing `details`). Runtime was unaffected (jiti strips
+  types) but they are now type-clean and guarded by `check:ext`.
+
 ## [0.79.0] - 2026-06-13
 
 Marathon increment 2: resumable orchestration, productivity, deterministic recall.

@@ -67,6 +67,14 @@ export function computeFileLists(fileOps: FileOperations): { readFiles: string[]
 }
 
 /**
+ * Active re-read pointer: turns the passive file inventory into an instruction.
+ * Their content was dropped by compaction, so the model must re-read on demand
+ * instead of hallucinating remembered content.
+ */
+const FILE_REREAD_POINTER =
+	"These files were read/modified before this summary; their content was dropped during compaction. Re-read with the read tool ONLY if needed for the current step; do not rely on remembered content.";
+
+/**
  * Format file operations as XML tags for summary.
  */
 export function formatFileOperations(readFiles: string[], modifiedFiles: string[]): string {
@@ -78,7 +86,7 @@ export function formatFileOperations(readFiles: string[], modifiedFiles: string[
 		sections.push(`<modified-files>\n${modifiedFiles.join("\n")}\n</modified-files>`);
 	}
 	if (sections.length === 0) return "";
-	return `\n\n${sections.join("\n\n")}`;
+	return `\n\n${FILE_REREAD_POINTER}\n\n${sections.join("\n\n")}`;
 }
 
 // ============================================================================

@@ -701,6 +701,9 @@ Commands are typed in the Phi Code terminal with a `/` prefix.
 | `/plans` | orchestrator | List all plans with status (spec only / planned / executed) |
 | `/commit` | commit | Deterministic commit of the working tree (`[phi] ...` message, secret/`--amend` safety; `--all` to stage everything) |
 | `/context` | models | Show or set the active model's context window (`/context 256k`, `/context 1M`, `/context auto`) |
+| `/title` | productivity | Derive a session title + kebab-case branch name from the first message |
+| `/dream` | productivity | Deterministic memory consolidation: report duplicate notes that could be merged (never deletes) |
+| `/agents-init` | productivity | Write a minimal `AGENTS.md` (package manager + build/test/lint scripts) when none exists |
 | `/skills` | skill-loader | List all discovered skills with sources and descriptions |
 | `/routing` | smart-router | Show current routing configuration and model assignments |
 | `/search <query>` | web-search | Quick web search from the terminal |
