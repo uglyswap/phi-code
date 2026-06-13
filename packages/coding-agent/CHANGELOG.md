@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.78.0] - 2026-06-13
+
+Orchestration robustness + quality pass, derived from an analysis of Claude Code's
+own prompt patterns. The goal: make a multi-model `/plan` pipeline more reliable
+than any single model, with simple text contracts (no fragile structured output).
+
+### Added
+
+- **Phase retry on transient failure.** A `/plan` phase that times out or hits a
+  transient provider error (5xx / 429 / connection reset / broken JSON tool call,
+  distinct from a fatal 401) is now retried once on its fallback model (a
+  different family) before being skipped. Turns multi-model redundancy into a
+  reliability win.
+- **Canonical phase verdict + bounded review->fix loop.** TEST and REVIEW write a
+  `## VERDICT: PASS|FAIL|BLOCKED|SKIP` line the orchestrator reads by regex from
+  the report file (deterministic, proxy-proof). A REVIEW `FAIL` opens exactly one
+  targeted CODE fix (on the `## BLOCKING` findings) followed by one re-REVIEW. A
+  `BLOCKED` verdict pauses the run and tells the user, instead of chaining onto
+  nothing.
+- **`## HANDOFF` contract between phases.** Each phase ends its report with a
+  Critical-Files/State/Next block the orchestrator forwards verbatim, replacing
+  the fragile "Successfully wrote" regex reconstruction as the source of truth.
+- **Adversarial REVIEW.** The cosmetic checklist is replaced by sequential review
+  angles (correctness, cross-file, security/language) plus a three-state
+  verification (CONFIRMED / PLAUSIBLE / REFUTED) that requires quoting the line,
+  and a `file:line - summary - failure_scenario` finding format.
+- **Runtime-proof TEST.** TEST must paste the actual command output (build + run +
+  an end-to-end probe) and may only report PASS on observed success; "when in
+  doubt, FAIL".
+- **Deterministic security gate.** During autonomous `/plan` only, a local regex
+  pre-check (`isDestructiveCommand`, zero API calls) blocks clearly destructive
+  bash (`rm -rf` outside the workspace, `git push --force`, `git reset --hard`,
+  `curl | sh`, `dd of=/dev`, fork bombs, ...). Interactive use is unaffected.
+- **Honest-reporting / autonomous operating rules** appended to every phase
+  (evidence before assertion, act don't ask mid-phase, root cause not workaround).
+
+### Fixed
+
+- **Memory data loss (same-day clobber).** `memory_write` now writes one fact per
+  uniquely-named file (slug + content hash) with minimal frontmatter, and the
+  underlying note store no longer overwrites an existing file by default. Daily
+  append-only logs stay separate from the fact store.
+- **Internal abort vs user cancel.** A phase-timeout abort is no longer mistaken
+  for a user Ctrl+C cancellation (which previously could stop the whole run).
+
+### Changed
+
+- **Compaction summaries** now preserve user requests and security constraints
+  verbatim, keep a `## Dead Ends` section, mark claims from truncated tool output
+  as `[UNCERTAIN]`, reject tool calls in the summarizer, and guard against silent
+  shrinkage on iterative updates.
+- **Trust boundary on web content** (results wrapped as `external-untrusted`) and
+  hardened `edit`/`write`/`read` tool descriptions against fragile tool-calling.
+- Aligned the example subagent's agent directory on `.phi` (was `.pi`).
+
 ## [0.77.3] - 2026-06-13
 
 ### Added

@@ -27,6 +27,160 @@ const bashSchema = Type.Object({
 
 export type BashToolInput = Static<typeof bashSchema>;
 
+export interface DestructiveCommandResult {
+	blocked: boolean;
+	reason?: string;
+}
+
+/**
+ * Deterministic, local (zero API call) safety gate for destructive bash commands.
+ *
+ * Pure function: given a raw command string (and optionally the workspace cwd),
+ * returns whether the command should be blocked and a human readable reason.
+ *
+ * This is intentionally conservative: a false negative (a dangerous command slips
+ * through) is preferred over a false positive (a safe command is blocked). Only
+ * patterns that are very clearly destructive are matched. The gate is meant to be
+ * applied only during autonomous orchestration, never in normal interactive use.
+ */
+export function isDestructiveCommand(cmd: string, cwd?: string): DestructiveCommandResult {
+	if (typeof cmd !== "string" || cmd.length === 0) {
+		return { blocked: false };
+	}
+	// Normalize for matching: collapse runs of whitespace to single spaces.
+	// The original command is still used for path extraction below.
+	const normalized = cmd.replace(/\s+/g, " ").trim();
+	const lower = normalized.toLowerCase();
+
+	// Fork bombs (classic shell fork bomb and common variants).
+	// Compare against a whitespace-stripped form to catch spacing variants.
+	const dense = normalized.replace(/\s+/g, "");
+	if (/\(\)\{:?\|:?&?\};:/.test(dense) || /\w+\(\)\{\w+\|\w+&\};/.test(dense)) {
+		return { blocked: true, reason: "Fork bomb pattern detected." };
+	}
+
+	// Pipe a remote download straight into a shell interpreter (curl|sh, wget|sh, etc.).
+	if (/\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:ba|z|da)?sh\b/.test(lower)) {
+		return { blocked: true, reason: "Piping a remote download directly into a shell is blocked." };
+	}
+
+	// Dangerous permission bypass flag.
+	if (/--dangerously-skip-permissions\b/.test(lower)) {
+		return { blocked: true, reason: "Use of --dangerously-skip-permissions is blocked." };
+	}
+
+	// Filesystem creation (mkfs) and raw disk writes (dd of=/dev/...).
+	if (/\bmkfs(?:\.\w+)?\b/.test(lower)) {
+		return { blocked: true, reason: "Filesystem creation (mkfs) is blocked." };
+	}
+	if (/\bdd\b[^\n]*\bof=\/dev\//.test(lower)) {
+		return { blocked: true, reason: "Raw disk write (dd of=/dev/...) is blocked." };
+	}
+
+	// SQL: dropping a database.
+	if (/\bdrop\s+database\b/.test(lower)) {
+		return { blocked: true, reason: "DROP DATABASE is blocked." };
+	}
+
+	// Git: force push, pushing to main/master, hard reset, aggressive clean.
+	if (/\bgit\s+push\b/.test(lower)) {
+		if (/\bgit\s+push\b[^\n]*(?:--force-with-lease\b|--force\b|\s-f\b)/.test(lower)) {
+			return { blocked: true, reason: "git push --force / --force-with-lease is blocked." };
+		}
+		if (
+			/\bgit\s+push\b[^\n]*\borigin\b[^\n]*\b(?:main|master)\b/.test(lower) ||
+			/\bgit\s+push\b\s+(?:main|master)\b/.test(lower)
+		) {
+			return { blocked: true, reason: "git push to main/master is blocked." };
+		}
+	}
+	if (/\bgit\s+reset\b[^\n]*--hard\b/.test(lower)) {
+		return { blocked: true, reason: "git reset --hard is blocked." };
+	}
+	if (/\bgit\s+clean\b/.test(lower)) {
+		// Match a single combined flag (e.g. -fdx, -xfd) containing f, d and x.
+		const cleanFlag = lower.match(/\bgit\s+clean\b[^\n]*?(-[a-z]+)/);
+		if (cleanFlag && /f/.test(cleanFlag[1]) && /d/.test(cleanFlag[1]) && /x/.test(cleanFlag[1])) {
+			return { blocked: true, reason: "git clean -fdx is blocked." };
+		}
+		// Match separate flags (e.g. -f -d -x).
+		if (/(?:^|\s)-[a-z]*f/.test(lower) && /(?:^|\s)-[a-z]*d/.test(lower) && /(?:^|\s)-[a-z]*x/.test(lower)) {
+			return { blocked: true, reason: "git clean -fdx is blocked." };
+		}
+	}
+
+	// rm -rf targeting paths outside the workspace cwd.
+	// Split on common command separators and inspect each rm segment that
+	// carries both recursive and force flags.
+	const segments = normalized.split(/&&|\|\||[;&|]/);
+	for (const segment of segments) {
+		if (!/\brm\b/.test(segment)) continue;
+		if (!hasRecursiveForceFlags(segment)) continue;
+		const verdict = inspectRmTargets(segment, cwd);
+		if (verdict.blocked) return verdict;
+	}
+
+	return { blocked: false };
+}
+
+/**
+ * Return true when an rm segment carries both a recursive flag (-r / -R) and a
+ * force flag (-f), either combined (-rf, -fr) or as separate tokens.
+ */
+function hasRecursiveForceFlags(segment: string): boolean {
+	const flagTokens = segment.split(/\s+/).filter((t) => t.startsWith("-") && !t.startsWith("--"));
+	let recursive = false;
+	let force = false;
+	for (const flag of flagTokens) {
+		if (/[rR]/.test(flag)) recursive = true;
+		if (/f/.test(flag)) force = true;
+	}
+	if (/--recursive\b/.test(segment)) recursive = true;
+	if (/--force\b/.test(segment)) force = true;
+	return recursive && force;
+}
+
+/**
+ * Inspect the path arguments of an `rm -rf` segment and block targets that
+ * clearly escape the workspace cwd (root, home, parent traversal, absolute
+ * paths outside cwd, or broad wildcards). Relative paths that stay inside the
+ * workspace are allowed.
+ */
+function inspectRmTargets(rmSegment: string, cwd?: string): DestructiveCommandResult {
+	// Strip the leading `rm` and its flag tokens, keep the operands.
+	const withoutRm = rmSegment.replace(/^.*?\brm\b/i, "");
+	const tokens = withoutRm.split(/\s+/).filter((t) => t.length > 0 && !t.startsWith("-"));
+	for (const rawToken of tokens) {
+		// Unquote a leading/trailing quote pair for inspection.
+		const token = rawToken.replace(/^['"]/, "").replace(/['"]$/, "");
+		if (token.length === 0) continue;
+		// Root or near-root absolute targets.
+		if (token === "/" || /^\/\*?$/.test(token)) {
+			return { blocked: true, reason: "rm -rf targeting the filesystem root is blocked." };
+		}
+		// Home directory targets.
+		if (token === "~" || token.startsWith("~/") || token === "$HOME" || token.startsWith("$HOME/")) {
+			return { blocked: true, reason: "rm -rf targeting the home directory is blocked." };
+		}
+		// Parent-directory traversal escapes the workspace.
+		if (token === ".." || token.startsWith("../") || token.includes("/../")) {
+			return { blocked: true, reason: "rm -rf with parent-directory traversal (..) is blocked." };
+		}
+		// Absolute path: allow only if it stays inside the workspace cwd.
+		if (token.startsWith("/")) {
+			const target = token.replace(/\*+$/, "");
+			if (cwd) {
+				const normalizedCwd = cwd.replace(/[\\/]+$/, "");
+				if (target === normalizedCwd || target.startsWith(`${normalizedCwd}/`)) {
+					continue;
+				}
+			}
+			return { blocked: true, reason: "rm -rf targeting an absolute path outside the workspace is blocked." };
+		}
+	}
+	return { blocked: false };
+}
+
 export interface BashToolDetails {
 	truncation?: TruncationResult;
 	fullOutputPath?: string;
@@ -283,6 +437,18 @@ export function createBashToolDefinition(
 			onUpdate?,
 			_ctx?,
 		) {
+			// Deterministic local safety gate: only active during autonomous
+			// orchestration. In normal interactive use nothing is blocked.
+			if ((globalThis as any).__phiOrchestrationActive === true) {
+				const verdict = isDestructiveCommand(command, cwd);
+				if (verdict.blocked) {
+					throw new Error(
+						`Command blocked by safety gate: ${verdict.reason ?? "destructive command"}\n` +
+							"This guard is active only during autonomous orchestration.",
+					);
+				}
+			}
+
 			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${command}` : command;
 			const spawnContext = resolveSpawnContext(resolvedCommand, cwd, spawnHook);
 			const output = new OutputAccumulator({ tempFilePrefix: "pi-bash" });

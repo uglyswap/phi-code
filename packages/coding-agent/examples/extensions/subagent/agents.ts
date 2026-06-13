@@ -85,7 +85,9 @@ function isDirectory(p: string): boolean {
 function findNearestProjectAgentsDir(cwd: string): string | null {
 	let currentDir = cwd;
 	while (true) {
-		const candidate = path.join(currentDir, ".pi", "agents");
+		// Align on ".phi" so the subagent and the phi orchestrator read the same
+		// project agents source (".phi/agents", matching ~/.phi/agent/agents for user scope).
+		const candidate = path.join(currentDir, ".phi", "agents");
 		if (isDirectory(candidate)) return candidate;
 
 		const parentDir = path.dirname(currentDir);

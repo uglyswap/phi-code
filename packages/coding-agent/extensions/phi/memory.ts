@@ -3,7 +3,7 @@
  *
  * Now powered by sigma-memory package which provides:
  * - NotesManager: Markdown files management
- * - OntologyManager: Knowledge graph with entities and relations  
+ * - OntologyManager: Knowledge graph with entities and relations
  * - VectorStore: Embedded vector search (sql.js + local embeddings)
  *
  * Features:
@@ -18,12 +18,51 @@
  * 2. Memory files are stored in ~/.phi/memory/
  */
 
-import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI, ExtensionContext } from "phi-code";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
-import { readFileSync } from "node:fs";
+import { Type } from "@sinclair/typebox";
+import type { ExtensionAPI, ExtensionContext } from "phi-code";
 import { SigmaMemory } from "sigma-memory";
+
+/**
+ * Build a unique, human-readable filename for a single memory fact.
+ *
+ * Combines a kebab-case slug of the first words of the content with a short
+ * content hash. This prevents same-day clobber (each fact gets its own file)
+ * while staying deterministic: re-writing the exact same fact yields the same
+ * name instead of piling up duplicates.
+ */
+function buildFactFilename(content: string): string {
+	const slug = content
+		.toLowerCase()
+		.replace(/[^a-z0-9\s-]/g, " ")
+		.trim()
+		.split(/\s+/)
+		.slice(0, 6)
+		.join("-")
+		.replace(/-+/g, "-")
+		.replace(/^-|-$/g, "")
+		.slice(0, 60);
+	const hash = createHash("sha256").update(content).digest("hex").slice(0, 8);
+	const date = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+	const stem = slug ? `${date}-${slug}-${hash}` : `${date}-${hash}`;
+	return `${stem}.md`;
+}
+
+/**
+ * Prepend a minimal YAML frontmatter ({name, description}) if absent, so each
+ * fact file carries lightweight metadata for later listing and search.
+ */
+function withFrontmatter(content: string, name: string): string {
+	if (content.startsWith("---\n") || content.startsWith("---\r\n")) {
+		return content;
+	}
+	const firstLine = content.split("\n", 1)[0]?.trim() ?? "";
+	const description = (firstLine || name).replace(/"/g, "'").slice(0, 120);
+	return `---\nname: "${name}"\ndescription: "${description}"\n---\n\n${content}`;
+}
 
 export default function memoryExtension(pi: ExtensionAPI) {
 	// Initialize sigma-memory with embedded vector store
@@ -41,7 +80,8 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		name: "memory_search",
 		label: "Memory Search",
 		description: "Search for content in memory using unified search (notes + ontology + vector search)",
-		promptSnippet: "Search project memory (notes, ontology, vector search). ALWAYS call before answering questions about prior work, decisions, or project context.",
+		promptSnippet:
+			"Search project memory (notes, ontology, vector search). ALWAYS call before answering questions about prior work, decisions, or project context.",
 		promptGuidelines: [
 			"MANDATORY: Before starting ANY task, call memory_search with relevant keywords. This is not optional.",
 			"When starting work on a topic, search memory for existing notes and learnings.",
@@ -57,64 +97,72 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			const { query } = params as { query: string };
-			
+
 			try {
 				const results = await sigmaMemory.search(query);
-				
+
 				if (results.length === 0) {
 					return {
-						content: [{ type: "text", text: `No results found for "${query}". Use memory_write to create some memory files!` }],
-						details: { found: false, query, resultCount: 0 }
+						content: [
+							{
+								type: "text",
+								text: `No results found for "${query}". Use memory_write to create some memory files!`,
+							},
+						],
+						details: { found: false, query, resultCount: 0 },
 					};
 				}
 
 				// Format results by source
 				let resultText = `Found ${results.length} results for "${query}":\n\n`;
-				
-				const groupedResults = results.reduce((groups, result) => {
-					if (!groups[result.source]) groups[result.source] = [];
-					groups[result.source].push(result);
-					return groups;
-				}, {} as Record<string, typeof results>);
+
+				const groupedResults = results.reduce(
+					(groups, result) => {
+						if (!groups[result.source]) groups[result.source] = [];
+						groups[result.source].push(result);
+						return groups;
+					},
+					{} as Record<string, typeof results>,
+				);
 
 				for (const [source, sourceResults] of Object.entries(groupedResults)) {
 					resultText += `## ${source.toUpperCase()} (${sourceResults.length} results)\n\n`;
-					
-					for (const result of sourceResults.slice(0, 5)) { // Limit to 5 results per source
+
+					for (const result of sourceResults.slice(0, 5)) {
+						// Limit to 5 results per source
 						resultText += `**Score: ${result.score.toFixed(2)}** | Type: ${result.type}\n`;
-						
-						if (result.source === 'notes') {
+
+						if (result.source === "notes") {
 							const data = result.data;
 							resultText += `File: ${data.file} (line ${data.line})\n`;
 							resultText += `> ${data.content}\n\n`;
-						} else if (result.source === 'ontology') {
+						} else if (result.source === "ontology") {
 							const data = result.data;
-							if (result.type === 'entity') {
+							if (result.type === "entity") {
 								resultText += `Entity: ${data.name} (${data.type})\n`;
 								resultText += `Properties: ${JSON.stringify(data.properties)}\n\n`;
-							} else if (result.type === 'relation') {
+							} else if (result.type === "relation") {
 								resultText += `Relation: ${data.type} (${data.from} → ${data.to})\n`;
 								resultText += `Properties: ${JSON.stringify(data.properties)}\n\n`;
 							}
-						} else if (result.source === 'vectors') {
+						} else if (result.source === "vectors") {
 							const data = result.data;
 							resultText += `File: ${data.file} (line ${data.line})\n`;
 							resultText += `> ${data.content}\n\n`;
 						}
 					}
-					
-					resultText += '---\n\n';
+
+					resultText += "---\n\n";
 				}
 
 				return {
 					content: [{ type: "text", text: resultText }],
-					details: { found: true, query, resultCount: results.length, sources: Object.keys(groupedResults) }
+					details: { found: true, query, resultCount: results.length, sources: Object.keys(groupedResults) },
 				};
-
 			} catch (error) {
 				return {
 					content: [{ type: "text", text: `Memory search failed: ${error}` }],
-					details: { error: String(error), found: false, query }
+					details: { error: String(error), found: false, query },
 				};
 			}
 		},
@@ -125,7 +173,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 	 */
 	pi.registerTool({
 		name: "memory_write",
-		label: "Memory Write", 
+		label: "Memory Write",
 		description: "Write content to a memory file. If no filename provided, uses today's date.",
 		parameters: Type.Object({
 			content: Type.String({ description: "Content to write to the memory file" }),
@@ -136,24 +184,29 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			const { content, file } = params as { content: string; file?: string };
 
 			try {
-				// Write to notes
-				sigmaMemory.notes.write(content, file);
-				const filename = file || new Date().toISOString().split('T')[0] + '.md';
+				// Generate a unique per-fact filename when the caller did not pass
+				// one, so each memory_write becomes its own file instead of
+				// clobbering today's note. An explicit file name is still honored.
+				const targetName = file || buildFactFilename(content);
+				const finalContent = withFrontmatter(content, targetName);
+
+				// write() returns the name actually written (with a "-N" suffix if
+				// a same-name file already existed), so we never overwrite data.
+				const filename = sigmaMemory.notes.write(finalContent, targetName);
 
 				// Auto-index in vector store (non-blocking)
-				sigmaMemory.vectors.addDocument(filename, content).catch(() => {
+				sigmaMemory.vectors.addDocument(filename, finalContent).catch(() => {
 					// Vector indexing failed silently — notes still saved
 				});
-				
+
 				return {
 					content: [{ type: "text", text: `Content written to ${filename} (indexed for vector search)` }],
-					details: { filename, contentLength: content.length, vectorIndexed: true }
+					details: { filename, contentLength: content.length, vectorIndexed: true },
 				};
-
 			} catch (error) {
 				return {
 					content: [{ type: "text", text: `Failed to write to memory: ${error}` }],
-					details: { error: String(error) }
+					details: { error: String(error) },
 				};
 			}
 		},
@@ -177,21 +230,23 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				if (!file) {
 					// List all available memory files
 					const files = sigmaMemory.notes.list();
-					
+
 					if (files.length === 0) {
 						return {
 							content: [{ type: "text", text: "No memory files found." }],
-							details: { action: "list", fileCount: 0 }
+							details: { action: "list", fileCount: 0 },
 						};
 					}
 
 					const fileList = files
-						.map(f => `- ${f.name} (${(f.size / 1024).toFixed(1)} KB, ${new Date(f.date).toLocaleDateString()})`)
-						.join('\n');
+						.map(
+							(f) => `- ${f.name} (${(f.size / 1024).toFixed(1)} KB, ${new Date(f.date).toLocaleDateString()})`,
+						)
+						.join("\n");
 
 					return {
 						content: [{ type: "text", text: `Available memory files (${files.length}):\n\n${fileList}` }],
-						details: { action: "list", fileCount: files.length }
+						details: { action: "list", fileCount: files.length },
 					};
 				}
 
@@ -200,13 +255,12 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
 				return {
 					content: [{ type: "text", text: `**${file}:**\n\n${content}` }],
-					details: { action: "read", found: true, filename: file, contentLength: content.length }
+					details: { action: "read", found: true, filename: file, contentLength: content.length },
 				};
-
 			} catch (error) {
 				return {
 					content: [{ type: "text", text: `Failed to read memory: ${error}` }],
-					details: { error: String(error), action: "read", filename: file }
+					details: { error: String(error), action: "read", filename: file },
 				};
 			}
 		},
@@ -218,21 +272,32 @@ export default function memoryExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "ontology_add",
 		label: "Ontology Add",
-		description: "Add an entity or relation to the project knowledge graph. Entities represent things (projects, files, services, people). Relations connect them.",
+		description:
+			"Add an entity or relation to the project knowledge graph. Entities represent things (projects, files, services, people). Relations connect them.",
 		promptGuidelines: [
 			"When discovering project architecture (services, databases, APIs), add entities and relations to the ontology.",
 			"When learning about how components connect, add relations (e.g. 'api-server' → 'uses' → 'postgres-db').",
 		],
 		parameters: Type.Object({
-			type: Type.Union([Type.Literal("entity"), Type.Literal("relation")], { description: "What to add: 'entity' or 'relation'" }),
+			type: Type.Union([Type.Literal("entity"), Type.Literal("relation")], {
+				description: "What to add: 'entity' or 'relation'",
+			}),
 			// Entity fields
-			entityType: Type.Optional(Type.String({ description: "Entity type (e.g. Project, Service, Database, File, Person, Tool)" })),
+			entityType: Type.Optional(
+				Type.String({ description: "Entity type (e.g. Project, Service, Database, File, Person, Tool)" }),
+			),
 			name: Type.Optional(Type.String({ description: "Entity name (e.g. 'my-api', 'postgres-db')" })),
-			properties: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Key-value properties (e.g. {language: 'TypeScript', port: '3000'})" })),
+			properties: Type.Optional(
+				Type.Record(Type.String(), Type.String(), {
+					description: "Key-value properties (e.g. {language: 'TypeScript', port: '3000'})",
+				}),
+			),
 			// Relation fields
 			from: Type.Optional(Type.String({ description: "Source entity ID" })),
 			to: Type.Optional(Type.String({ description: "Target entity ID" })),
-			relationType: Type.Optional(Type.String({ description: "Relation type (e.g. 'uses', 'depends-on', 'deployed-on', 'created-by')" })),
+			relationType: Type.Optional(
+				Type.String({ description: "Relation type (e.g. 'uses', 'depends-on', 'deployed-on', 'created-by')" }),
+			),
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
@@ -240,7 +305,10 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			try {
 				if (p.type === "entity") {
 					if (!p.entityType || !p.name) {
-						return { content: [{ type: "text", text: "Entity requires 'entityType' and 'name'" }], isError: true };
+						return {
+							content: [{ type: "text", text: "Entity requires 'entityType' and 'name'" }],
+							isError: true,
+						};
 					}
 					const id = sigmaMemory.ontology.addEntity({
 						type: p.entityType,
@@ -253,31 +321,34 @@ export default function memoryExtension(pi: ExtensionAPI) {
 					};
 				} else if (p.type === "relation") {
 					if (!p.from || !p.to || !p.relationType) {
-						return { content: [{ type: "text", text: "Relation requires 'from', 'to', and 'relationType'" }], isError: true };
+						return {
+							content: [{ type: "text", text: "Relation requires 'from', 'to', and 'relationType'" }],
+							isError: true,
+						};
 					}
-					
+
 					// Try finding source entity by ID first, then by name
 					let sourceEntity = sigmaMemory.ontology.findEntity({ id: p.from })[0];
 					if (!sourceEntity) {
 						// Try finding by name (case-insensitive)
 						const allEntities = sigmaMemory.ontology.findEntity({});
-						sourceEntity = allEntities.find(e => e.name.toLowerCase() === p.from.toLowerCase());
+						sourceEntity = allEntities.find((e) => e.name.toLowerCase() === p.from.toLowerCase());
 						if (!sourceEntity) {
 							return { content: [{ type: "text", text: `Source entity not found: ${p.from}` }], isError: true };
 						}
 					}
-					
+
 					// Try finding target entity by ID first, then by name
 					let targetEntity = sigmaMemory.ontology.findEntity({ id: p.to })[0];
 					if (!targetEntity) {
 						// Try finding by name (case-insensitive)
 						const allEntities = sigmaMemory.ontology.findEntity({});
-						targetEntity = allEntities.find(e => e.name.toLowerCase() === p.to.toLowerCase());
+						targetEntity = allEntities.find((e) => e.name.toLowerCase() === p.to.toLowerCase());
 						if (!targetEntity) {
 							return { content: [{ type: "text", text: `Target entity not found: ${p.to}` }], isError: true };
 						}
 					}
-					
+
 					const id = sigmaMemory.ontology.addRelation({
 						from: sourceEntity.id,
 						to: targetEntity.id,
@@ -285,7 +356,12 @@ export default function memoryExtension(pi: ExtensionAPI) {
 						properties: p.properties || {},
 					});
 					return {
-						content: [{ type: "text", text: `Relation added: \`${sourceEntity.name}\` → **${p.relationType}** → \`${targetEntity.name}\` — ID: \`${id}\`` }],
+						content: [
+							{
+								type: "text",
+								text: `Relation added: \`${sourceEntity.name}\` → **${p.relationType}** → \`${targetEntity.name}\` — ID: \`${id}\``,
+							},
+						],
 						details: { id, from: sourceEntity.id, to: targetEntity.id, type: p.relationType },
 					};
 				}
@@ -302,15 +378,22 @@ export default function memoryExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "ontology_query",
 		label: "Ontology Query",
-		description: "Query the project knowledge graph. Find entities by type/name, get relations, find paths between entities, or get stats.",
+		description:
+			"Query the project knowledge graph. Find entities by type/name, get relations, find paths between entities, or get stats.",
 		parameters: Type.Object({
-			action: Type.Union([
-				Type.Literal("find"),
-				Type.Literal("relations"),
-				Type.Literal("path"),
-				Type.Literal("stats"),
-				Type.Literal("graph"),
-			], { description: "Query action: find (entities), relations (of entity), path (between entities), stats, graph (full export)" }),
+			action: Type.Union(
+				[
+					Type.Literal("find"),
+					Type.Literal("relations"),
+					Type.Literal("path"),
+					Type.Literal("stats"),
+					Type.Literal("graph"),
+				],
+				{
+					description:
+						"Query action: find (entities), relations (of entity), path (between entities), stats, graph (full export)",
+				},
+			),
 			entityType: Type.Optional(Type.String({ description: "Filter by entity type (for 'find' action)" })),
 			name: Type.Optional(Type.String({ description: "Filter by name (partial match, for 'find' action)" })),
 			entityId: Type.Optional(Type.String({ description: "Entity ID (for 'relations' action)" })),
@@ -325,21 +408,26 @@ export default function memoryExtension(pi: ExtensionAPI) {
 					case "find": {
 						const results = sigmaMemory.ontology.findEntity({ type: p.entityType, name: p.name });
 						if (results.length === 0) return { content: [{ type: "text", text: "No entities found." }] };
-						const text = results.map(e => `- **${e.name}** (${e.type}) ID:\`${e.id}\` ${JSON.stringify(e.properties)}`).join("\n");
+						const text = results
+							.map((e) => `- **${e.name}** (${e.type}) ID:\`${e.id}\` ${JSON.stringify(e.properties)}`)
+							.join("\n");
 						return { content: [{ type: "text", text: `Found ${results.length} entities:\n${text}` }] };
 					}
 					case "relations": {
 						if (!p.entityId) return { content: [{ type: "text", text: "'entityId' required" }], isError: true };
 						const rels = sigmaMemory.ontology.findRelations(p.entityId);
 						if (rels.length === 0) return { content: [{ type: "text", text: "No relations found." }] };
-						const text = rels.map(r => `- \`${r.from}\` → **${r.type}** → \`${r.to}\``).join("\n");
+						const text = rels.map((r) => `- \`${r.from}\` → **${r.type}** → \`${r.to}\``).join("\n");
 						return { content: [{ type: "text", text: `Found ${rels.length} relations:\n${text}` }] };
 					}
 					case "path": {
-						if (!p.fromId || !p.toId) return { content: [{ type: "text", text: "'fromId' and 'toId' required" }], isError: true };
+						if (!p.fromId || !p.toId)
+							return { content: [{ type: "text", text: "'fromId' and 'toId' required" }], isError: true };
 						const path = sigmaMemory.ontology.queryPath(p.fromId, p.toId);
 						if (!path) return { content: [{ type: "text", text: "No path found between these entities." }] };
-						const text = path.map(s => `${s.entity.name}${s.relation ? ` → [${s.relation.type}]` : ""}`).join(" → ");
+						const text = path
+							.map((s) => `${s.entity.name}${s.relation ? ` → [${s.relation.type}]` : ""}`)
+							.join(" → ");
 						return { content: [{ type: "text", text: `Path: ${text}` }] };
 					}
 					case "stats": {
@@ -355,7 +443,10 @@ export default function memoryExtension(pi: ExtensionAPI) {
 						return { content: [{ type: "text", text: JSON.stringify(graph, null, 2) }] };
 					}
 					default:
-						return { content: [{ type: "text", text: "Action must be: find, relations, path, stats, graph" }], isError: true };
+						return {
+							content: [{ type: "text", text: "Action must be: find, relations, path, stats, graph" }],
+							isError: true,
+						};
 				}
 			} catch (error) {
 				return { content: [{ type: "text", text: `Ontology query error: ${error}` }], isError: true };
@@ -375,37 +466,36 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
 			try {
 				const status = await sigmaMemory.status();
-				
+
 				let statusText = "# Memory Status\n\n";
-				
+
 				// Notes status
 				statusText += `## Notes\n`;
 				statusText += `- Files: ${status.notes.count}\n`;
 				statusText += `- Total size: ${(status.notes.totalSize / 1024).toFixed(1)} KB\n`;
-				statusText += `- Last modified: ${status.notes.lastModified ? new Date(status.notes.lastModified).toLocaleString() : 'Never'}\n\n`;
-				
+				statusText += `- Last modified: ${status.notes.lastModified ? new Date(status.notes.lastModified).toLocaleString() : "Never"}\n\n`;
+
 				// Ontology status
 				statusText += `## Ontology\n`;
 				statusText += `- Entities: ${status.ontology.entities}\n`;
 				statusText += `- Relations: ${status.ontology.relations}\n`;
 				statusText += `- Entities by type: ${JSON.stringify(status.ontology.entitiesByType)}\n`;
 				statusText += `- Relations by type: ${JSON.stringify(status.ontology.relationsByType)}\n\n`;
-				
+
 				// Vector store status
 				statusText += `## Vector Search (embedded)\n`;
 				statusText += `- Documents: ${status.vectors.documentCount}\n`;
 				statusText += `- Chunks: ${status.vectors.chunkCount}\n`;
-				statusText += `- Last update: ${status.vectors.lastUpdate || 'Never'}\n`;
+				statusText += `- Last update: ${status.vectors.lastUpdate || "Never"}\n`;
 
 				return {
 					content: [{ type: "text", text: statusText }],
-					details: { status }
+					details: { status },
 				};
-
 			} catch (error) {
 				return {
 					content: [{ type: "text", text: `Failed to get memory status: ${error}` }],
-					details: { error: String(error) }
+					details: { error: String(error) },
 				};
 			}
 		},

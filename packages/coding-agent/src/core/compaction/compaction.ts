@@ -459,6 +459,13 @@ const SUMMARIZATION_PROMPT = `The messages above are a conversation to summarize
 
 Use this EXACT format:
 
+## User Requests (verbatim)
+[Each user message that is NOT a tool result, quoted word-for-word. Preserve these word-for-word. Do not paraphrase, reorder, or omit any user request.]
+
+## Constraints (verbatim - MUST persist)
+- [Any secrets, forbidden files, hard rules, or non-negotiable requirements. Preserve these word-for-word.]
+- [Or "(none)" if none were mentioned]
+
 ## Goal
 [What is the user trying to accomplish? Can be multiple items if the session covers different tasks.]
 
@@ -479,6 +486,10 @@ Use this EXACT format:
 ## Key Decisions
 - **[Decision]**: [Brief rationale]
 
+## Dead Ends
+- [Approach tried]: [why it failed, so it is not retried]
+- [Or "(none)" if not applicable]
+
 ## Next Steps
 1. [Ordered list of what should happen next]
 
@@ -486,7 +497,7 @@ Use this EXACT format:
 - [Any data, examples, or references needed to continue]
 - [Or "(none)" if not applicable]
 
-Keep each section concise. Preserve exact file paths, function names, and error messages.`;
+Keep each section concise. Preserve exact file paths, function names, and error messages. If a tool result was marked as truncated, mark any claim derived from it as [UNCERTAIN - based on truncated output] rather than stating it as fact.`;
 
 const UPDATE_SUMMARIZATION_PROMPT = `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.
 
@@ -496,9 +507,16 @@ Update the existing structured summary with new information. RULES:
 - UPDATE the Progress section: move items from "In Progress" to "Done" when completed
 - UPDATE "Next Steps" based on what was accomplished
 - PRESERVE exact file paths, function names, and error messages
-- If something is no longer relevant, you may remove it
+- NEVER drop, paraphrase, or shorten the "User Requests (verbatim)", "Constraints (verbatim - MUST persist)", or "Dead Ends" sections: carry them forward unchanged and only append new entries
+- If something is no longer relevant, you may remove it (this does NOT apply to the verbatim and Dead Ends sections above, which must always persist)
 
 Use this EXACT format:
+
+## User Requests (verbatim)
+[Preserve every previous entry word-for-word, append any new user message that is NOT a tool result, quoted word-for-word.]
+
+## Constraints (verbatim - MUST persist)
+- [Preserve every previous entry word-for-word, append any newly discovered secrets, forbidden files, or hard rules.]
 
 ## Goal
 [Preserve existing goals, add new ones if the task expanded]
@@ -519,13 +537,17 @@ Use this EXACT format:
 ## Key Decisions
 - **[Decision]**: [Brief rationale] (preserve all previous, add new)
 
+## Dead Ends
+- [PRESERVE all previous dead ends, append new ones] [Approach tried]: [why it failed, so it is not retried]
+- [Or "(none)" if not applicable]
+
 ## Next Steps
 1. [Update based on current state]
 
 ## Critical Context
 - [Preserve important context, add new if needed]
 
-Keep each section concise. Preserve exact file paths, function names, and error messages.`;
+Keep each section concise. Preserve exact file paths, function names, and error messages. If a tool result was marked as truncated, mark any claim derived from it as [UNCERTAIN - based on truncated output] rather than stating it as fact.`;
 
 /**
  * Generate a summary of the conversation using the LLM.
@@ -590,7 +612,49 @@ export async function generateSummary(
 		.map((c) => c.text)
 		.join("\n");
 
+	// Anti-drift guard: if a previous summary exists and the new one collapses
+	// (loses >40% of its size, or drops file paths it referenced), keep the union
+	// instead of silently discarding intent. Backward compatible: no previousSummary
+	// means we return the new summary unchanged.
+	if (previousSummary) {
+		const previousPaths = extractFilePaths(previousSummary);
+		const newPaths = extractFilePaths(textContent);
+		const lostPaths = [...previousPaths].filter((p) => !newPaths.has(p));
+		const shrankTooMuch = textContent.length < previousSummary.length * 0.6;
+
+		if (shrankTooMuch || lostPaths.length > 0) {
+			if (process.env.PHI_DEBUG) {
+				const reason = shrankTooMuch
+					? `summary shrank to ${textContent.length}/${previousSummary.length} chars (<60%)`
+					: `summary dropped ${lostPaths.length} file path(s): ${lostPaths.join(", ")}`;
+				console.warn(`[compaction] preserving union of previous + new summary (${reason})`);
+			}
+			return `${previousSummary}\n\n---\n\n## Updated Summary\n\n${textContent}`;
+		}
+	}
+
 	return textContent;
+}
+
+/**
+ * Extract file-path-like tokens from a summary for drift detection.
+ * Matches POSIX and Windows style paths that contain a separator and an extension
+ * or a recognizable directory segment. Conservative: false negatives are fine,
+ * the goal is to detect when a path present before disappears entirely.
+ */
+function extractFilePaths(text: string): Set<string> {
+	const paths = new Set<string>();
+	// Match tokens with a path separator and at least one dot (file with extension)
+	// or a nested directory path. Avoids matching plain words.
+	const regex = /[\w./-]*[/\\][\w./-]*\.[A-Za-z0-9]+/g;
+	const matches = text.match(regex);
+	if (matches) {
+		for (const m of matches) {
+			const trimmed = m.trim();
+			if (trimmed.length > 0) paths.add(trimmed);
+		}
+	}
+	return paths;
 }
 
 // ============================================================================

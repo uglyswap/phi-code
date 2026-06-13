@@ -232,6 +232,16 @@ For each phase, the orchestrator:
 
 Phase 1 uses the **prompt-architect pattern** to create a structured project brief (Context → Objective → Requirements → Constraints) that guides all subsequent phases.
 
+**Reliability & quality (v0.78).** The pipeline is built on simple text contracts so a multi-model run is *more* reliable than any single model, with no dependency on the provider returning valid structured output:
+
+- **Phase retry.** A phase that times out or hits a transient error (5xx / 429 / connection reset / broken JSON tool call) is retried once on its fallback model — a different family — before being skipped. A genuine 401 stays fatal.
+- **Canonical verdict.** TEST and REVIEW start their report with `## VERDICT: PASS|FAIL|BLOCKED|SKIP`, which the orchestrator reads by regex from the file (deterministic). `BLOCKED` pauses the run for you instead of chaining onto nothing.
+- **Review → fix loop (bounded).** A REVIEW `FAIL` triggers exactly one targeted CODE fix on the `## BLOCKING` findings, followed by one re-REVIEW. One cycle max, no infinite loops.
+- **Adversarial REVIEW.** Sequential angles (correctness, cross-file, security) + three-state verification (`CONFIRMED` / `PLAUSIBLE` / `REFUTED`, must quote the line) replace the old cosmetic checklist. Findings are `file:line - summary - failure_scenario`.
+- **Runtime-proof TEST.** TEST must paste real command output (build + run + an end-to-end probe); PASS only on observed success.
+- **`## HANDOFF` block.** Each phase ends its report with Critical-Files / State / Next, forwarded verbatim to the next phase (no fragile regex reconstruction).
+- **Security gate.** During autonomous `/plan` only, a local deterministic regex check blocks clearly destructive commands (`rm -rf` outside the workspace, `git push --force`, `git reset --hard`, `curl | sh`, ...). Interactive use is never blocked.
+
 **Commands:**
 - `/plan <description>` — Full workflow: 5 sequential agent phases with model switching
 - `/run` — Re-execute an existing plan

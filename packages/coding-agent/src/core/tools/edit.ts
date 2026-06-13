@@ -294,11 +294,14 @@ export function createEditToolDefinition(
 		name: "edit",
 		label: "edit",
 		description:
-			"Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+			"Edit a single file using exact text replacement. Always read the file with the read tool BEFORE editing so every edits[].oldText is copied from the real content, never guessed. Keep each edits[].oldText MINIMAL and UNIQUE: 1-3 lines with just enough surrounding context to match exactly one region. Every edits[].oldText must match a unique, non-overlapping region of the original file. If the same text appears multiple times, add nearby context to make it unique instead of expanding to a large block. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
 		promptSnippet:
 			"Make precise file edits with exact text replacement, including multiple disjoint edits in one call",
 		promptGuidelines: [
+			"Read the file with the read tool before editing. Never guess file content: copy edits[].oldText from what read returned.",
 			"Use edit for precise changes (edits[].oldText must match exactly)",
+			"Keep edits[].oldText minimal and unique: 1-3 lines with just enough context. Do not paste a large block when a short snippet already identifies the spot.",
+			"When the same text appears more than once, disambiguate with a small amount of adjacent context rather than expanding the snippet to a whole function.",
 			"When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls",
 			"Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
 			"Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",

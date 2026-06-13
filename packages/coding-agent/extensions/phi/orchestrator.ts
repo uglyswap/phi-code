@@ -22,6 +22,12 @@ import { writeFile, mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
+import {
+	extractBlockingFindings,
+	extractHandoff,
+	isTransientError,
+	parsePhaseVerdict,
+} from "./orchestrator-helpers.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -217,6 +223,12 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		fallback: string;
 		agent: AgentDef | null;
 		instruction: string;
+		// Set true once this phase has been retried once (transient proxy failure /
+		// timeout / 0-tool-call). Hard cap of one retry per phase.
+		retried?: boolean;
+		// When true, switchModelForPhase resolves the fallback model first (used on retry
+		// to swap to a different model family rather than re-hit the one that just failed).
+		useFallback?: boolean;
 	}
 
 	let phaseQueue: OrchestratorPhase[] = [];
@@ -234,6 +246,47 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	// Real phase counters for the final summary
 	let completedPhases = 0;
 	let skippedPhases = 0;
+	// The phase currently executing (so agent_end can read its report + apply
+	// phase-specific logic like verdict parsing and the review->fix loop).
+	let currentPhase: OrchestratorPhase | null = null;
+	// Timestamp shared by all phase report file names in the current run.
+	let currentRunTs = "";
+	// Hard cap: at most one REVIEW->fix->re-REVIEW cycle per run.
+	let reviewFixRounds = 0;
+	// Set true right before an INTERNAL ctx.abort() (phase timeout) so the
+	// resulting agent_end is not mistaken for a user Ctrl+C cancellation.
+	let internalAbort = false;
+
+	/** Read a phase's report file (.phi/plans/<key>-<ts>.md). Null-safe. */
+	function readPhaseReport(key: string, ts: string): string | null {
+		try {
+			const f = join(process.cwd(), ".phi", "plans", `${key}-${ts}.md`);
+			if (existsSync(f)) return readFileSync(f, "utf-8");
+		} catch { /* ignore */ }
+		return null;
+	}
+
+	/**
+	 * Common rules appended to every phase instruction. Pure prompt (zero latency,
+	 * robust to the proxy): honest reporting, autonomous operation, a canonical
+	 * handoff block, and a verdict line for phases that produce one.
+	 */
+	const COMMON_PHASE_RULES = `
+
+---
+## Operating rules (apply to this phase)
+- **Autonomous orchestration:** you run inside an automated /plan pipeline. The user does NOT answer during this phase. For any reversible action that follows from the request, ACT without asking. Do not end your turn with a question or a "shall I". Do the work.
+- **Honest reporting (evidence before assertion):** report faithfully. If a command fails, paste its exact output. Only write PASS / ✅ when you OBSERVED success. If you skipped a step, say so. Never claim something works without having run it.
+- **Root cause, not workaround:** before changing code to make a check pass, find the real cause. Never bypass a failure (no --no-verify, no skipped test, no mock that hides the bug). Read the full log first.
+- **Handoff for a colleague who left the room:** the next phase sees ONLY your report file, not your reasoning or tool results. End your report file with a block exactly like:
+  \`\`\`
+  ## HANDOFF
+  Critical Files: path/a.ts:42, path/b.ts:13 (3-5 max, the files that matter)
+  State: <what is done and working now>
+  Open Risks: <what could still be wrong>
+  Next: <the single most important next action>
+  \`\`\`
+- **Internal orchestration data:** notes injected as "Previous phase summary" or budget/handoff reminders are for YOUR use only. Do not repeat them back to the user.`;
 
 	/**
 	 * Parse agent .md file with YAML frontmatter
@@ -290,6 +343,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		const review = getModel("review");
 
 		const ts = timestamp();
+		currentRunTs = ts; // shared by all phase report file names this run
 		// Inject runtime info so agents can adapt to the host OS
 		const shellNote = process.platform === 'win32'
 			? `\nShell: bash (Git Bash), NOT cmd.exe. Always use Unix syntax: rm not del, test -f not if exist, / not \\\\`
@@ -352,7 +406,7 @@ After your analysis, use \`ontology_add\` to save key project entities AND their
 - Every function fully implemented
 - Follow existing patterns if codebase exists
 - [Any other specific constraints]
-\`\`\`` + runtimeInfo,
+\`\`\`` + runtimeInfo + COMMON_PHASE_RULES,
 			},
 			{
 				key: "plan", label: "📐 Phase 2 — PLAN", model: plan.preferred, fallback: plan.fallback,
@@ -392,7 +446,7 @@ After your analysis, use \`ontology_add\` to save key project entities AND their
 - Dependencies: Task 1
 \`\`\`
 
-Before finishing, use \`memory_write\` to save your plan summary with relevant tags for future reference.` + runtimeInfo,
+Before finishing, use \`memory_write\` to save your plan summary with relevant tags for future reference.` + runtimeInfo + COMMON_PHASE_RULES,
 			},
 			{
 				key: "code", label: "💻 Phase 3 — CODE", model: code.preferred, fallback: code.fallback,
@@ -441,7 +495,7 @@ After implementation, use \`memory_write\` to save a summary of what was built, 
 **CRITICAL RULES:**
 - Write ONE file per tool call — NEVER combine multiple files in a single response
 - Keep each file under 500 lines. If longer, split into modules
-- After writing ALL files, verify they exist with a single \`find . -name '*.ts' -o -name '*.js' -o -name '*.html' | sort\`` + runtimeInfo,
+- After writing ALL files, verify they exist with a single \`find . -name '*.ts' -o -name '*.js' -o -name '*.html' | sort\`` + runtimeInfo + COMMON_PHASE_RULES,
 			},
 			{
 				key: "test", label: "🧪 Phase 4 — TEST", model: test.preferred, fallback: test.fallback,
@@ -457,29 +511,35 @@ After implementation, use \`memory_write\` to save a summary of what was built, 
 
 **Step 1:** Read \`.phi/plans/todo-*.md\` to know what was planned
 **Step 2:** Read \`.phi/plans/progress-*.md\` to see what was done
-**Step 3:** Run the code, check for errors, test key features
-**Step 4:** Fix any errors you find
-**Step 5:** Write test results to \`.phi/plans/test-${ts}.md\`
+**Step 3:** ACTUALLY RUN the code and observe it (proof, not a declarative checkbox). Verification = runtime evidence, by surface type:
+   - **CLI:** run the real command, capture stdout AND the exit code, paste them.
+   - **HTTP/API:** start the server in the background with a readiness wait, then \`curl\` the route that changed; paste the response + status.
+   - **Library/package:** import the public entry and call it; paste the output.
+   - At least one adversarial probe per feature (empty input, wrong type, missing arg).
+   - Running \`npm test\` alone is NOT sufficient proof for a feature.
+**Step 4:** Fix any real errors you find (root cause, not a workaround).
+**Step 5:** Write test results to \`.phi/plans/test-${ts}.md\`, starting the file with a VERDICT line.
 
-**Test report format:**
+**Test report format (the FIRST line MUST be the verdict):**
 \`\`\`markdown
+## VERDICT: PASS|FAIL|BLOCKED
+
 # Test Report
 
+## Commands Run (with pasted output)
+\`\`\`
+$ <command actually executed>
+<real stdout/stderr>  (exit code: N)
+\`\`\`
+
 ## Tests Executed
-- [ ] Feature 1: Description - PASS/FAIL
-- [ ] Feature 2: Description - PASS/FAIL
+- Feature 1: <command> -> PASS/FAIL (evidence above)
 
 ## Errors Found & Fixed
-- Error: Description
-  - Fix: What was done
-
-## Manual Testing
-- Tested: What was manually verified
-- Result: Pass/Fail with details
-
-## Final Status
-✅ All tests pass / ❌ Issues remain
+- Error: ... -> Fix: ...
 \`\`\`
+
+**Verdict rules:** PASS only if you OBSERVED every feature working at runtime. When in doubt, FAIL. No partial pass (3/4 working = FAIL). Use BLOCKED only when you could not run anything (broken launch recipe, missing env, provider down) and say what is needed.
 
 **CRITICAL RULES:**
 - NEVER run a server with \`&\` without cleanup. Always use: \`timeout 15 bash -c 'node src/index.js & PID=$!; sleep 2; curl ...; kill $PID'\`
@@ -497,7 +557,7 @@ After implementation, use \`memory_write\` to save a summary of what was built, 
 
 After testing, use \`memory_write\` to save test results, bugs found, and lessons learned.
 
-**Ontology update:** Use \`ontology_add\` to update the project status (e.g., entity "test-results" type "Phase" with properties {passed: "N", failed: "M", coverage: "X%"}) and add a relation to the project entity.` + runtimeInfo,
+**Ontology update:** Use \`ontology_add\` to update the project status (e.g., entity "test-results" type "Phase" with properties {passed: "N", failed: "M", coverage: "X%"}) and add a relation to the project entity.` + runtimeInfo + COMMON_PHASE_RULES,
 			},
 			{
 				key: "review", label: "🔍 Phase 5 — REVIEW", model: review.preferred, fallback: review.fallback,
@@ -513,42 +573,33 @@ After testing, use \`memory_write\` to save test results, bugs found, and lesson
 
 **Project Request:** ${description}
 
-**Step 1:** Read all \`.phi/plans/*.md\` files
-**Step 2:** Review code quality, security, performance
-**Step 3:** Fix any issues found
-**Step 4:** Write final report to \`.phi/plans/review-${ts}.md\`
+**Step 1:** Get the diff to review. Run \`git diff\` (and \`git status\`) if it is a git repo; otherwise read the files listed in the progress/handoff reports. Skip test/fixture hunks.
+**Step 2:** Review in SEQUENTIAL ANGLES (do all in this one turn, no sub-agents). Collect raw candidates first, judge after:
+   - **Angle 1 - Correctness:** read the diff line by line. What behaviour did it change or remove? Off-by-one, null/undefined, wrong condition, broken invariant.
+   - **Angle 2 - Cross-file:** grep the callers and callees of changed symbols. Did a signature/return/contract change break a caller elsewhere?
+   - **Angle 3 - Security & language pitfalls:** input validation, injection, secrets, auth, error handling; plus language traps (async not awaited, shadowed scope, mutation of shared state).
+**Step 3 - VERIFY (3-state, cite the line):** for EACH candidate, quote the exact line and classify:
+   - **CONFIRMED** - you can name the input/state that triggers it and the wrong output. Quote the line.
+   - **PLAUSIBLE** - the mechanism is real but the trigger is uncertain. Say what would confirm it.
+   - **REFUTED** - drop it. Only refute if you can quote the line that proves it cannot happen (a type, guard, or constant). When unsure, keep it PLAUSIBLE.
+   Keep only CONFIRMED + PLAUSIBLE. A finding with no concrete failure scenario is noise: drop it.
+**Step 4:** Write \`.phi/plans/review-${ts}.md\`, starting with the VERDICT line.
 
-**Review checklist:**
-- Code quality: naming, structure, readability
-- Security: input validation, error handling
-- Performance: efficiency, resource usage
-- Documentation: comments, README if needed
-- Completeness: all requirements met
-
-**Final report format:**
+**Final report format (the FIRST line MUST be the verdict):**
 \`\`\`markdown
+## VERDICT: PASS|FAIL
+
 # Final Review
 
-## Code Quality ✅/❌
-- Structure: Good/Needs work
-- Naming: Clear/Unclear
-- Comments: Adequate/Missing
+## Findings (correctness first, then security, then cleanup)
+- path/file.ts:123 - <one-line summary> - failure scenario: <input/state -> wrong output> [CONFIRMED|PLAUSIBLE]
 
-## Security ✅/❌
-- Input validation: Present/Missing
-- Error handling: Robust/Weak
-
-## Performance ✅/❌
-- Efficiency: Good/Could improve
-- Resource usage: Optimal/Excessive
-
-## Completeness ✅/❌
-- All requirements met: Yes/No
-- All files created: Yes/No
-
-## Final Verdict
-✅ Project ready for production / ❌ Issues need resolution
+## BLOCKING
+(Only the must-fix findings. If empty, write "none" and set VERDICT: PASS.)
+- path/file.ts:123 - <what must change and why>
 \`\`\`
+
+**Verdict rules:** VERDICT: FAIL if there is ANY CONFIRMED correctness/security finding (it goes under BLOCKING). VERDICT: PASS only if BLOCKING is empty. Do NOT pad: if the code is clean, return PASS with no findings.
 
 After your review, use \`memory_write\` ONCE to save:
 - Key lessons learned about this project type
@@ -561,7 +612,7 @@ Tag the note with relevant keywords for vector search.
 **Ontology enrichment:** After your review, use \`ontology_add\` to save your key findings:
 - Add a "review-report" entity with type "Document"
 - Add relations to the project: "reviews" → project, quality score as entity property
-- Save any new architectural decisions or patterns discovered` + runtimeInfo,
+- Save any new architectural decisions or patterns discovered` + runtimeInfo + COMMON_PHASE_RULES,
 			},
 		];
 	}
@@ -596,7 +647,11 @@ Tag the note with relevant keywords for vector search.
 		ctx: any,
 	): Promise<{ modelId: string; warning?: string }> {
 		const available = ctx.modelRegistry?.getAvailable?.() || [];
-		const target = resolveModelRef(available, phase.model) || resolveModelRef(available, phase.fallback);
+		// On a retry, resolve the fallback FIRST so we swap to a different model
+		// (ideally another family) rather than re-hitting the one that just failed.
+		const target = phase.useFallback
+			? resolveModelRef(available, phase.fallback) || resolveModelRef(available, phase.model)
+			: resolveModelRef(available, phase.model) || resolveModelRef(available, phase.fallback);
 		const currentId = ctx.model?.id || phase.model;
 
 		if (!target) {
@@ -729,6 +784,7 @@ Tag the note with relevant keywords for vector search.
 
 		const phase = phaseQueue.shift()!;
 		phasePending = true;
+		currentPhase = phase;
 
 		switchModelForPhase(phase, ctx).then(({ modelId, warning }) => {
 			activateAgent(phase, ctx);
@@ -743,12 +799,24 @@ Tag the note with relevant keywords for vector search.
 			if (phaseTimeoutId) clearTimeout(phaseTimeoutId);
 			phaseTimeoutId = setTimeout(() => {
 				if (orchestrationActive && phasePending) {
-					ctx.ui.notify(`\n⏰ **Phase timed out** (${MAX_PHASE_DURATION_MS / 60000} min limit). Skipping to next phase.`, "warning");
 					phasePending = false;
-					skippedPhases++;
 					// Abort the stuck phase first so the next instruction does not
-					// race a still-streaming phase.
+					// race a still-streaming phase. Mark it internal so the resulting
+					// agent_end is not treated as a user cancellation.
+					internalAbort = true;
 					try { ctx.abort(); } catch { /* best effort */ }
+					// Retry the SAME phase once on the fallback model before skipping:
+					// a timed-out phase usually means the model/route stalled, and a
+					// different family often gets through (cap = one retry per phase).
+					if (!phase.retried) {
+						phase.retried = true;
+						phase.useFallback = true;
+						phaseQueue.unshift(phase);
+						ctx.ui.notify(`\n⏰ **Phase timed out** (${MAX_PHASE_DURATION_MS / 60000} min) — retrying once on the fallback model.`, "warning");
+					} else {
+						skippedPhases++;
+						ctx.ui.notify(`\n⏰ **Phase timed out again** — skipping to next phase.`, "warning");
+					}
 					sendNextPhase(ctx);
 				}
 			}, MAX_PHASE_DURATION_MS);
@@ -775,6 +843,11 @@ Tag the note with relevant keywords for vector search.
 
 	pi.on("agent_end", async (event, ctx) => {
 		if (!orchestrationActive) return;
+
+		// An internal abort (phase timeout) re-emits agent_end; that transition was
+		// already handled by the timeout. Consume the flag and ignore this event so
+		// it is not mistaken for a user cancellation below.
+		if (internalAbort) { internalAbort = false; return; }
 
 		// User abort (Ctrl+C / ESC): the aborted run still emits agent_end, but it
 		// must NOT be treated as phase completion. Detect the aborted assistant
@@ -858,6 +931,20 @@ Tag the note with relevant keywords for vector search.
 			return;
 		}
 
+		// Transient provider/proxy failure (timeout text / 5xx / 429 / broken JSON
+		// tool call) that is NOT a 401: retry the SAME phase once on the fallback
+		// model (a different family often gets through) before chaining onward.
+		if (currentPhase && !currentPhase.retried && isTransientError(messages)) {
+			if (phaseTimeoutId) { clearTimeout(phaseTimeoutId); phaseTimeoutId = null; }
+			currentPhase.retried = true;
+			currentPhase.useFallback = true;
+			phaseQueue.unshift(currentPhase);
+			phasePending = false;
+			ctx.ui.notify(`\n🔁 **Transient provider error** in ${currentPhase.label} — retrying once on the fallback model.`, "warning");
+			sendNextPhase(ctx);
+			return;
+		}
+
 		// A phase that made 0 tool calls is NOT fatal: a model may legitimately
 		// answer with text only (e.g. an inline plan). Warn and continue rather
 		// than killing phases 2-5, mirroring the graceful phase-timeout path.
@@ -891,10 +978,54 @@ Tag the note with relevant keywords for vector search.
 
 		const phaseSummary = summaryParts.join('\n');
 
-		// Inject structured summary into next phase
-		if (phaseSummary && phaseQueue.length > 0) {
-			phaseQueue[0].instruction += `\n\n**Previous phase summary:**\n${phaseSummary}`;
+		// Prefer the phase's canonical "## HANDOFF" block (a deterministic text
+		// contract written to its report file) over the heuristic summary; fall back
+		// to the heuristic when the model did not write one.
+		const reportContent = currentPhase ? readPhaseReport(currentPhase.key, currentRunTs) : null;
+		const handoff = reportContent ? extractHandoff(reportContent) : "";
+		const nextBrief = handoff
+			? `Tool calls: ${toolCallCount}\n## HANDOFF (from ${currentPhase?.label || "previous phase"})\n${handoff}`
+			: phaseSummary;
+		if (nextBrief && phaseQueue.length > 0) {
+			phaseQueue[0].instruction += `\n\n**Previous phase summary:**\n${nextBrief}`;
 		}
+
+		// Verdict-driven control (best-effort, never breaks the chain):
+		// - BLOCKED: the phase could not run; pause the run for the user.
+		// - REVIEW FAIL: open ONE bounded fix -> re-review cycle.
+		try {
+			const verdict = reportContent ? parsePhaseVerdict(reportContent) : null;
+			const looped = toolCallCount > MAX_TOOL_CALLS_PER_PHASE;
+
+			if (verdict === "BLOCKED" && currentPhase) {
+				ctx.ui.notify(`\n⏸️ **${currentPhase.label} reported BLOCKED.** Pausing /plan — see \`.phi/plans/${currentPhase.key}-${currentRunTs}.md\`. Fix the blocker and re-run \`/plan\` to continue.`, "warning");
+				stopOrchestration();
+				return;
+			}
+
+			if (currentPhase?.key === "review" && verdict === "FAIL" && reviewFixRounds < 1 && !looped) {
+				reviewFixRounds++;
+				const blocking = (reportContent ? extractBlockingFindings(reportContent) : "").slice(0, 4000);
+				const fixPhase: OrchestratorPhase = {
+					key: "code",
+					label: "🔧 Fix — CODE (review remediation)",
+					model: currentPhase.model,
+					fallback: currentPhase.fallback,
+					agent: loadAgentDef("code"),
+					instruction: `You are the CODE agent. REVIEW found BLOCKING issues. Fix ONLY these, root cause not workaround, then update \`.phi/plans/progress-${currentRunTs}.md\`.\n\n## BLOCKING findings to fix:\n${blocking || "(see the review report in .phi/plans/)"}\n` + COMMON_PHASE_RULES,
+				};
+				const reReviewPhase: OrchestratorPhase = {
+					...currentPhase,
+					retried: false,
+					useFallback: false,
+					label: "🔍 Re-REVIEW (after fix)",
+				};
+				// Run next: fix, then re-review.
+				phaseQueue.unshift(reReviewPhase);
+				phaseQueue.unshift(fixPhase);
+				ctx.ui.notify(`\n🔁 **REVIEW verdict: FAIL** — running one targeted fix + re-review cycle.`, "warning");
+			}
+		} catch { /* verdict logic is best-effort */ }
 
 		// Phase complete — chain to next
 		completedPhases++;
@@ -940,6 +1071,9 @@ Tag the note with relevant keywords for vector search.
 			savedTools = pi.getActiveTools();
 			completedPhases = 0;
 			skippedPhases = 0;
+			reviewFixRounds = 0;
+			currentPhase = null;
+			internalAbort = false;
 			const firstPhase = phases[0];
 
 			ctx.ui.notify(`📋 **Orchestrator started** — 5 phases with model routing + agent roles\n`, "info");
