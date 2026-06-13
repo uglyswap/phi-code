@@ -35,14 +35,42 @@ export class NotesManager {
 	}
 
 	/**
-	 * Écrit dans un fichier .md (date du jour si pas de nom)
+	 * Écrit dans un fichier .md (date du jour si pas de nom).
+	 *
+	 * Par défaut (overwrite=false) on NE remplace JAMAIS un fichier existant :
+	 * un suffixe numérique unique (-2, -3, ...) est ajouté pour éviter la perte
+	 * de données (clobber même-jour). Passer overwrite=true pour forcer le
+	 * remplacement total de l'ancien comportement.
+	 *
+	 * Retourne le nom de fichier réellement écrit (utile quand un suffixe a été
+	 * généré) pour que l'appelant indexe le bon nom.
 	 */
-	write(content: string, filename?: string): void {
+	write(content: string, filename?: string, overwrite = false): string {
 		const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
 		const file = filename || `${today}.md`;
-		const filePath = this.resolveNotePath(file);
 
+		// Resolve once up-front to validate against path traversal before any
+		// candidate-name probing on disk.
+		this.resolveNotePath(file);
+
+		let finalName = file;
+		if (!overwrite && existsSync(this.resolveNotePath(file))) {
+			// Find a unique "-N" suffixed name so we never clobber existing data.
+			const dotIndex = file.lastIndexOf(".");
+			const stem = dotIndex > 0 ? file.slice(0, dotIndex) : file;
+			const ext = dotIndex > 0 ? file.slice(dotIndex) : "";
+			let counter = 2;
+			let candidate = `${stem}-${counter}${ext}`;
+			while (existsSync(this.resolveNotePath(candidate))) {
+				counter += 1;
+				candidate = `${stem}-${counter}${ext}`;
+			}
+			finalName = candidate;
+		}
+
+		const filePath = this.resolveNotePath(finalName);
 		writeFileSync(filePath, content, "utf8");
+		return finalName;
 	}
 
 	/**

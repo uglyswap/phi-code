@@ -95,7 +95,7 @@ const TOOL_RESULT_MAX_CHARS = 2000;
 function truncateForSummary(text: string, maxChars: number): string {
 	if (text.length <= maxChars) return text;
 	const truncatedChars = text.length - maxChars;
-	return `${text.slice(0, maxChars)}\n\n[... ${truncatedChars} more characters truncated]`;
+	return `${text.slice(0, maxChars)}\n\n[... ${truncatedChars} more characters truncated. This output is incomplete: mark any claim derived from it as [UNCERTAIN - based on truncated output] rather than stating it as fact.]`;
 }
 
 /**
@@ -165,6 +165,8 @@ export function serializeConversation(messages: Message[]): string {
 // Summarization System Prompt
 // ============================================================================
 
-export const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI coding assistant, then produce a structured summary following the exact format specified.
+export const SUMMARIZATION_SYSTEM_PROMPT = `TEXT ONLY. You MUST respond with plain text only. Do NOT emit tool calls, function calls, or tool-use blocks of any kind: any tool call will be REJECTED.
+
+You are a context summarization assistant. Your task is to read a conversation between a user and an AI coding assistant, then produce a structured summary following the exact format specified.
 
 Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.`;
