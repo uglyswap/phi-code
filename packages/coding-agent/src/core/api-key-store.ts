@@ -11,7 +11,7 @@
  *   2. process.env[envVar] (legacy fallback)
  *
  * Events emitted via the EventEmitter:
- *   - "key_changed" { provider, key }  : when setKey() or external edit detected
+ *   - "key_changed" { provider }       : when setKey() or external edit detected
  *   - "key_removed" { provider }       : when removeKey() called
  *   - "store_reloaded"                 : when reloadFromDisk() succeeds
  */
@@ -121,7 +121,10 @@ export class ApiKeyStore extends EventEmitter {
 			apiKey: key,
 		};
 		this.persist();
-		this.emit("key_changed", { provider: providerId, key });
+		// Do not include the raw key in the event payload to avoid leaking the
+		// secret to listeners/logs. Listeners that need the value read it back
+		// via getKey(providerId).
+		this.emit("key_changed", { provider: providerId });
 	}
 
 	/**

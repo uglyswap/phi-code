@@ -76,6 +76,19 @@ export default function keysExtension(pi: ExtensionAPI) {
 						ctx.ui.notify("Usage: `/keys set <provider-id> <api-key>`", "warning");
 						return;
 					}
+					// A bare `set` only updates the key; it cannot supply baseUrl/api/models.
+					// For a never-configured id this would persist an unusable provider
+					// (apiKey but no endpoint), so require an existing entry with a baseUrl.
+					const existing = store.getProvider(id);
+					if (!existing?.baseUrl) {
+						ctx.ui.notify(
+							`\`${id}\` is not a configured provider (no baseUrl on file). ` +
+								`Run \`/setup\` to add it with an endpoint and models first; ` +
+								`\`/keys set\` only updates the key of an already-configured provider.`,
+							"warning",
+						);
+						return;
+					}
 					watcher.muteForWrite("models_json_changed");
 					store.setKey(id, key);
 					ctx.ui.notify(

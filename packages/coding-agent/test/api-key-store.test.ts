@@ -36,13 +36,14 @@ describe("ApiKeyStore", () => {
 		expect(parsed.providers.alibaba?.baseUrl).toBe("https://example.com/v1");
 	});
 
-	test("setKey emits key_changed event", () => {
+	test("setKey emits key_changed event without leaking the raw key", () => {
 		const store = new ApiKeyStore({ configPath });
-		const events: Array<{ provider: string; key: string }> = [];
-		store.on("key_changed", (e: { provider: string; key: string }) => events.push(e));
+		const events: Array<{ provider: string }> = [];
+		store.on("key_changed", (e: { provider: string }) => events.push(e));
 		store.setKey("opencode-go", "secret-abc");
 		expect(events).toHaveLength(1);
-		expect(events[0]).toEqual({ provider: "opencode-go", key: "secret-abc" });
+		// The raw key must not be part of the event payload (read it via getKey instead).
+		expect(events[0]).toEqual({ provider: "opencode-go" });
 	});
 
 	test("getKey returns stored key first, falls back to env var", () => {

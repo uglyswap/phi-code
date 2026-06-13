@@ -246,6 +246,10 @@ export class InteractiveMode {
 	private version: string;
 	private isInitialized = false;
 	private onInputCallback?: (text: string) => void;
+	// Input mode: "act" sends messages to the agent directly; "plan" routes the next
+	// message through the /plan orchestrator (5 sequential phases, one model per phase).
+	// Toggled with Tab (when the editor is empty); shown by the footer Act/Plan indicator.
+	private inputMode: "act" | "plan" = "act";
 	private loadingAnimation: Loader | undefined = undefined;
 	private workingMessage: string | undefined = undefined;
 	private workingVisible = true;
@@ -380,6 +384,7 @@ export class InteractiveMode {
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
 		this.footer = new FooterComponent(this.session, this.footerDataProvider);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
+		this.footer.setMode(this.inputMode);
 
 		// Load hide thinking block setting
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
@@ -1231,8 +1236,11 @@ export class InteractiveMode {
 		if (exact) return exact;
 
 		let current = p;
-		while (current.includes("/")) {
-			current = current.substring(0, current.lastIndexOf("/"));
+		// Walk up parent directories independently of the path separator so resource
+		// scope labels also resolve on Windows (backslash-separated paths).
+		while (current.includes("/") || current.includes("\\")) {
+			const idx = Math.max(current.lastIndexOf("/"), current.lastIndexOf("\\"));
+			current = current.substring(0, idx);
 			const parent = sourceInfos.get(current);
 			if (parent) return parent;
 		}
@@ -1634,6 +1642,9 @@ export class InteractiveMode {
 		this.streamingComponent = undefined;
 		this.streamingMessage = undefined;
 		this.pendingTools.clear();
+		// Drop deferred bash components from the previous session: otherwise the next
+		// submit re-injects a stale component into the new session's chat.
+		this.pendingBashComponents = [];
 		this.renderInitialMessages();
 	}
 
@@ -2431,6 +2442,7 @@ export class InteractiveMode {
 		this.defaultEditor.onCtrlD = () => this.handleCtrlD();
 		this.defaultEditor.onAction("app.suspend", () => this.handleCtrlZ());
 		this.defaultEditor.onAction("app.thinking.cycle", () => this.cycleThinkingLevel());
+		this.defaultEditor.onAction("app.mode.toggle", () => this.toggleInputMode());
 		this.defaultEditor.onAction("app.model.cycleForward", () => this.cycleModel("forward"));
 		this.defaultEditor.onAction("app.model.cycleBackward", () => this.cycleModel("backward"));
 
@@ -2487,6 +2499,13 @@ export class InteractiveMode {
 		this.defaultEditor.onSubmit = async (text: string) => {
 			text = text.trim();
 			if (!text) return;
+
+			// In Plan mode, route plain prose through the /plan orchestrator. Slash
+			// commands and bash (! / !!) still run normally, so the user can keep
+			// driving the session while staying in Plan mode.
+			if (this.inputMode === "plan" && !text.startsWith("/") && !text.startsWith("!")) {
+				text = `/plan ${text}`;
+			}
 
 			// Handle commands
 			if (text === "/settings") {
@@ -3445,6 +3464,36 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	/**
+	 * Toggle between Act mode (messages go straight to the agent) and Plan mode
+	 * (the next message is routed through the /plan orchestrator). Bound to Tab when
+	 * the editor is empty. The active mode is reflected by the footer Act/Plan indicator.
+	 */
+	private toggleInputMode(): void {
+		const next = this.inputMode === "act" ? "plan" : "act";
+
+		// Plan mode depends on the /plan orchestrator extension. If it is not loaded
+		// (e.g. extensions disabled), stay in Act mode and explain why.
+		if (next === "plan" && !this.session.extensionRunner.getCommand("plan")) {
+			this.showWarning("Plan mode unavailable: the /plan orchestrator extension is not loaded.");
+			return;
+		}
+
+		this.inputMode = next;
+		this.footer.setMode(next);
+		this.footer.invalidate();
+
+		if (next === "plan") {
+			this.showStatus(
+				"Plan mode ON — your next message launches the /plan orchestrator (5 phases, one model per phase). Tab on an empty prompt to return to Act.",
+			);
+		} else {
+			this.showStatus("Act mode ON — messages go straight to the agent. Tab on an empty prompt for Plan mode.");
+		}
+
+		this.ui.requestRender();
+	}
+
 	private cycleThinkingLevel(): void {
 		const newLevel = this.session.cycleThinkingLevel();
 		if (newLevel === undefined) {
@@ -3497,6 +3546,12 @@ export class InteractiveMode {
 		this.hideThinkingBlock = !this.hideThinkingBlock;
 		this.settingsManager.setHideThinkingBlock(this.hideThinkingBlock);
 
+		// Preserve in-flight tool components across the rebuild. rebuildChatFromMessages()
+		// clears pendingTools and only repopulates from persisted messages, so a tool that
+		// has not produced its result yet would be orphaned and its later updates/result
+		// lost. Keep the existing components (with their accumulated output) to re-attach.
+		const inFlightTools = new Map(this.pendingTools);
+
 		// Rebuild chat from session messages
 		this.chatContainer.clear();
 		this.rebuildChatFromMessages();
@@ -3506,6 +3561,18 @@ export class InteractiveMode {
 			this.streamingComponent.setHideThinkingBlock(this.hideThinkingBlock);
 			this.streamingComponent.updateContent(this.streamingMessage);
 			this.chatContainer.addChild(this.streamingComponent);
+
+			// Re-attach in-flight tool components after the streaming message so their
+			// subsequent updates and results still resolve via pendingTools.
+			for (const content of this.streamingMessage.content) {
+				if (content.type === "toolCall") {
+					const existing = inFlightTools.get(content.id);
+					if (existing && !this.pendingTools.has(content.id)) {
+						this.chatContainer.addChild(existing);
+						this.pendingTools.set(content.id, existing);
+					}
+				}
+			}
 		}
 
 		this.showStatus(`Thinking blocks: ${this.hideThinkingBlock ? "hidden" : "visible"}`);
@@ -3529,8 +3596,11 @@ export class InteractiveMode {
 			// Stop TUI to release terminal
 			this.ui.stop();
 
-			// Split by space to support editor arguments (e.g., "code --wait")
-			const [editor, ...editorArgs] = editorCmd.split(" ");
+			// Parse the editor command respecting quoted tokens so editor paths that
+			// contain spaces (common on Windows, e.g. '"C:\\Program Files\\...\\Code.exe"
+			// --wait') are not split apart. A naive split(" ") would break them.
+			const tokens = editorCmd.match(/"[^"]*"|\S+/g) ?? [editorCmd];
+			const [editor, ...editorArgs] = tokens.map((t) => t.replace(/^"|"$/g, ""));
 
 			// Spawn editor synchronously with inherited stdio for interactive editing
 			const result = spawnSync(editor, [...editorArgs, tmpFile], {
@@ -3538,8 +3608,12 @@ export class InteractiveMode {
 				shell: process.platform === "win32",
 			});
 
-			// On successful exit (status 0), replace editor content
-			if (result.status === 0) {
+			// Surface a launch failure (binary not found / not executable) instead of
+			// silently doing nothing; result.status is null in that case.
+			if (result.error) {
+				this.showWarning(`Failed to launch editor: ${result.error.message}`);
+			} else if (result.status === 0) {
+				// On successful exit, replace editor content.
 				const newContent = fs.readFileSync(tmpFile, "utf-8").replace(/\n$/, "");
 				this.editor.setText(newContent);
 			}
@@ -3644,6 +3718,11 @@ export class InteractiveMode {
 			const dequeueHint = this.getAppKeyDisplay("app.message.dequeue");
 			const hintText = theme.fg("dim", `↳ ${dequeueHint} to edit all queued messages`);
 			this.pendingMessagesContainer.addChild(new TruncatedText(hintText, 1, 0));
+		}
+		// Re-attach deferred bash components: the clear() above detached them, but they
+		// may still be streaming output and must stay visible until flushed to chat.
+		for (const component of this.pendingBashComponents) {
+			this.pendingMessagesContainer.addChild(component);
 		}
 	}
 
@@ -5001,8 +5080,9 @@ export class InteractiveMode {
 			return;
 		}
 
-		// Export to a temp file
-		const tmpFile = path.join(os.tmpdir(), "session.html");
+		// Export to a temp file with a unique name so concurrent phi instances
+		// running /share do not overwrite or delete each other's export.
+		const tmpFile = path.join(os.tmpdir(), `pi-session-${crypto.randomUUID()}.html`);
 		try {
 			await this.session.exportToHtml(tmpFile);
 		} catch (error: unknown) {

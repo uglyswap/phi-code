@@ -67,7 +67,10 @@ export async function executeBashWithOperations(
 		}
 		const id = randomBytes(8).toString("hex");
 		tempFilePath = join(tmpdir(), `pi-bash-${id}.log`);
-		tempFileStream = createWriteStream(tempFilePath);
+		// Full bash output can contain secrets (env dumps, tokens, .env contents).
+		// Create the temp file with owner-only perms so other local users on a
+		// shared tmpdir cannot read it. On Windows the mode is effectively ignored.
+		tempFileStream = createWriteStream(tempFilePath, { mode: 0o600 });
 		for (const chunk of outputChunks) {
 			tempFileStream.write(chunk);
 		}

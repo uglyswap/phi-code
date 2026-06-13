@@ -229,6 +229,11 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	const MAX_PHASE_DURATION_MS = 10 * 60 * 1000; // 10 minutes per phase
 	const MAX_TOOL_CALLS_PER_PHASE = 60; // Safety limit
 	let phaseStartTime: number | null = null;
+	// User's model before /plan started, restored once orchestration ends
+	let originalModel: any | null = null;
+	// Real phase counters for the final summary
+	let completedPhases = 0;
+	let skippedPhases = 0;
 
 	/**
 	 * Parse agent .md file with YAML frontmatter
@@ -582,27 +587,48 @@ Tag the note with relevant keywords for vector search.
 
 	/**
 	 * Switch model for the current phase.
+	 * Returns the model id actually in use plus an optional warning when the
+	 * requested routing.json model could not be applied (not in registry or no
+	 * API key), so the caller can surface the degraded routing to the user.
 	 */
-	async function switchModelForPhase(phase: OrchestratorPhase, ctx: any): Promise<string> {
+	async function switchModelForPhase(
+		phase: OrchestratorPhase,
+		ctx: any,
+	): Promise<{ modelId: string; warning?: string }> {
 		const available = ctx.modelRegistry?.getAvailable?.() || [];
 		const target = resolveModelRef(available, phase.model) || resolveModelRef(available, phase.fallback);
+		const currentId = ctx.model?.id || phase.model;
 
-		if (target && (target.id !== ctx.model?.id || target.provider !== ctx.model?.provider)) {
-			const switched = await pi.setModel(target);
-			if (switched) return target.id;
+		if (!target) {
+			// Neither the preferred nor the fallback ref resolved to a registered model.
+			return {
+				modelId: currentId,
+				warning: `Phase ${phase.label} model '${phase.model}' unavailable (not in registry); running on '${currentId}'`,
+			};
 		}
-		return ctx.model?.id || phase.model;
+
+		if (target.id !== ctx.model?.id || target.provider !== ctx.model?.provider) {
+			const switched = await pi.setModel(target);
+			if (switched) return { modelId: target.id };
+			// setModel returns false when the target has no configured auth.
+			return {
+				modelId: currentId,
+				warning: `Phase ${phase.label} model '${phase.model}' unavailable (no API key); running on '${currentId}'`,
+			};
+		}
+		return { modelId: target.id };
 	}
 
 	/**
 	 * Activate agent for a phase: set system prompt + restrict tools.
 	 */
 	function activateAgent(phase: OrchestratorPhase, ctx: any) {
+		// Fallback capture: savedTools is normally taken in the /plan handler at
+		// orchestration start, but capture it here too so restoration is always defined.
+		if (!savedTools) {
+			savedTools = pi.getActiveTools();
+		}
 		if (phase.agent) {
-			// Save current tools for restoration
-			if (!savedTools) {
-				savedTools = pi.getActiveTools();
-			}
 			// Set agent's system prompt (will be injected via before_agent_start)
 			activeAgentPrompt = phase.agent.systemPrompt;
 			// Restrict tools to agent's allowed tools
@@ -612,10 +638,20 @@ Tag the note with relevant keywords for vector search.
 				const agentTools = [...phase.agent.tools, ...memoryTools.filter(t => !phase.agent.tools.includes(t))];
 				activeAgentTools = agentTools;
 				pi.setActiveTools(agentTools);
+			} else if (savedTools) {
+				// Agent with no tool restriction: reset to the full toolset so the
+				// previous phase's narrower restriction does not leak into this one.
+				activeAgentTools = null;
+				pi.setActiveTools(savedTools);
 			}
 		} else {
+			// No agent for this phase: restore the full toolset, otherwise the prior
+			// phase's restriction would persist.
 			activeAgentPrompt = null;
 			activeAgentTools = null;
+			if (savedTools) {
+				pi.setActiveTools(savedTools);
+			}
 		}
 	}
 
@@ -639,27 +675,54 @@ Tag the note with relevant keywords for vector search.
 		(globalThis as any).__phiOrchestrationActive = active;
 	}
 
+	/**
+	 * Tear down orchestration state without chaining to the next phase.
+	 * Used by the user-abort and auth-error paths so they restore the user's
+	 * model and tools exactly like the normal completion branch.
+	 */
+	function stopOrchestration() {
+		setOrchestrationActive(false);
+		phasePending = false;
+		deactivateAgent();
+		if (phaseTimeoutId) { clearTimeout(phaseTimeoutId); phaseTimeoutId = null; }
+		if (originalModel) {
+			const toRestore = originalModel;
+			originalModel = null;
+			Promise.resolve(pi.setModel(toRestore)).catch(() => { /* best effort */ });
+		}
+	}
+
 	function sendNextPhase(ctx: any) {
 		if (phaseQueue.length === 0) {
 			// All phases done — clean up and notify
 			setOrchestrationActive(false);
 			phasePending = false;
 			deactivateAgent();
+			// Restore the user's model so /plan does not overwrite their /model choice.
+			if (originalModel) {
+				const toRestore = originalModel;
+				originalModel = null;
+				Promise.resolve(pi.setModel(toRestore)).catch(() => { /* best effort */ });
+			}
 			if (phaseTimeoutId) { clearTimeout(phaseTimeoutId); phaseTimeoutId = null; }
-			// Generate global final summary
-			const totalPhases = 5; // always 5
+			// Generate global final summary using the real phase counters
 			const elapsed = phaseStartTime ? Math.round((Date.now() - phaseStartTime) / 1000) : 0;
 			const minutes = Math.floor(elapsed / 60);
 			const seconds = elapsed % 60;
+			const skippedNote = skippedPhases ? ` (${skippedPhases} skipped on timeout)` : "";
 			ctx.ui.notify(`\n📊 **Orchestration Summary**\n` +
-				`  Phases: ${totalPhases}/5 completed\n` +
+				`  Phases: ${completedPhases}/5 completed${skippedNote}\n` +
 				`  Duration: ${minutes}m ${seconds}s\n` +
 				`  Check \`.phi/plans/\` for all reports`, "info");
+			const allDone = completedPhases >= 5 && skippedPhases === 0;
+			const doneMsg = allDone
+				? `\n✅ **All 5 phases complete!**`
+				: `\n⚠️ **Orchestration finished:** ${completedPhases}/5 phases completed${skippedNote}.`;
 			try {
-				ctx.ui.notify(`\n✅ **All 5 phases complete!**`, "info");
+				ctx.ui.notify(doneMsg, "info");
 			} catch {
 				// Fallback: inject completion message into conversation stream
-				try { pi.sendUserMessage(`✅ All 5 phases complete! The project is ready for review.`); } catch { /* best effort */ }
+				try { pi.sendUserMessage(`Orchestration finished: ${completedPhases}/5 phases completed${skippedNote}.`); } catch { /* best effort */ }
 			}
 			return;
 		}
@@ -667,18 +730,25 @@ Tag the note with relevant keywords for vector search.
 		const phase = phaseQueue.shift()!;
 		phasePending = true;
 
-		switchModelForPhase(phase, ctx).then((modelId) => {
+		switchModelForPhase(phase, ctx).then(({ modelId, warning }) => {
 			activateAgent(phase, ctx);
 			const agentName = phase.agent?.name || phase.key;
 			ctx.ui.notify(`\n${phase.label} → \`${modelId}\` (agent: ${agentName})`, "info");
-			// Small delay to let the model switch settle, then send instruction
-			setTimeout(() => pi.sendUserMessage(phase.instruction), 500);
+			if (warning) ctx.ui.notify(`\n⚠️ ${warning}`, "warning");
+			// Small delay to let the model switch settle, then send instruction.
+			// deliverAs:"followUp" queues the message instead of throwing when the
+			// agent is still streaming (e.g. on the timeout path).
+			setTimeout(() => pi.sendUserMessage(phase.instruction, { deliverAs: "followUp" }), 500);
 			// Set phase timeout — abort if phase takes too long
 			if (phaseTimeoutId) clearTimeout(phaseTimeoutId);
 			phaseTimeoutId = setTimeout(() => {
 				if (orchestrationActive && phasePending) {
 					ctx.ui.notify(`\n⏰ **Phase timed out** (${MAX_PHASE_DURATION_MS / 60000} min limit). Skipping to next phase.`, "warning");
 					phasePending = false;
+					skippedPhases++;
+					// Abort the stuck phase first so the next instruction does not
+					// race a still-streaming phase.
+					try { ctx.abort(); } catch { /* best effort */ }
 					sendNextPhase(ctx);
 				}
 			}, MAX_PHASE_DURATION_MS);
@@ -705,6 +775,19 @@ Tag the note with relevant keywords for vector search.
 
 	pi.on("agent_end", async (event, ctx) => {
 		if (!orchestrationActive) return;
+
+		// User abort (Ctrl+C / ESC): the aborted run still emits agent_end, but it
+		// must NOT be treated as phase completion. Detect the aborted assistant
+		// message and stop the whole workflow instead of chaining the next phase.
+		const userAborted = (event.messages || []).some(
+			(m: any) => m.role === 'assistant' && m.stopReason === 'aborted',
+		);
+		if (userAborted) {
+			ctx.ui.notify(`\n🛑 **Orchestration cancelled** by user. Remaining phases skipped.`, "warning");
+			stopOrchestration();
+			return;
+		}
+
 		// Allow completion even if phasePending was cleared by a duplicate event
 		if (!phasePending) {
 			// If queue is empty and orchestration is active, force completion
@@ -740,9 +823,10 @@ Tag the note with relevant keywords for vector search.
 					const match = content.match(/wrote \d+ bytes to (.+)/);
 					if (match) filesWritten.push(match[1]);
 				}
-				// Track edits
-				if (name === 'edit' && !content.includes('ERR')) {
-					const match = content.match(/edited (.+)/) || content.match(/in (.+)/);
+				// Track edits — the edit tool returns "Successfully replaced N block(s) in <path>."
+				// Anchor the path capture so it does not over-capture unrelated text.
+				if (name === 'edit' && !content.includes('ERR') && !(msg as any).isError) {
+					const match = content.match(/replaced \d+ block\(s\) in (.+?)\.?$/m);
 					if (match) filesEdited.push(match[1]);
 				}
 				// Track errors — but filter out edit retries (old_text mismatch = normal retry, not error)
@@ -770,10 +854,7 @@ Tag the note with relevant keywords for vector search.
 		// Only a genuine auth failure (401) is fatal — abort the whole workflow.
 		if (hasAuthError) {
 			ctx.ui.notify(`\n❌ **Orchestrator aborted:** API authentication error (401)\nCheck your API key and model configuration.`, "error");
-			setOrchestrationActive(false);
-			phasePending = false;
-			deactivateAgent();
-			if (phaseTimeoutId) { clearTimeout(phaseTimeoutId); phaseTimeoutId = null; }
+			stopOrchestration();
 			return;
 		}
 
@@ -816,6 +897,7 @@ Tag the note with relevant keywords for vector search.
 		}
 
 		// Phase complete — chain to next
+		completedPhases++;
 		phasePending = false;
 		sendNextPhase(ctx);
 	});
@@ -851,6 +933,13 @@ Tag the note with relevant keywords for vector search.
 			phaseQueue = phases.slice(1); // Queue phases 2-5
 			setOrchestrationActive(true);
 			phasePending = true;
+			// Capture the user's model + full toolset so they can be restored when
+			// orchestration ends (otherwise /plan permanently overwrites /model and
+			// per-phase tool restrictions can leak).
+			originalModel = ctx.model || null;
+			savedTools = pi.getActiveTools();
+			completedPhases = 0;
+			skippedPhases = 0;
 			const firstPhase = phases[0];
 
 			ctx.ui.notify(`📋 **Orchestrator started** — 5 phases with model routing + agent roles\n`, "info");
@@ -866,11 +955,12 @@ Tag the note with relevant keywords for vector search.
 			// Record orchestration start time for final summary
 			phaseStartTime = Date.now();
 			// Switch model and activate agent for first phase
-			const modelId = await switchModelForPhase(firstPhase, ctx);
+			const { modelId, warning } = await switchModelForPhase(firstPhase, ctx);
 			activateAgent(firstPhase, ctx);
 			const agentName = firstPhase.agent?.name || firstPhase.key;
 			ctx.ui.notify(`${firstPhase.label} → \`${modelId}\` (agent: ${agentName})`, "info");
-			setTimeout(() => pi.sendUserMessage(firstPhase.instruction), 200);
+			if (warning) ctx.ui.notify(`\n⚠️ ${warning}`, "warning");
+			setTimeout(() => pi.sendUserMessage(firstPhase.instruction, { deliverAs: "followUp" }), 200);
 		},
 	});
 

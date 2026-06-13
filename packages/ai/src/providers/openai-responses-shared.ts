@@ -515,7 +515,9 @@ export async function processResponsesStream<TApi extends Api>(
 				output.stopReason = "toolUse";
 			}
 		} else if (event.type === "error") {
-			throw new Error(`Error Code ${event.code}: ${event.message}` || "Unknown error");
+			const code = event.code ?? "unknown";
+			const message = event.message ?? "";
+			throw new Error(message ? `Error Code ${code}: ${message}` : `Error Code ${code}`);
 		} else if (event.type === "response.failed") {
 			const error = event.response?.error;
 			const details = event.response?.incomplete_details;

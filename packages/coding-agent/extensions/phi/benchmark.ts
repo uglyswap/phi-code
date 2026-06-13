@@ -711,9 +711,16 @@ Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`, "info");
 			}
 
 			if (arg) {
-				// Benchmark specific model
-				const model = available.find(m => m.id.toLowerCase() === arg || m.id.toLowerCase().includes(arg));
+				// Benchmark specific model: prefer exact id match, then require an
+				// unambiguous substring match to avoid benchmarking the wrong model.
+				const exact = available.find(m => m.id.toLowerCase() === arg);
+				const matches = available.filter(m => m.id.toLowerCase().includes(arg));
+				const model = exact ?? (matches.length === 1 ? matches[0] : undefined);
 				if (!model) {
+					if (!exact && matches.length > 1) {
+						ctx.ui.notify(`Model "${arg}" is ambiguous. Did you mean:\n${matches.map(m => `  - ${m.id} (${m.provider})`).join("\n")}`, "warning");
+						return;
+					}
 					ctx.ui.notify(`Model "${arg}" not found or no API key. Available:\n${available.map(m => `  - ${m.id} (${m.provider})`).join("\n")}`, "warning");
 					return;
 				}

@@ -502,7 +502,10 @@ _Edit this file to customize Phi Code's behavior for your project._
 		// not cause the user to lose what they just typed.
 		try {
 			await persistProviderKey(provider, trimmed);
-			process.env[provider.envVar] = trimmed;
+			// Do not mirror the key into process.env: getKey() reads models.json
+			// first, so the store is already the source of truth. Setting the env
+			// var would leak the plaintext key to every child process (bash tool,
+			// pi.exec, npm postinstall, etc.).
 		} catch (err) {
 			ctx.ui.notify(
 				`Failed to write ${modelsJsonPath}: ${err instanceof Error ? err.message : String(err)}`,

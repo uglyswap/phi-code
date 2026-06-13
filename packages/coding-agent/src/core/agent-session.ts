@@ -427,8 +427,14 @@ export class AgentSession {
 
 	/** Emit an event to all listeners */
 	private _emit(event: AgentSessionEvent): void {
+		// Isolate each listener so a throwing listener cannot abort the broadcast
+		// and silently drop the event for the remaining listeners.
 		for (const l of this._eventListeners) {
-			l(event);
+			try {
+				l(event);
+			} catch (err) {
+				console.error("AgentSession listener error", err);
+			}
 		}
 	}
 
@@ -1607,6 +1613,10 @@ export class AgentSession {
 	 * @param customInstructions Optional instructions for the compaction summary
 	 */
 	async compact(customInstructions?: string): Promise<CompactionResult> {
+		// Abort any in-flight auto-compaction first. abort() only cancels retry and
+		// the agent, not _autoCompactionAbortController, so without this a concurrent
+		// auto-compaction could append a second compaction entry and rebuild state twice.
+		this.abortCompaction();
 		this._disconnectFromAgent();
 		await this.abort();
 		this._compactionAbortController = new AbortController();
@@ -2419,7 +2429,7 @@ export class AgentSession {
 
 		const err = message.errorMessage;
 		// Match: overloaded_error, provider returned error, rate limit, 429, 500, 502, 503, 504, service unavailable, network/connection errors (including connection lost), WebSocket transport closes/errors, fetch failed, request ended without sending chunks, HTTP/2 closed before response, terminated, retry delay exceeded
-		return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i.test(
+		return /overloaded|provider.?returned.?error|rate.?limit|too many requests|\b(429|500|502|503|504)\b|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i.test(
 			err,
 		);
 	}
@@ -2492,10 +2502,15 @@ export class AgentSession {
 			this._resolveRetry();
 			return false;
 		}
-		this._retryAbortController = undefined;
+		// Keep _retryAbortController set across the deferred tick so abortRetry() in the
+		// gap between the resolved sleep and the setTimeout callback can still mark the
+		// signal aborted. Capture the signal and clear the controller inside the callback.
+		const signal = this._retryAbortController.signal;
 
 		// Retry via continue() - use setTimeout to break out of event handler chain
 		setTimeout(() => {
+			this._retryAbortController = undefined;
+			if (signal.aborted) return;
 			this.agent.continue().catch(() => {
 				// Retry failed - will be caught by next agent_end
 			});

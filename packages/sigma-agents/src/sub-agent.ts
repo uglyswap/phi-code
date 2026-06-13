@@ -64,7 +64,7 @@ export class SubAgentManager {
 	 * Le contenu après le frontmatter devient le system prompt...
 	 */
 	parseAgentMarkdown(content: string): SubAgentConfig | null {
-		const lines = content.split("\n");
+		const lines = content.split(/\r?\n/);
 
 		if (!lines[0]?.startsWith("---")) {
 			return null;

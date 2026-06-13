@@ -51,6 +51,7 @@ export class OutputAccumulator {
 
 	private tempFilePath: string | undefined;
 	private tempFileStream: WriteStream | undefined;
+	private tempFileFailed = false;
 
 	constructor(options: OutputAccumulatorOptions = {}) {
 		this.maxLines = options.maxLines ?? DEFAULT_MAX_LINES;
@@ -203,7 +204,7 @@ export class OutputAccumulator {
 	}
 
 	private ensureTempFile(): void {
-		if (this.tempFilePath) {
+		if (this.tempFilePath || this.tempFileFailed) {
 			return;
 		}
 		this.tempFilePath = defaultTempFilePath(this.tempFilePrefix);
@@ -213,6 +214,16 @@ export class OutputAccumulator {
 		// the file name is fresh each time, so there is no pre-existing file to
 		// inherit looser perms. On Windows the mode is effectively ignored.
 		this.tempFileStream = createWriteStream(this.tempFilePath, { mode: 0o600 });
+		// Attach a permanent error handler immediately so a write failure
+		// (ENOSPC, EACCES, EMFILE, ...) cannot emit 'error' without a listener
+		// and crash the process. On failure, drop the temp file and degrade to
+		// the in-memory tail. closeTempFile() attaches its own once('error')
+		// listener at end() time; that one only handles promise rejection.
+		this.tempFileStream.on("error", () => {
+			this.tempFileFailed = true;
+			this.tempFileStream = undefined;
+			this.tempFilePath = undefined;
+		});
 		for (const chunk of this.rawChunks) {
 			this.tempFileStream.write(chunk);
 		}

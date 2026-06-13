@@ -277,11 +277,16 @@ export function extractAnsiCode(str: string, pos: number): { code: string; lengt
 
 	const next = str[pos + 1];
 
-	// CSI sequence: ESC [ ... m/G/K/H/J
+	// CSI sequence: ESC [ <param bytes 0x30-0x3F> <intermediate bytes 0x20-0x2F> <final byte 0x40-0x7E>
+	// Per ECMA-48 a CSI sequence ends on any final byte in 0x40-0x7E. This covers SGR styling (m)
+	// as well as cursor/scroll/private codes (e.g. \x1b[1A, \x1b[?25l, \x1b[6n).
 	if (next === "[") {
 		let j = pos + 2;
-		while (j < str.length && !/[mGKHJ]/.test(str[j]!)) j++;
-		if (j < str.length) return { code: str.substring(pos, j + 1), length: j + 1 - pos };
+		while (j < str.length) {
+			const c = str.charCodeAt(j);
+			if (c >= 0x40 && c <= 0x7e) return { code: str.substring(pos, j + 1), length: j + 1 - pos };
+			j++;
+		}
 		return null;
 	}
 

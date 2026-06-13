@@ -6,6 +6,14 @@ import { OntologyManager } from "./ontology.js";
 import type { MemoryConfig, MemoryStatus, UnifiedSearchResult } from "./types.js";
 import { VectorStore } from "./vector-store.js";
 
+// search() runs during a live TUI session. Writing to stdout/stderr directly
+// corrupts the rendered input line, so these diagnostics are opt-in
+// (set PHI_MEMORY_VERBOSE=1 or PHI_DEBUG=1). Mirrors vector-store.ts.
+const VERBOSE = process.env.PHI_MEMORY_VERBOSE === "1" || process.env.PHI_DEBUG === "1";
+function vlog(message: string): void {
+	if (VERBOSE) console.error(message);
+}
+
 export class SigmaMemory {
 	public readonly notes: NotesManager;
 	public readonly ontology: OntologyManager;
@@ -48,7 +56,7 @@ export class SigmaMemory {
 		} catch (error) {
 			// Surface the failure on a debug channel rather than swallowing it,
 			// so a broken notes subsystem is diagnosable instead of looking empty.
-			console.debug(`[SigmaMemory] notes search failed: ${error instanceof Error ? error.message : String(error)}`);
+			vlog(`[SigmaMemory] notes search failed: ${error instanceof Error ? error.message : String(error)}`);
 		}
 
 		// Search in ontology
@@ -76,7 +84,7 @@ export class SigmaMemory {
 		} catch (error) {
 			// Surface the failure on a debug channel rather than swallowing it,
 			// so a broken ontology subsystem is diagnosable instead of looking empty.
-			console.debug(`[SigmaMemory] ontology search failed: ${error instanceof Error ? error.message : String(error)}`);
+			vlog(`[SigmaMemory] ontology search failed: ${error instanceof Error ? error.message : String(error)}`);
 		}
 
 		// Vector similarity search
@@ -93,7 +101,7 @@ export class SigmaMemory {
 		} catch (error) {
 			// Surface the failure on a debug channel rather than swallowing it,
 			// so a broken vector subsystem is diagnosable instead of looking empty.
-			console.debug(`[SigmaMemory] vector search failed: ${error instanceof Error ? error.message : String(error)}`);
+			vlog(`[SigmaMemory] vector search failed: ${error instanceof Error ? error.message : String(error)}`);
 		}
 
 		// Sort by score descending

@@ -1,4 +1,4 @@
-import { exec } from "child_process";
+import { spawn } from "child_process";
 import { getOAuthProviders } from "phi-code-ai/oauth";
 import { Container, type Focusable, getKeybindings, Input, Spacer, Text, type TUI } from "phi-code-tui";
 import { theme } from "../theme/theme.js";
@@ -99,9 +99,16 @@ export class LoginDialogComponent extends Container implements Focusable {
 			this.contentContainer.addChild(new Text(theme.fg("warning", instructions), 1, 0));
 		}
 
-		// Try to open browser
-		const openCmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-		exec(`${openCmd} "${url}"`);
+		// Try to open browser without going through a shell (no injection, URL passed as a literal arg)
+		const child =
+			process.platform === "darwin"
+				? spawn("open", [url])
+				: process.platform === "win32"
+					? // empty title arg so `start` treats the URL as the target, not the window title
+						spawn("cmd", ["/c", "start", "", url], { windowsHide: true })
+					: spawn("xdg-open", [url]);
+		// Ignore spawn failures (missing binary); the user can still copy the URL shown above
+		child.on("error", () => {});
 
 		this.tui.requestRender();
 	}

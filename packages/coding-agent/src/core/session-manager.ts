@@ -463,17 +463,44 @@ export function loadEntriesFromFile(filePath: string): FileEntry[] {
 }
 
 function isValidSessionFile(filePath: string): boolean {
+	let fd: number | undefined;
 	try {
-		const fd = openSync(filePath, "r");
-		const buffer = Buffer.alloc(512);
-		const bytesRead = readSync(fd, buffer, 0, 512, 0);
-		closeSync(fd);
-		const firstLine = buffer.toString("utf8", 0, bytesRead).split("\n")[0];
+		fd = openSync(filePath, "r");
+		// Read incrementally until the first newline. The header line can exceed
+		// 512 bytes (e.g. forked sessions store a full parent session path, which
+		// is long and double-escaped on Windows), so a fixed buffer would truncate
+		// it and break JSON.parse. Cap the scan to avoid reading a newline-less file.
+		const BLOCK_SIZE = 1024;
+		const MAX_HEADER_BYTES = 64 * 1024;
+		const block = Buffer.alloc(BLOCK_SIZE);
+		const chunks: Buffer[] = [];
+		let total = 0;
+		let newlineFound = false;
+		while (total < MAX_HEADER_BYTES) {
+			const bytesRead = readSync(fd, block, 0, BLOCK_SIZE, total);
+			if (bytesRead === 0) break;
+			chunks.push(Buffer.from(block.subarray(0, bytesRead)));
+			total += bytesRead;
+			if (block.subarray(0, bytesRead).includes(0x0a)) {
+				newlineFound = true;
+				break;
+			}
+		}
+		// No newline within the bound means either a giant header or a single-line
+		// file; only parse when we actually captured the full first line.
+		if (!newlineFound && total >= MAX_HEADER_BYTES) return false;
+		const firstLine = Buffer.concat(chunks).toString("utf8").split(/\r?\n/)[0];
 		if (!firstLine) return false;
 		const header = JSON.parse(firstLine);
 		return header.type === "session" && typeof header.id === "string";
 	} catch {
 		return false;
+	} finally {
+		if (fd !== undefined) {
+			try {
+				closeSync(fd);
+			} catch {}
+		}
 	}
 }
 

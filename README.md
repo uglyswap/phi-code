@@ -192,6 +192,12 @@ When the smart router detects a matching category, it **automatically switches**
 
 Event-driven multi-model orchestration. Each phase runs with its own model and agent persona.
 
+**Act/Plan toggle (Tab):** press <kbd>Tab</kbd> on an empty prompt to switch
+between **Act** mode (messages go straight to the agent) and **Plan** mode (your
+next message is routed through the `/plan` orchestrator below). The active mode
+is shown by the indicator in the bottom-right of the footer (`● Act` / `○ Plan`).
+While you are typing, <kbd>Tab</kbd> keeps its usual completion behaviour.
+
 **How `/plan` works:**
 
 ```

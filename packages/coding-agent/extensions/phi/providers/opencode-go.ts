@@ -77,7 +77,9 @@ interface CacheEntry {
 
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 let cache: CacheEntry | null = null;
-let inflightFetch: Promise<OpenCodeGoModel[]> | null = null;
+// Inflight fetches keyed by apiKey so a keyless probe never leaks its
+// (possibly 401/reduced) result to a caller that passed a real key.
+const inflightFetch = new Map<string, Promise<OpenCodeGoModel[]>>();
 
 function isCacheValid(now: number): boolean {
 	return cache !== null && now - cache.fetchedAt < CACHE_TTL_MS;
@@ -125,19 +127,25 @@ export async function getOpenCodeGoModels(options?: {
 		return { models: cache!.models, source: "cache" };
 	}
 
-	if (inflightFetch) {
-		try {
-			const models = await inflightFetch;
-			return { models, source: "live" };
-		} catch {
-			// fall through to fresh attempt
+	const inflightKey = options?.apiKey ?? "";
+
+	if (!force) {
+		const existing = inflightFetch.get(inflightKey);
+		if (existing) {
+			try {
+				const models = await existing;
+				return { models, source: "live" };
+			} catch {
+				// fall through to fresh attempt
+			}
 		}
 	}
 
-	inflightFetch = fetchModelsRaw(options?.apiKey, timeoutMs);
+	const promise = fetchModelsRaw(options?.apiKey, timeoutMs);
+	inflightFetch.set(inflightKey, promise);
 	try {
-		const models = await inflightFetch;
-		cache = { models, fetchedAt: now };
+		const models = await promise;
+		cache = { models, fetchedAt: Date.now() };
 		return { models, source: "live" };
 	} catch {
 		if (cache) {
@@ -145,7 +153,9 @@ export async function getOpenCodeGoModels(options?: {
 		}
 		return { models: [...OPENCODE_GO_FALLBACK_MODELS], source: "fallback" };
 	} finally {
-		inflightFetch = null;
+		// Only clear the slot we created; a concurrent fetch for the same key
+		// may have replaced it (e.g. force=true overwriting a pending entry).
+		if (inflightFetch.get(inflightKey) === promise) inflightFetch.delete(inflightKey);
 	}
 }
 
@@ -240,5 +250,5 @@ export function buildOpenCodeGoAnthropicProviderConfig(apiKey: string, models: O
  */
 export function _resetOpenCodeGoCache(): void {
 	cache = null;
-	inflightFetch = null;
+	inflightFetch.clear();
 }

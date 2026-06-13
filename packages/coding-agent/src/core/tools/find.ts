@@ -306,7 +306,9 @@ export function createFindToolDefinition(
 								if (!line) continue;
 								const hadTrailingSlash = line.endsWith("/") || line.endsWith("\\");
 								let relativePath = line;
-								if (line.startsWith(searchPath)) {
+								// Case-insensitive prefix match so a differing drive-letter case on
+								// Windows (e.g. fd emitting 'c:\' vs resolved 'C:\') still short-circuits.
+								if (line.toLowerCase().startsWith(searchPath.toLowerCase())) {
 									relativePath = line.slice(searchPath.length + 1);
 								} else {
 									relativePath = path.relative(searchPath, line);

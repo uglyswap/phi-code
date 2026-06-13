@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.77.0] - 2026-06-13
+
+### Added
+
+- **Act/Plan input modes with a Tab toggle.** Press Tab on an empty prompt to
+  switch between Act mode (messages go straight to the agent) and Plan mode
+  (your next message is routed through the `/plan` orchestrator: 5 sequential
+  phases, one model per phase). A dedicated indicator in the bottom-right of the
+  footer shows the active mode (`● Act` / `○ Plan`): the active mode is a filled,
+  colored bullet, the inactive one a dim hollow bullet. Tab keeps its completion
+  behaviour while you are typing.
+
+### Fixed
+
+- **Context window display.** A dynamically registered provider whose models
+  omit `contextWindow` no longer renders a misleading `0` context size. The
+  model registry now falls back to a sane default (128k) at registration, and
+  the footer shows `?` for an unknown window instead of `0`, fixing the wrong
+  context size shown after switching models or during `/plan` orchestration
+  (where each phase may run a different model).
+- Large batch of audited correctness, security, Windows, resource-leak and UX
+  fixes across the agent session, compaction, tools, interactive mode, the
+  `/plan` orchestrator, providers, and the bundled `tui`/`ai`/`agent`/`sigma`
+  packages. Highlights: `/plan` no longer treats a user abort as phase
+  completion and restores the user's model afterwards; the external-editor
+  command handles editor paths with spaces on Windows; deferred bash output and
+  in-flight tool components no longer disappear on re-render; `key_changed`
+  events no longer carry the raw API key; world-readable secret/temp files are
+  created with restrictive permissions.
+
 ## [0.76.0] - 2026-05-16
 
 ### Added
