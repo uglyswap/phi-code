@@ -21,6 +21,7 @@ import {
 	buildOpenCodeGoProviderConfig,
 	getOpenCodeGoModels,
 } from "./providers/opencode-go.js";
+import { formatWindow, inferContextWindow, parseContextWindow } from "./providers/context-window.js";
 import { fetchLiveModels, peekCache, resetLiveModelsCache, toPersistedModel } from "./providers/live-models.js";
 
 const PROVIDER_DISPLAY: Record<string, string> = {
@@ -186,6 +187,96 @@ export default function modelsExtension(pi: ExtensionAPI) {
 					`/models error: ${err instanceof Error ? err.message : String(err)}`,
 					"error",
 				);
+			}
+		},
+	});
+
+	pi.registerCommand("context", {
+		description:
+			"Show or set the active model's context window (e.g. `/context 256k`, `/context 1M`, `/context auto`). Drives when the conversation auto-compacts.",
+		handler: async (args, ctx) => {
+			const model = ctx.model;
+			if (!model) {
+				ctx.ui.notify("No active model. Select one with `/model` first.", "warning");
+				return;
+			}
+			const provider = model.provider;
+			const modelId = model.id;
+			const arg = args.trim();
+
+			const readOverrideWindow = (): number | undefined => {
+				const overrides = store.getProvider(provider)?.modelOverrides as
+					| Record<string, { contextWindow?: number }>
+					| undefined;
+				return overrides?.[modelId]?.contextWindow;
+			};
+
+			const writeOverrides = (overrides: Record<string, unknown>): void => {
+				const stored = store.getProvider(provider) ?? {};
+				watcher.muteForWrite("models_json_changed");
+				store.setKey(provider, stored.apiKey ?? "local", { modelOverrides: overrides });
+			};
+
+			try {
+				if (arg === "") {
+					const source = readOverrideWindow() !== undefined ? "manual override" : "provider / inferred";
+					ctx.ui.notify(
+						`**${modelId}** (\`${provider}\`) context window: \`${formatWindow(model.contextWindow)}\` (${source}).\n` +
+							"Set the real value with `/context 256k`, `/context 1M`, or `/context 200000`. " +
+							"Reset to the detected value with `/context auto`.\n" +
+							"This is what determines when the conversation auto-compacts.",
+						"info",
+					);
+					return;
+				}
+
+				if (arg.toLowerCase() === "auto" || arg.toLowerCase() === "reset") {
+					const stored = store.getProvider(provider) ?? {};
+					const overrides = { ...((stored.modelOverrides as Record<string, unknown>) ?? {}) };
+					const entry = overrides[modelId];
+					if (entry && typeof entry === "object") {
+						const next = { ...(entry as Record<string, unknown>) };
+						delete next.contextWindow;
+						if (Object.keys(next).length === 0) delete overrides[modelId];
+						else overrides[modelId] = next;
+					}
+					writeOverrides(overrides);
+
+					// Revert the active model to the persisted/inferred window.
+					const persistedModels = (store.getProvider(provider)?.models as
+						| Array<{ id?: string; contextWindow?: number }>
+						| undefined) ?? [];
+					const persisted = persistedModels.find((m) => m?.id === modelId)?.contextWindow;
+					const reverted = persisted && persisted > 0 ? persisted : inferContextWindow(modelId, undefined, provider);
+					await pi.setModel({ ...model, contextWindow: reverted });
+					ctx.ui.notify(`Cleared context override for **${modelId}**. Reverted to \`${formatWindow(reverted)}\`.`, "info");
+					return;
+				}
+
+				const value = parseContextWindow(arg);
+				if (!value) {
+					ctx.ui.notify("Invalid value. Use e.g. `256k`, `1M`, or `200000`.", "warning");
+					return;
+				}
+
+				// Immediate effect: the footer and auto-compaction use the new window right away.
+				await pi.setModel({ ...model, contextWindow: value });
+
+				// Persist as a per-model override so it survives restarts and the background
+				// refresh (which rewrites `models` but leaves `modelOverrides` untouched).
+				const stored = store.getProvider(provider) ?? {};
+				const overrides = { ...((stored.modelOverrides as Record<string, unknown>) ?? {}) };
+				const existing = (overrides[modelId] as Record<string, unknown> | undefined) ?? {};
+				overrides[modelId] = { ...existing, contextWindow: value };
+				writeOverrides(overrides);
+
+				ctx.ui.notify(
+					`Context window for **${modelId}** set to \`${formatWindow(value)}\` (saved). ` +
+						`Auto-compaction now triggers near ${formatWindow(value)}.`,
+					"info",
+				);
+			} catch (err) {
+				ctx.ui.notify(`/context error: ${err instanceof Error ? err.message : String(err)}`, "error");
 			}
 		},
 	});

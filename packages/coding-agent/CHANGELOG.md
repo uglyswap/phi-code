@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.77.3] - 2026-06-13
+
+### Added
+
+- **`/context` command to view and set the active model's context window.**
+  `/context` shows the current window and whether it is provider-reported,
+  inferred, or a manual override. `/context 256k`, `/context 1M`, or
+  `/context 200000` set it (applied immediately to the footer and auto-compaction,
+  and saved as a per-model override that survives restarts and the background
+  refresh). `/context auto` clears the override. Useful when a provider reports no
+  window and the inferred value is wrong: the window directly drives when the
+  conversation auto-compacts (`compact when tokens > window - reserve`).
+
+### Changed
+
+- **Default fallback context window raised from 128k to 256k**, matching most
+  current high-end models. Known 128k families (DeepSeek, Llama, GPT-4o, Hy3) are
+  pinned explicitly so they are not over-reported. Note the asymmetry: a too-large
+  window risks a late compaction and a hard "context exceeded" on a genuinely
+  smaller model, so set the real value with `/context` when in doubt.
+
 ## [0.77.2] - 2026-06-13
 
 ### Changed

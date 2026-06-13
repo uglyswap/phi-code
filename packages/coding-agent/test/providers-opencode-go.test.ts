@@ -155,7 +155,7 @@ describe("providers/opencode-go", () => {
 			expect(inferOpenCodeGoContextWindow("glm-5.1")).toBe(200_000);
 			expect(inferOpenCodeGoContextWindow("mimo-v2-pro")).toBe(200_000);
 			expect(inferOpenCodeGoContextWindow("deepseek-v4-pro")).toBe(128_000);
-			expect(inferOpenCodeGoContextWindow("unknown-model", 0)).toBe(128_000);
+			expect(inferOpenCodeGoContextWindow("unknown-model", 0)).toBe(256_000);
 		});
 	});
 
