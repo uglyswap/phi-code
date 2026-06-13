@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.81.0] - 2026-06-14
+
+Marathon increment 4 (prompt-only, low risk).
+
+### Changed
+
+- **Memory discipline.** The per-turn reminder now tells the model to (1) save only
+  non-obvious, cross-session facts (not what git already records) and (2)
+  verify-before-trust: a recalled note describes a PAST state, so confirm it against
+  the live code before acting, and the current observation wins on conflict.
+- **REVIEW final sweep.** On large diffs, the reviewer re-reads the diff once more
+  as if fresh and adds only genuinely new bugs (no padding).
+- **Run Recipe.** EXPLORE records a `## Run Recipe` (build/run command, port, ready
+  signal) in the brief; TEST uses it to actually run the code and to tell a real
+  failure (FAIL) from a stale launch recipe (BLOCKED).
+
 ## [0.80.0] - 2026-06-14
 
 Marathon increment 3: context protection, productivity commands, and the

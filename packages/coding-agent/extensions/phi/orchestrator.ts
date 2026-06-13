@@ -414,6 +414,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
    - Requirements: specific features needed
    - Tech decisions: frameworks, patterns to use
    - Constraints: what to NOT break
+   - Run Recipe: from package.json scripts / Makefile / Dockerfile / README, a \`## Run Recipe\` with the build command, run command, port/URL, and ready signal (the TEST phase uses this to actually run the code)
 5. **MANDATORY:** Write your findings to \`.phi/plans/explore-${ts}.md\` using the \`write\` tool. This file is READ by Phase 2 PLAN — if you skip it, the plan agent has no context. Do NOT skip this step.
 
 **LAST ACTION (MANDATORY):** Call \`memory_write\` to save your exploration findings for downstream agents.
@@ -580,6 +581,8 @@ $ <command actually executed>
 - Error: ... -> Fix: ...
 \`\`\`
 
+**Launch:** if the brief contains a "## Run Recipe" (build command, run command, port/URL, ready signal), use it. Distinguish a real failure (FAIL) from a stale launch recipe (BLOCKED) and report the recipe that actually works.
+
 **Verdict rules:** PASS only if you OBSERVED every feature working at runtime. When in doubt, FAIL. No partial pass (3/4 working = FAIL). Use BLOCKED only when you could not run anything (broken launch recipe, missing env, provider down) and say what is needed.
 
 **CRITICAL RULES:**
@@ -639,6 +642,8 @@ After testing, use \`memory_write\` to save test results, bugs found, and lesson
 (Only the must-fix findings. If empty, write "none" and set VERDICT: PASS.)
 - path/file.ts:123 - <what must change and why>
 \`\`\`
+
+**Final sweep (large diffs only):** before writing the verdict, re-read the diff once more as if you had never seen it; add ONLY bugs not already in your list. If there are none, do not pad.
 
 **Verdict rules:** VERDICT: FAIL if there is ANY CONFIRMED correctness/security finding (it goes under BLOCKING). VERDICT: PASS only if BLOCKING is empty. Do NOT pad: if the code is clean, return PASS with no findings.
 
