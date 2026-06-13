@@ -35,8 +35,14 @@ describe("inferContextWindow", () => {
 		expect(inferContextWindow("models/abc-123", undefined, "google")).toBe(2_000_000);
 	});
 
-	test("falls back to 128k for unknown families", () => {
+	test("pins known 128k families", () => {
 		expect(inferContextWindow("deepseek-v4-pro")).toBe(128_000);
-		expect(inferContextWindow("some-random-model")).toBe(128_000);
+		expect(inferContextWindow("llama-3.3-70b")).toBe(128_000);
+		expect(inferContextWindow("gpt-4o")).toBe(128_000);
+	});
+
+	test("falls back to 256k for genuinely unknown models", () => {
+		expect(inferContextWindow("some-random-model")).toBe(256_000);
+		expect(inferContextWindow("acme-llm-9")).toBe(256_000);
 	});
 });
