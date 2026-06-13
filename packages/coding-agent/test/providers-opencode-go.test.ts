@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	_resetOpenCodeGoCache,
+	buildOpenCodeGoAnthropicProviderConfig,
 	buildOpenCodeGoProviderConfig,
 	getOpenCodeGoModels,
+	inferOpenCodeGoContextWindow,
 	OPENCODE_GO_ENV_VAR,
 	OPENCODE_GO_FALLBACK_MODELS,
 	pingOpenCodeGo,
@@ -108,9 +110,10 @@ describe("providers/opencode-go", () => {
 	});
 
 	describe("buildOpenCodeGoProviderConfig", () => {
-		test("produces openai-completions config with mapped models", () => {
+		test("produces openai-completions config and excludes Qwen/MiniMax (Anthropic-routed)", () => {
 			const cfg = buildOpenCodeGoProviderConfig("k", [
 				{ id: "kimi-k2.6", name: "Kimi K2.6", contextWindow: 256000, maxTokens: 16384 },
+				{ id: "glm-5", name: "GLM 5" },
 				{ id: "qwen3-coder" },
 			]);
 			expect(cfg.baseUrl).toBe("https://opencode.ai/zen/go/v1");
@@ -121,7 +124,38 @@ describe("providers/opencode-go", () => {
 				name: "Kimi K2.6",
 				contextWindow: 256000,
 			});
-			expect(cfg.models[1].name).toBe("qwen3-coder");
+			expect(cfg.models[1].name).toBe("GLM 5");
+			// Qwen/MiniMax are routed to the Anthropic-compatible endpoint, not here.
+			expect(cfg.models.find((m) => m.id === "qwen3-coder")).toBeUndefined();
+		});
+	});
+
+	describe("buildOpenCodeGoAnthropicProviderConfig", () => {
+		test("routes Qwen/MiniMax and infers their 1M context window when missing", () => {
+			const cfg = buildOpenCodeGoAnthropicProviderConfig("k", [
+				{ id: "qwen3.7-plus" },
+				{ id: "minimax-m2.7" },
+				{ id: "kimi-k2.6", name: "Kimi K2.6" },
+			]);
+			expect(cfg.api).toBe("anthropic-messages");
+			expect(cfg.models.map((m) => m.id)).toEqual(["qwen3.7-plus", "minimax-m2.7"]);
+			// qwen3.7-plus has no contextWindow from the API; it must not collapse to 128k.
+			expect(cfg.models.find((m) => m.id === "qwen3.7-plus")?.contextWindow).toBe(1_000_000);
+		});
+	});
+
+	describe("inferOpenCodeGoContextWindow", () => {
+		test("keeps a provided positive window", () => {
+			expect(inferOpenCodeGoContextWindow("qwen3.7-plus", 262_144)).toBe(262_144);
+		});
+		test("infers by model family when missing", () => {
+			expect(inferOpenCodeGoContextWindow("qwen3.7-plus")).toBe(1_000_000);
+			expect(inferOpenCodeGoContextWindow("minimax-m2.7")).toBe(1_000_000);
+			expect(inferOpenCodeGoContextWindow("kimi-k2.6")).toBe(256_000);
+			expect(inferOpenCodeGoContextWindow("glm-5.1")).toBe(200_000);
+			expect(inferOpenCodeGoContextWindow("mimo-v2-pro")).toBe(200_000);
+			expect(inferOpenCodeGoContextWindow("deepseek-v4-pro")).toBe(128_000);
+			expect(inferOpenCodeGoContextWindow("unknown-model", 0)).toBe(128_000);
 		});
 	});
 

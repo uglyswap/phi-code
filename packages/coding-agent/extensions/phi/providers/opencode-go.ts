@@ -61,6 +61,7 @@ export const OPENCODE_GO_FALLBACK_MODELS: readonly OpenCodeGoModel[] = [
 	{ id: "glm-5", name: "GLM 5", contextWindow: 200_000, maxTokens: 128_000 },
 	{ id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", contextWindow: 128_000, maxTokens: 8_192 },
 	{ id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", contextWindow: 128_000, maxTokens: 8_192 },
+	{ id: "qwen3.7-plus", name: "Qwen 3.7 Plus", contextWindow: 1_000_000, maxTokens: 16_384 },
 	{ id: "qwen3.6-plus", name: "Qwen 3.6 Plus", contextWindow: 1_000_000, maxTokens: 16_384 },
 	{ id: "qwen3.5-plus", name: "Qwen 3.5 Plus", contextWindow: 1_000_000, maxTokens: 16_384 },
 	{ id: "mimo-v2-pro", name: "MiMo V2 Pro", contextWindow: 200_000, maxTokens: 16_384 },
@@ -208,13 +209,28 @@ export function isOpenCodeGoAnthropicModel(id: string): boolean {
 	return /^(qwen|minimax)/i.test(id);
 }
 
+/**
+ * Infer a model's context window by family when the OpenCode Go API does not
+ * report one (it omits it for some newer models, e.g. qwen3.7-plus). A flat
+ * 128k default badly under-reports the large-context Qwen/MiniMax models, which
+ * surfaces as a wrong "/128k" in the footer. Values mirror OPENCODE_GO_FALLBACK_MODELS.
+ */
+export function inferOpenCodeGoContextWindow(id: string, provided?: number): number {
+	if (typeof provided === "number" && provided > 0) return provided;
+	const lower = id.toLowerCase();
+	if (/^(qwen|minimax)/.test(lower)) return 1_000_000;
+	if (/^kimi/.test(lower)) return 256_000;
+	if (/^(glm|mimo)/.test(lower)) return 200_000;
+	return 128_000;
+}
+
 function toPersistedOpenCodeGoModel(m: OpenCodeGoModel) {
 	return {
 		id: m.id,
 		name: m.name ?? m.id,
 		reasoning: true,
 		input: ["text"] as const,
-		contextWindow: m.contextWindow ?? 128_000,
+		contextWindow: inferOpenCodeGoContextWindow(m.id, m.contextWindow),
 		maxTokens: m.maxTokens ?? 16_384,
 	};
 }
