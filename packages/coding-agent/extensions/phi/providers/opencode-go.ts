@@ -18,6 +18,8 @@
  * Model IDs follow format: opencode-go/<model-id> (e.g., opencode-go/kimi-k2.6).
  */
 
+import { inferContextWindow } from "./context-window.js";
+
 export const OPENCODE_GO_ENV_VAR = "OPENCODE_GO_API_KEY";
 export const OPENCODE_GO_AUTH_URL = "https://opencode.ai/auth";
 export const OPENCODE_GO_MODELS_URL = "https://opencode.ai/zen/go/v1/models";
@@ -211,17 +213,11 @@ export function isOpenCodeGoAnthropicModel(id: string): boolean {
 
 /**
  * Infer a model's context window by family when the OpenCode Go API does not
- * report one (it omits it for some newer models, e.g. qwen3.7-plus). A flat
- * 128k default badly under-reports the large-context Qwen/MiniMax models, which
- * surfaces as a wrong "/128k" in the footer. Values mirror OPENCODE_GO_FALLBACK_MODELS.
+ * report one (it omits it for some newer models, e.g. qwen3.7-plus). Delegates
+ * to the shared resolver so every provider applies the same family heuristics.
  */
 export function inferOpenCodeGoContextWindow(id: string, provided?: number): number {
-	if (typeof provided === "number" && provided > 0) return provided;
-	const lower = id.toLowerCase();
-	if (/^(qwen|minimax)/.test(lower)) return 1_000_000;
-	if (/^kimi/.test(lower)) return 256_000;
-	if (/^(glm|mimo)/.test(lower)) return 200_000;
-	return 128_000;
+	return inferContextWindow(id, provided, "opencode-go");
 }
 
 function toPersistedOpenCodeGoModel(m: OpenCodeGoModel) {

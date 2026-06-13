@@ -16,6 +16,11 @@
  */
 
 import { ApiKeyStore, type ConfigWatcher, type ExtensionAPI, getApiKeyStore, getConfigWatcher } from "phi-code";
+import {
+	buildOpenCodeGoAnthropicProviderConfig,
+	buildOpenCodeGoProviderConfig,
+	getOpenCodeGoModels,
+} from "./providers/opencode-go.js";
 import { fetchLiveModels, peekCache, resetLiveModelsCache, toPersistedModel } from "./providers/live-models.js";
 
 const PROVIDER_DISPLAY: Record<string, string> = {
@@ -42,6 +47,41 @@ interface RefreshOutcome {
 	error?: string;
 }
 
+/**
+ * Refresh the OpenCode Go provider pair from the shared catalog.
+ * "opencode-go" persists the OpenAI-compat models; "opencode-go-anthropic"
+ * persists the Qwen/MiniMax models served over the Anthropic endpoint. Both
+ * sides get family-inferred context windows via the config builders.
+ */
+async function refreshOpenCodeGo(
+	store: ApiKeyStore,
+	watcher: ConfigWatcher,
+	providerId: string,
+	apiKey: string | undefined,
+	stored: ReturnType<ApiKeyStore["getProvider"]>,
+): Promise<RefreshOutcome> {
+	const { models, source } = await getOpenCodeGoModels({ apiKey, forceRefresh: true });
+	const keyForBuild = apiKey ?? stored?.apiKey ?? "local";
+	const config =
+		providerId === "opencode-go-anthropic"
+			? buildOpenCodeGoAnthropicProviderConfig(keyForBuild, models)
+			: buildOpenCodeGoProviderConfig(keyForBuild, models);
+
+	if (config.models.length === 0) {
+		return { provider: providerId, source: source === "fallback" ? "fallback" : "skipped", count: 0 };
+	}
+
+	watcher.muteForWrite("models_json_changed");
+	store.setKey(providerId, stored?.apiKey ?? apiKey ?? "local", {
+		baseUrl: stored?.baseUrl ?? config.baseUrl,
+		api: stored?.api ?? config.api,
+		models: config.models,
+	});
+
+	const outcomeSource = source === "live" ? "live" : source === "cache" ? "cache" : "fallback";
+	return { provider: providerId, source: outcomeSource, count: config.models.length };
+}
+
 async function refreshOne(
 	store: ApiKeyStore,
 	watcher: ConfigWatcher,
@@ -51,6 +91,12 @@ async function refreshOne(
 	const apiKey = stored?.apiKey && !stored.apiKey.startsWith("$") && stored.apiKey !== "local"
 		? stored.apiKey
 		: undefined;
+
+	// OpenCode Go is a provider pair the generic fetchLiveModels path can't express
+	// (and never handled the Anthropic side), so refresh it from the shared catalog.
+	if (providerId === "opencode-go" || providerId === "opencode-go-anthropic") {
+		return await refreshOpenCodeGo(store, watcher, providerId, apiKey, stored);
+	}
 
 	resetLiveModelsCache(providerId);
 	const result = await fetchLiveModels(providerId, {

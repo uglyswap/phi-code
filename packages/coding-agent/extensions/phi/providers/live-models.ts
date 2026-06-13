@@ -25,6 +25,7 @@ import {
 	pingOpenCodeGo,
 } from "./opencode-go.js";
 import { ALIBABA_MODELS, ALIBABA_PROVIDERS, pingAlibaba } from "./alibaba.js";
+import { inferContextWindow } from "./context-window.js";
 
 export const LAST_VERIFIED = "2026-05-15";
 
@@ -462,7 +463,9 @@ export function toPersistedModel(m: LiveModel): {
 		name: m.name ?? m.id,
 		reasoning: m.reasoning ?? true,
 		input: ["text"] as const,
-		contextWindow: m.contextWindow ?? 128_000,
+		// Infer by model family when the provider API omits the window, instead of
+		// collapsing large-context models (Qwen/MiniMax/Gemini/...) to a flat 128k.
+		contextWindow: inferContextWindow(m.id, m.contextWindow),
 		maxTokens: m.maxTokens ?? 16_384,
 	};
 }
