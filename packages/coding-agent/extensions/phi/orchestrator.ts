@@ -152,6 +152,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			if (orchestrationActive) {
 				return {
 					content: [{ type: "text", text: "⚠️ Orchestration is already active via /plan. Do NOT call orchestrate during /plan phases. Follow the phase instructions instead." }],
+					details: undefined,
 				};
 			}
 
@@ -726,13 +727,14 @@ Tag the note with relevant keywords for vector search.
 			savedTools = pi.getActiveTools();
 		}
 		if (phase.agent) {
+			const agentDef = phase.agent;
 			// Set agent's system prompt (will be injected via before_agent_start)
-			activeAgentPrompt = phase.agent.systemPrompt;
+			activeAgentPrompt = agentDef.systemPrompt;
 			// Restrict tools to agent's allowed tools
-			if (phase.agent.tools.length > 0) {
+			if (agentDef.tools.length > 0) {
 				// Always include memory tools in orchestration phases
 				const memoryTools = ['memory_search', 'memory_write', 'memory_read', 'ontology_add', 'ontology_query'];
-				const agentTools = [...phase.agent.tools, ...memoryTools.filter(t => !phase.agent.tools.includes(t))];
+				const agentTools = [...agentDef.tools, ...memoryTools.filter(t => !agentDef.tools.includes(t))];
 				activeAgentTools = agentTools;
 				pi.setActiveTools(agentTools);
 			} else if (savedTools) {
@@ -926,14 +928,16 @@ Tag the note with relevant keywords for vector search.
 		const testResults: string[] = [];
 		let toolCallCount = 0;
 
-		for (const msg of messages) {
+		for (const rawMsg of messages) {
+			// Pi message variants are scanned dynamically; cast to a loose shape once.
+			const msg = rawMsg as { role?: string; content?: unknown; name?: string; toolName?: string; isError?: boolean };
 			// Pi uses role: "toolResult" instead of "tool"
 			if (msg.role === 'tool' || msg.role === 'function' || msg.role === 'toolResult') {
 				toolCallCount++;
 				const content = Array.isArray(msg.content)
 					? msg.content.map((c: any) => c.text || '').join('')
 					: String(msg.content || '');
-				const name = (msg as any).name || (msg as any).toolName || '';
+				const name = msg.name || msg.toolName || '';
 				// Track writes
 				if (name === 'write' && content.includes('Successfully wrote')) {
 					const match = content.match(/wrote \d+ bytes to (.+)/);
@@ -941,7 +945,7 @@ Tag the note with relevant keywords for vector search.
 				}
 				// Track edits — the edit tool returns "Successfully replaced N block(s) in <path>."
 				// Anchor the path capture so it does not over-capture unrelated text.
-				if (name === 'edit' && !content.includes('ERR') && !(msg as any).isError) {
+				if (name === 'edit' && !content.includes('ERR') && !msg.isError) {
 					const match = content.match(/replaced \d+ block\(s\) in (.+?)\.?$/m);
 					if (match) filesEdited.push(match[1]);
 				}
@@ -956,7 +960,7 @@ Tag the note with relevant keywords for vector search.
 				}
 				// Track test results
 				if (content.includes('PASS') || content.includes('✅') || content.includes('✗') || content.includes('❌')) {
-					const lines = content.split('\n').filter(l => /PASS|FAIL|✅|❌|✗/.test(l));
+					const lines = content.split('\n').filter((l: string) => /PASS|FAIL|✅|❌|✗/.test(l));
 					testResults.push(...lines.slice(0, 10));
 				}
 			}

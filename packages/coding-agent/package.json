@@ -1,6 +1,6 @@
 {
 	"name": "@phi-code-admin/phi-code",
-	"version": "0.79.0",
+	"version": "0.80.0",
 	"description": "Coding agent CLI with persistent memory, sub-agents, intelligent routing, and orchestration",
 	"type": "module",
 	"piConfig": {
@@ -38,6 +38,7 @@
 		"clean": "shx rm -rf dist",
 		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
 		"build": "tsgo -p tsconfig.build.json && shx chmod +x dist/cli.js && npm run copy-assets",
+		"check:ext": "tsgo -p tsconfig.ext.json --noEmit",
 		"build:binary": "npm --prefix ../tui run build && npm --prefix ../ai run build && npm --prefix ../agent run build && npm run build && bun build --compile --external koffi ./dist/bun/cli.js --outfile dist/pi && npm run copy-binary-assets",
 		"copy-assets": "shx mkdir -p dist/modes/interactive/theme dist/core/export-html/vendor dist/core && shx cp src/modes/interactive/theme/*.json dist/modes/interactive/theme/ && shx cp src/core/default-models.json dist/core/ && shx cp src/core/export-html/template.html src/core/export-html/template.css src/core/export-html/template.js dist/core/export-html/ && shx cp src/core/export-html/vendor/*.js dist/core/export-html/vendor/",
 		"copy-binary-assets": "shx cp package.json dist/ && shx cp README.md dist/ && shx cp CHANGELOG.md dist/ && shx mkdir -p dist/theme && shx cp src/modes/interactive/theme/*.json dist/theme/ && shx mkdir -p dist/assets && shx cp -r src/modes/interactive/assets dist/ 2>/dev/null || true && shx mkdir -p dist/export-html/vendor && shx cp src/core/export-html/template.html dist/export-html/ && shx cp src/core/export-html/vendor/*.js dist/export-html/vendor/ && shx cp -r docs dist/ && shx cp -r examples dist/ && shx cp ../../node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm dist/",

@@ -45,8 +45,9 @@ export function extractHandoff(content: string): string {
  * a fallback model. A genuine 401 auth failure is NOT transient (handled as fatal
  * by the caller) and is explicitly excluded.
  */
-export function isTransientError(messages: Array<{ content?: unknown }>): boolean {
-	for (const msg of messages || []) {
+export function isTransientError(messages: readonly unknown[]): boolean {
+	for (const m of messages || []) {
+		const msg = (m ?? {}) as { content?: unknown };
 		const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content ?? "");
 		if (content.includes("401")) continue;
 		if (/\b(429|500|502|503|504)\b/.test(content)) return true;
