@@ -57,7 +57,7 @@ export function createBashTool(executor: Executor): AgentTool<typeof bashSchema>
 			if (totalBytes > DEFAULT_MAX_BYTES) {
 				const candidatePath = getTempFilePath();
 				try {
-					await writeFile(candidatePath, output, "utf-8");
+					await writeFile(candidatePath, output, { encoding: "utf-8", mode: 0o600 });
 					tempFilePath = candidatePath;
 				} catch (error) {
 					tempFilePath = undefined;

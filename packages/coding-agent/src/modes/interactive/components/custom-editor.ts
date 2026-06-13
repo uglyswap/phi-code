@@ -66,9 +66,27 @@ export class CustomEditor extends Editor {
 			// Fall through to editor handling for delete-char-forward when not empty
 		}
 
+		// Mode toggle (Tab) - only when the editor is empty and autocomplete is not
+		// showing, so Tab keeps triggering completion / acceptance while the user types.
+		if (this.keybindings.matches(data, "app.mode.toggle")) {
+			if (this.getText().trim().length === 0 && !this.isShowingAutocomplete()) {
+				const handler = this.actionHandlers.get("app.mode.toggle");
+				if (handler) {
+					handler();
+					return;
+				}
+			}
+			// Otherwise fall through to the parent editor (Tab completion / accept).
+		}
+
 		// Check all other app actions
 		for (const [action, handler] of this.actionHandlers) {
-			if (action !== "app.interrupt" && action !== "app.exit" && this.keybindings.matches(data, action)) {
+			if (
+				action !== "app.interrupt" &&
+				action !== "app.exit" &&
+				action !== "app.mode.toggle" &&
+				this.keybindings.matches(data, action)
+			) {
 				handler();
 				return;
 			}

@@ -436,9 +436,12 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			return {};
 		}
 		const truncated = userPrompt.length > 200 ? `${userPrompt.slice(0, 200)}...` : userPrompt;
+		// Neutralize angle brackets so user content cannot close the
+		// <system-reminder> block early and inject trusted instructions.
+		const safe = truncated.replace(/[<>]/g, (c) => (c === "<" ? "&lt;" : "&gt;")).replace(/"/g, '\\"');
 		const reminder = `<system-reminder>
 You are about to respond to a new user message:
-"${truncated.replace(/"/g, '\\"')}"
+"${safe}"
 
 REMINDER (project rule, applies every turn):
 1. Call \`memory_search\` FIRST with keywords from the user's intent. Recent

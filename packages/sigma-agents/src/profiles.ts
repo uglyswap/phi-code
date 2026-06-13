@@ -23,8 +23,11 @@ export class ModelProfiler {
 				}
 			}
 		} catch (error) {
-			// If file doesn't exist, use default profiles
-			console.warn(`Could not load profiles from ${path}:`, error);
+			// Missing file is nominal: fall back to defaults silently.
+			// Only warn on real read/parse errors.
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+				console.warn(`Could not load profiles from ${path}:`, error);
+			}
 			this.loadDefaultProfiles();
 		}
 	}

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import type { Config, Pod } from "./types.js";
@@ -7,7 +7,7 @@ import type { Config, Pod } from "./types.js";
 const getConfigDir = (): string => {
 	const configDir = process.env.PI_CONFIG_DIR || join(homedir(), ".pi");
 	if (!existsSync(configDir)) {
-		mkdirSync(configDir, { recursive: true });
+		mkdirSync(configDir, { recursive: true, mode: 0o700 });
 	}
 	return configDir;
 };
@@ -34,7 +34,9 @@ export const loadConfig = (): Config => {
 export const saveConfig = (config: Config): void => {
 	const configPath = getConfigPath();
 	try {
-		writeFileSync(configPath, JSON.stringify(config, null, 2));
+		writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+		// writeFileSync only applies mode on creation, narrow existing files too
+		chmodSync(configPath, 0o600);
 	} catch (e) {
 		console.error(`Error saving config: ${e}`);
 		process.exit(1);

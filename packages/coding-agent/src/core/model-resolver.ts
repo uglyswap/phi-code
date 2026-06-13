@@ -60,6 +60,11 @@ function isAlias(id: string): boolean {
 	// Check if ID ends with -latest
 	if (id.endsWith("-latest")) return true;
 
+	// Preview/dated builds (e.g. -preview-09-2025) are not stable aliases.
+	// Their date suffix is not always 8 consecutive digits, so detect the
+	// -preview marker explicitly to avoid ranking them above the stable id.
+	if (id.includes("-preview")) return false;
+
 	// Check if ID ends with a date pattern (-YYYYMMDD)
 	const datePattern = /-\d{8}$/;
 	return !datePattern.test(id);
@@ -140,12 +145,13 @@ function tryMatchModel(modelPattern: string, availableModels: Model<Api>[]): Mod
 	const datedVersions = matches.filter((m) => !isAlias(m.id));
 
 	if (aliases.length > 0) {
-		// Prefer alias - if multiple aliases, pick the one that sorts highest
-		aliases.sort((a, b) => b.id.localeCompare(a.id));
+		// Prefer alias - if multiple aliases, pick the one that sorts highest.
+		// Use numeric collation so gpt-5.10 ranks above gpt-5.4.
+		aliases.sort((a, b) => b.id.localeCompare(a.id, undefined, { numeric: true }));
 		return aliases[0];
 	} else {
 		// No alias found, pick latest dated version
-		datedVersions.sort((a, b) => b.id.localeCompare(a.id));
+		datedVersions.sort((a, b) => b.id.localeCompare(a.id, undefined, { numeric: true }));
 		return datedVersions[0];
 	}
 }

@@ -179,6 +179,9 @@ export function streamProxy(model: Model<any>, context: Context, options: ProxyS
 			reader = response.body!.getReader();
 			const decoder = new TextDecoder();
 			let buffer = "";
+			// Track whether the server sent a terminal (done/error) event so we can
+			// synthesize one if the connection closes cleanly without it.
+			let sawTerminal = false;
 
 			while (true) {
 				const { done, value } = await reader.read();
@@ -199,6 +202,9 @@ export function streamProxy(model: Model<any>, context: Context, options: ProxyS
 							const proxyEvent = JSON.parse(data) as ProxyAssistantMessageEvent;
 							const event = processProxyEvent(proxyEvent, partial);
 							if (event) {
+								if (event.type === "done" || event.type === "error") {
+									sawTerminal = true;
+								}
 								stream.push(event);
 							}
 						}
@@ -208,6 +214,18 @@ export function streamProxy(model: Model<any>, context: Context, options: ProxyS
 
 			if (options.signal?.aborted) {
 				throw new Error("Request aborted by user");
+			}
+
+			// Guard against a truncated stream that closed without a terminal SSE.
+			// Without this, result() would hang forever since end() does not resolve
+			// the final result when no terminal event was pushed.
+			if (!sawTerminal) {
+				partial.stopReason = "stop";
+				stream.push({
+					type: "done",
+					reason: partial.stopReason as Extract<StopReason, "stop" | "length" | "toolUse">,
+					message: partial,
+				});
 			}
 
 			stream.end();

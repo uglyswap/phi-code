@@ -4,7 +4,7 @@
 
 import chalk from "chalk";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
-import { dirname, join } from "path";
+import { basename, dirname, join } from "path";
 import { CONFIG_DIR_NAME, getAgentDir, getBinDir } from "./config.js";
 import { migrateKeybindingsConfig } from "./core/keybindings.js";
 
@@ -117,9 +117,9 @@ export function migrateSessionsFromAgentRoot(): void {
 				mkdirSync(correctDir, { recursive: true });
 			}
 
-			// Move the file
-			const fileName = file.split("/").pop() || file.split("\\").pop();
-			const newPath = join(correctDir, fileName!);
+			// Move the file (basename handles both separators per platform)
+			const fileName = basename(file);
+			const newPath = join(correctDir, fileName);
 
 			if (existsSync(newPath)) continue; // Skip if target exists
 
@@ -285,14 +285,36 @@ export async function showDeprecationWarnings(warnings: string[]): Promise<void>
 	console.log(chalk.yellow(`Documentation: ${EXTENSIONS_DOC_URL}`));
 	console.log(chalk.dim(`\nPress any key to continue...`));
 
+	// If stdin is not a TTY (pipe/CI), do not enable raw mode and continue.
+	if (!process.stdin.isTTY) {
+		console.log();
+		return;
+	}
+
 	await new Promise<void>((resolve) => {
-		process.stdin.setRawMode?.(true);
-		process.stdin.resume();
-		process.stdin.once("data", () => {
+		let done = false;
+		const onData = () => finish();
+		const onSigint = () => finish(true);
+
+		// Restore stdin state on every exit path (keypress or SIGINT).
+		const finish = (interrupted = false) => {
+			if (done) return;
+			done = true;
+			process.stdin.removeListener("data", onData);
+			process.removeListener("SIGINT", onSigint);
 			process.stdin.setRawMode?.(false);
 			process.stdin.pause();
+			if (interrupted) {
+				console.log();
+				process.exit(130);
+			}
 			resolve();
-		});
+		};
+
+		process.stdin.setRawMode?.(true);
+		process.stdin.resume();
+		process.stdin.once("data", onData);
+		process.once("SIGINT", onSigint);
 	});
 	console.log();
 }

@@ -153,7 +153,10 @@ export class VectorStore {
 		// rename is atomic on the same filesystem, so a crash/power loss
 		// leaves either the previous or the new full image, never a
 		// truncated/corrupted vectors.db.
-		const tmpPath = `${this.dbPath}.tmp-${process.pid}`;
+		// Unique temp name per call: a PID-only suffix collides when two
+		// persist() calls run concurrently in the same process, causing the
+		// second renameSync to fail ENOENT or a torn image to be renamed.
+		const tmpPath = `${this.dbPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 		writeFileSync(tmpPath, buffer);
 		renameSync(tmpPath, this.dbPath);
 	}
@@ -236,6 +239,10 @@ export class VectorStore {
 	 * Deserialize a BLOB (Uint8Array) back to Float32Array.
 	 */
 	private deserializeEmbedding(blob: Uint8Array): Float32Array {
+		// A truncated/corrupt blob whose length is not a multiple of 4 would
+		// make the Float32Array constructor throw. Return an empty vector
+		// instead so a single bad row scores 0 rather than crashing search.
+		if (blob.byteLength % 4 !== 0) return new Float32Array(0);
 		// Create a proper copy to ensure alignment
 		const buffer = new ArrayBuffer(blob.byteLength);
 		new Uint8Array(buffer).set(blob);
@@ -248,6 +255,10 @@ export class VectorStore {
 	 * so this is equivalent to the dot product.
 	 */
 	private cosineSimilarity(a: Float32Array, b: Float32Array): number {
+		// Mismatched dimensions (different model/dtype, or a truncated blob)
+		// would read undefined and produce NaN, corrupting the search sort.
+		if (a.length !== b.length) return 0;
+
 		let dotProduct = 0;
 		let normA = 0;
 		let normB = 0;
@@ -400,6 +411,11 @@ export class VectorStore {
 			this.db.close();
 			this.db = null;
 		}
+		// Release the embedding pipeline so the ONNX session/tensors can be
+		// freed. Keep close() synchronous: dispose best-effort, fire-and-forget.
+		const p = this.pipeline;
+		this.pipeline = null;
+		if (p?.dispose) Promise.resolve(p.dispose()).catch(() => {});
 		this.initialized = false;
 		this.initPromise = null;
 		this.modelPromise = null;

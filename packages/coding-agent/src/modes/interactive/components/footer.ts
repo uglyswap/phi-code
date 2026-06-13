@@ -32,6 +32,7 @@ function formatTokens(count: number): string {
  */
 export class FooterComponent implements Component {
 	private autoCompactEnabled = true;
+	private mode: "act" | "plan" = "act";
 
 	constructor(
 		private session: AgentSession,
@@ -44,6 +45,25 @@ export class FooterComponent implements Component {
 
 	setAutoCompactEnabled(enabled: boolean): void {
 		this.autoCompactEnabled = enabled;
+	}
+
+	/** Set the active input mode shown by the Act/Plan indicators. */
+	setMode(mode: "act" | "plan"): void {
+		this.mode = mode;
+	}
+
+	/**
+	 * Build the bottom-right Act/Plan mode indicator line.
+	 * The active mode is a filled, colored bullet; the inactive mode is a dim
+	 * hollow bullet. Right-aligned to the footer width.
+	 */
+	private renderModeIndicator(width: number): string {
+		const actActive = this.mode === "act";
+		const act = actActive ? theme.fg("success", "● Act") : theme.fg("dim", "○ Act");
+		const plan = actActive ? theme.fg("dim", "○ Plan") : theme.fg("accent", "● Plan");
+		const indicator = `${act}   ${plan}`;
+		const pad = Math.max(0, width - visibleWidth(indicator));
+		return " ".repeat(pad) + indicator;
 	}
 
 	/**
@@ -122,13 +142,17 @@ export class FooterComponent implements Component {
 			statsParts.push(costStr);
 		}
 
-		// Colorize context percentage based on usage
+		// Colorize context percentage based on usage.
+		// When the active model has no known context window (e.g. a provider that does
+		// not report one), show "?" instead of a misleading "0" for both the percentage
+		// and the window size. This keeps the footer correct across model switches and
+		// during /plan orchestration, where each phase may run a different model.
 		let contextPercentStr: string;
 		const autoIndicator = this.autoCompactEnabled ? " (auto)" : "";
-		const contextPercentDisplay =
-			contextPercent === "?"
-				? `?/${formatTokens(contextWindow)}${autoIndicator}`
-				: `${contextPercent}%/${formatTokens(contextWindow)}${autoIndicator}`;
+		const windowKnown = contextWindow > 0;
+		const windowDisplay = windowKnown ? formatTokens(contextWindow) : "?";
+		const percentDisplay = windowKnown && contextPercent !== "?" ? `${contextPercent}%` : "?";
+		const contextPercentDisplay = `${percentDisplay}/${windowDisplay}${autoIndicator}`;
 		if (contextPercentValue > 90) {
 			contextPercentStr = theme.fg("error", contextPercentDisplay);
 		} else if (contextPercentValue > 70) {
@@ -214,6 +238,9 @@ export class FooterComponent implements Component {
 			// Truncate to terminal width with dim ellipsis for consistency with footer style
 			lines.push(truncateToWidth(statusLine, width, theme.fg("dim", "...")));
 		}
+
+		// Bottom-right Act/Plan mode indicator (dedicated line, always last).
+		lines.push(this.renderModeIndicator(width));
 
 		return lines;
 	}

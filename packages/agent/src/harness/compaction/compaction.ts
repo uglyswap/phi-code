@@ -584,6 +584,9 @@ export async function generateSummary(
 		completionOptions,
 	);
 
+	if (response.stopReason === "aborted") {
+		throw new Error("Summarization aborted");
+	}
 	if (response.stopReason === "error") {
 		throw new Error(`Summarization failed: ${response.errorMessage || "Unknown error"}`);
 	}
@@ -592,6 +595,12 @@ export async function generateSummary(
 		.filter((c): c is { type: "text"; text: string } => c.type === "text")
 		.map((c) => c.text)
 		.join("\n");
+
+	// Reject empty summaries: persisting "" would permanently drop the
+	// summarized history without any replacement context.
+	if (!textContent.trim()) {
+		throw new Error(`Summarization failed: ${response.errorMessage || "empty summary"}`);
+	}
 
 	return textContent;
 }
@@ -837,12 +846,22 @@ async function generateTurnPrefixSummary(
 			: { maxTokens, signal, apiKey, headers },
 	);
 
+	if (response.stopReason === "aborted") {
+		throw new Error("Turn prefix summarization aborted");
+	}
 	if (response.stopReason === "error") {
 		throw new Error(`Turn prefix summarization failed: ${response.errorMessage || "Unknown error"}`);
 	}
 
-	return response.content
+	const textContent = response.content
 		.filter((c): c is { type: "text"; text: string } => c.type === "text")
 		.map((c) => c.text)
 		.join("\n");
+
+	// Reject empty summaries: an empty turn prefix would silently lose context.
+	if (!textContent.trim()) {
+		throw new Error(`Turn prefix summarization failed: ${response.errorMessage || "empty summary"}`);
+	}
+
+	return textContent;
 }

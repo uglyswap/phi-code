@@ -6,9 +6,11 @@ import { theme } from "../theme/theme.js";
  * Format: "+123 content" or "-123 content" or " 123 content" or "     ..."
  */
 function parseDiffLine(line: string): { prefix: string; lineNum: string; content: string } | null {
-	const match = line.match(/^([+-\s])(\s*\d*)\s(.*)$/);
+	// Line number and separator space are optional so bare markers ("+", "-")
+	// and number-less lines ("+content") still match with the correct prefix.
+	const match = line.match(/^([+-\s])(\s*\d*)\s?(.*)$/);
 	if (!match) return null;
-	return { prefix: match[1], lineNum: match[2], content: match[3] };
+	return { prefix: match[1], lineNum: match[2], content: match[3] ?? "" };
 }
 
 /**

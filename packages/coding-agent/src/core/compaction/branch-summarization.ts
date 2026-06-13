@@ -240,6 +240,9 @@ export function prepareBranchEntries(entries: SessionEntry[], tokenBudget: numbe
 // Summary Generation
 // ============================================================================
 
+/** Minimum positive token budget when contextWindow - reserveTokens would be <= 0 */
+const MIN_BRANCH_TOKEN_BUDGET = 1000;
+
 const BRANCH_SUMMARY_PREAMBLE = `The user explored a different conversation branch before returning here.
 Summary of that exploration:
 
@@ -286,9 +289,12 @@ export async function generateBranchSummary(
 ): Promise<BranchSummaryResult> {
 	const { model, apiKey, headers, signal, customInstructions, replaceInstructions, reserveTokens = 16384 } = options;
 
-	// Token budget = context window minus reserved space for prompt + response
+	// Token budget = context window minus reserved space for prompt + response.
+	// Floor at a small positive value: if reserveTokens >= contextWindow the budget
+	// would be <= 0, which prepareBranchEntries treats as "no limit" (0 = no limit),
+	// inverting the intent and including every message. Keep it constrained instead.
 	const contextWindow = model.contextWindow || 128000;
-	const tokenBudget = contextWindow - reserveTokens;
+	const tokenBudget = Math.max(MIN_BRANCH_TOKEN_BUDGET, contextWindow - reserveTokens);
 
 	const { messages, fileOps } = prepareBranchEntries(entries, tokenBudget);
 

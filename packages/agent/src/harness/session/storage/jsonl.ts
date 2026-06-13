@@ -142,8 +142,9 @@ export class JsonlSessionStorage implements SessionStorage<JsonlSessionMetadata>
 			cwd: options.cwd,
 			parentSession: options.parentSessionPath,
 		};
-		await mkdir(dirname(resolvedPath), { recursive: true });
-		await writeFile(resolvedPath, `${JSON.stringify(header)}\n`);
+		// Restrict perms: session files persist tool output that may contain secrets
+		await mkdir(dirname(resolvedPath), { recursive: true, mode: 0o700 });
+		await writeFile(resolvedPath, `${JSON.stringify(header)}\n`, { mode: 0o600 });
 		return new JsonlSessionStorage(resolvedPath, header, [], null);
 	}
 

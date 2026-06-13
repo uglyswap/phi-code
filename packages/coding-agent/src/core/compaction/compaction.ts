@@ -276,6 +276,10 @@ export function estimateTokens(message: AgentMessage): number {
 			return Math.ceil(chars / 4);
 		}
 		case "bashExecution": {
+			// Excluded messages (!! prefix) are dropped by convertToLlm, so they cost no context.
+			if (message.excludeFromContext) {
+				return 0;
+			}
 			chars = message.command.length + message.output.length;
 			return Math.ceil(chars / 4);
 		}

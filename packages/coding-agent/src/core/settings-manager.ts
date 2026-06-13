@@ -180,10 +180,9 @@ export class FileSettingsStorage implements SettingsStorage {
 					throw error;
 				}
 				lastError = error;
-				const start = Date.now();
-				while (Date.now() - start < delayMs) {
-					// Sleep synchronously to avoid changing callers to async.
-				}
+				// Sleep synchronously without burning the CPU. Atomics.wait suspends the
+				// thread for delayMs instead of spinning (callers stay synchronous).
+				Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
 			}
 		}
 
@@ -925,6 +924,10 @@ export class SettingsManager {
 	}
 
 	setImageWidthCells(width: number): void {
+		// Guard against NaN/Infinity so we never persist a null/garbage value.
+		if (!Number.isFinite(width)) {
+			return;
+		}
 		if (!this.globalSettings.terminal) {
 			this.globalSettings.terminal = {};
 		}
@@ -1036,6 +1039,10 @@ export class SettingsManager {
 	}
 
 	setEditorPaddingX(padding: number): void {
+		// Guard against NaN/Infinity so we never persist a null/garbage value.
+		if (!Number.isFinite(padding)) {
+			return;
+		}
 		this.globalSettings.editorPaddingX = Math.max(0, Math.min(3, Math.floor(padding)));
 		this.markModified("editorPaddingX");
 		this.save();
@@ -1046,6 +1053,10 @@ export class SettingsManager {
 	}
 
 	setAutocompleteMaxVisible(maxVisible: number): void {
+		// Guard against NaN/Infinity so we never persist a null/garbage value.
+		if (!Number.isFinite(maxVisible)) {
+			return;
+		}
 		this.globalSettings.autocompleteMaxVisible = Math.max(3, Math.min(20, Math.floor(maxVisible)));
 		this.markModified("autocompleteMaxVisible");
 		this.save();

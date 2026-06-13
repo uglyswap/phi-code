@@ -333,6 +333,28 @@ function truncate(text: string, maxLen: number): string {
 	return `${text.substring(0, maxLen - 3)}...`;
 }
 
+// Scrub common secret shapes before posting tool output to a Slack thread.
+// Slack message history is outside the operator's control, so a model that
+// reads .env / dumps env vars must not leak raw secrets into it.
+const SECRET_PATTERNS: RegExp[] = [
+	/sk-[A-Za-z0-9]{16,}/g, // OpenAI-style keys
+	/ghp_[A-Za-z0-9]{16,}/g, // GitHub personal access tokens
+	/AKIA[0-9A-Z]{16}/g, // AWS access key IDs
+	/Bearer\s+[A-Za-z0-9._-]{16,}/g, // Bearer tokens
+	/eyJ[A-Za-z0-9._-]{16,}/g, // JWTs
+];
+
+function redactSecrets(text: string): string {
+	let scrubbed = text;
+	for (const pattern of SECRET_PATTERNS) {
+		scrubbed = scrubbed.replace(pattern, "[REDACTED]");
+	}
+	return scrubbed;
+}
+
+// Max length of tool result text posted to a Slack thread.
+const THREAD_RESULT_MAX_LENGTH = 2000;
+
 function extractToolResultText(result: unknown): string {
 	if (typeof result === "string") {
 		return result;
@@ -535,12 +557,19 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			const argsFormatted = pending
 				? formatToolArgsForSlack(agentEvent.toolName, pending.args as Record<string, unknown>)
 				: "(args not found)";
+			// Truncate + scrub secrets before persisting tool output/args to the Slack thread.
+			const safeArgs = redactSecrets(argsFormatted);
+			const truncatedResult = truncate(resultStr, THREAD_RESULT_MAX_LENGTH);
+			const safeResult =
+				truncatedResult.length < resultStr.length
+					? `${redactSecrets(truncatedResult)}\n... (truncated, ${resultStr.length} chars)`
+					: redactSecrets(truncatedResult);
 			const duration = (durationMs / 1000).toFixed(1);
 			let threadMessage = `*${agentEvent.isError ? "✗" : "✓"} ${agentEvent.toolName}*`;
 			if (label) threadMessage += `: ${label}`;
 			threadMessage += ` (${duration}s)\n`;
-			if (argsFormatted) threadMessage += `\`\`\`\n${argsFormatted}\n\`\`\`\n`;
-			threadMessage += `*Result:*\n\`\`\`\n${resultStr}\n\`\`\``;
+			if (safeArgs) threadMessage += `\`\`\`\n${safeArgs}\n\`\`\`\n`;
+			threadMessage += `*Result:*\n\`\`\`\n${safeResult}\n\`\`\``;
 
 			queue.enqueueMessage(threadMessage, "thread", "tool result thread", false);
 
@@ -775,13 +804,19 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			}
 
 			// Debug: write context to last_prompt.jsonl
-			const debugContext = {
-				systemPrompt,
-				messages: session.messages,
-				newUserMessage: userMessage,
-				imageAttachmentCount: imageAttachments.length,
-			};
-			await writeFile(join(channelDir, "last_prompt.jsonl"), JSON.stringify(debugContext, null, 2));
+			// Sensitive: dumps full system prompt + entire message history + new user message.
+			// Gated behind MOM_DEBUG_PROMPT and written 0600 so it is not a default world-readable artifact.
+			if (process.env.MOM_DEBUG_PROMPT) {
+				const debugContext = {
+					systemPrompt,
+					messages: session.messages,
+					newUserMessage: userMessage,
+					imageAttachmentCount: imageAttachments.length,
+				};
+				await writeFile(join(channelDir, "last_prompt.jsonl"), JSON.stringify(debugContext, null, 2), {
+					mode: 0o600,
+				});
+			}
 
 			await session.prompt(userMessage, imageAttachments.length > 0 ? { images: imageAttachments } : undefined);
 

@@ -896,8 +896,12 @@ export class ModelRegistry {
 					thinkingLevelMap: modelDef.thinkingLevelMap,
 					input: modelDef.input as ("text" | "image")[],
 					cost: modelDef.cost,
-					contextWindow: modelDef.contextWindow,
-					maxTokens: modelDef.maxTokens,
+					// Fall back to sane defaults when a dynamically registered provider
+					// omits these (e.g. a provider API that does not report a context
+					// window). Without this the active model's contextWindow is undefined
+					// and the footer renders a misleading "0" context size on model switch.
+					contextWindow: modelDef.contextWindow && modelDef.contextWindow > 0 ? modelDef.contextWindow : 128000,
+					maxTokens: modelDef.maxTokens && modelDef.maxTokens > 0 ? modelDef.maxTokens : 16384,
 					headers: undefined,
 					compat: modelDef.compat,
 				} as Model<Api>);

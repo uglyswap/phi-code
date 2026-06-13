@@ -50,8 +50,20 @@ function decodeEntities(text: string): string {
 	return text
 		.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
 		.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#x27;/g, "'")
-		.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
-		.replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCharCode(parseInt(n, 16)));
+		.replace(/&#(\d+);/g, (m, n) => {
+			try {
+				return String.fromCodePoint(parseInt(n, 10));
+			} catch {
+				return m;
+			}
+		})
+		.replace(/&#x([0-9a-fA-F]+);/g, (m, n) => {
+			try {
+				return String.fromCodePoint(parseInt(n, 16));
+			} catch {
+				return m;
+			}
+		});
 }
 
 function stripTags(html: string): string {
@@ -434,7 +446,7 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 		const hasReadability = await tryLoadReadability();
 		if (hasReadability && _JSDOM && _Readability) {
 			try {
-				const dom = new _JSDOM(text, { url });
+				const dom = new _JSDOM(text, { url: currentUrl });
 				const reader = new _Readability(dom.window.document);
 				const article = reader.parse();
 				if (article?.textContent) {

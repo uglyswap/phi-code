@@ -113,3 +113,71 @@ describe("FooterComponent width handling", () => {
 		}
 	});
 });
+
+describe("FooterComponent Act/Plan mode indicator", () => {
+	beforeAll(() => {
+		initTheme(undefined, false);
+	});
+
+	it("shows Act as the active mode by default", () => {
+		const session = createSession({ sessionName: "" });
+		const footer = new FooterComponent(session, createFooterData(1));
+
+		const lines = footer.render(80);
+		const indicator = lines[lines.length - 1];
+		expect(indicator).toContain("● Act");
+		expect(indicator).toContain("○ Plan");
+	});
+
+	it("reflects the active mode after setMode('plan')", () => {
+		const session = createSession({ sessionName: "" });
+		const footer = new FooterComponent(session, createFooterData(1));
+		footer.setMode("plan");
+
+		const lines = footer.render(80);
+		const indicator = lines[lines.length - 1];
+		expect(indicator).toContain("● Plan");
+		expect(indicator).toContain("○ Act");
+	});
+
+	it("keeps the indicator line within width and right-aligned", () => {
+		const width = 40;
+		const session = createSession({ sessionName: "" });
+		const footer = new FooterComponent(session, createFooterData(1));
+
+		const lines = footer.render(width);
+		const indicator = lines[lines.length - 1];
+		expect(visibleWidth(indicator)).toBeLessThanOrEqual(width);
+		// Right-aligned: indicator text sits at the end of the line.
+		expect(indicator.trimStart()).not.toBe("");
+		expect(indicator.startsWith(" ")).toBe(true);
+	});
+});
+
+describe("FooterComponent unknown context window", () => {
+	beforeAll(() => {
+		initTheme(undefined, false);
+	});
+
+	it("renders '?' instead of '0' when the model has no context window", () => {
+		const session = {
+			state: {
+				model: { id: "no-ctx-model", provider: "test", contextWindow: 0, reasoning: false },
+				thinkingLevel: "off",
+			},
+			sessionManager: {
+				getEntries: () => [],
+				getSessionName: () => "",
+				getCwd: () => "/tmp/project",
+			},
+			getContextUsage: () => undefined,
+			modelRegistry: { isUsingOAuth: () => false },
+		} as unknown as AgentSession;
+
+		const footer = new FooterComponent(session, createFooterData(1));
+		const lines = footer.render(80);
+		const statsLine = lines[1];
+		expect(statsLine).toContain("?/?");
+		expect(statsLine).not.toContain("/0");
+	});
+});

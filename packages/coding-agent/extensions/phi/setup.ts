@@ -19,7 +19,7 @@
  *  - Storage chmod 0600 garantit la sécurité au repos
  */
 
-import { ApiKeyStore, type ExtensionAPI, type ExtensionUIContext, getApiKeyStore } from "phi-code";
+import { ApiKeyStore, type ExtensionAPI, type ExtensionUIContext, getApiKeyStore, getConfigWatcher } from "phi-code";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -443,7 +443,13 @@ async function configureGenericCloud(
 		if (!proceed) return undefined;
 	}
 
+	// Mute the config watcher so these programmatic writes are not echoed back as
+	// models_json_changed events. Mute per-write because the ping/fetch below can
+	// exceed the ignore window between the two setKey calls (cf. models.ts).
+	const watcher = getConfigWatcher();
+
 	// Persist the key immediately so a downstream fetch failure cannot lose user input.
+	watcher.muteForWrite("models_json_changed");
 	store.setKey(provider.id, trimmed, {
 		baseUrl: provider.baseUrl,
 		api: provider.api,
@@ -479,6 +485,7 @@ async function configureGenericCloud(
 		: provider.staticModels.map((id) => ({ id, name: id, reasoning: true }))
 	).map(toPersistedModel);
 
+	watcher.muteForWrite("models_json_changed");
 	store.setKey(provider.id, trimmed, {
 		baseUrl: provider.baseUrl,
 		api: provider.api,

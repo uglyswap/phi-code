@@ -222,8 +222,14 @@ export class ProcessTerminal implements Terminal {
 			const STD_INPUT_HANDLE = -10;
 			const ENABLE_VIRTUAL_TERMINAL_INPUT = 0x0200;
 			const handle = GetStdHandle(STD_INPUT_HANDLE);
+			// koffi returns null for INVALID_HANDLE_VALUE on void* returns.
+			if (handle === null) return;
 			const mode = new Uint32Array(1);
-			GetConsoleMode(handle, mode);
+			// Bail when GetConsoleMode fails (redirected/non-console stdin): the
+			// mode buffer stays 0 and must not be written back, otherwise
+			// SetConsoleMode would wipe the existing console input flags.
+			const okGet = GetConsoleMode(handle, mode);
+			if (!okGet) return;
 			SetConsoleMode(handle, mode[0]! | ENABLE_VIRTUAL_TERMINAL_INPUT);
 		} catch {
 			// koffi not available — Shift+Tab won't be distinguishable from Tab

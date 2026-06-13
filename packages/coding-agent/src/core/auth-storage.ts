@@ -61,7 +61,7 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 
 	private ensureFileExists(): void {
 		if (!existsSync(this.authPath)) {
-			writeFileSync(this.authPath, "{}", "utf-8");
+			writeFileSync(this.authPath, "{}", { encoding: "utf-8", mode: 0o600 });
 			chmodSync(this.authPath, 0o600);
 		}
 	}
@@ -103,7 +103,7 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 			const current = existsSync(this.authPath) ? readFileSync(this.authPath, "utf-8") : undefined;
 			const { result, next } = fn(current);
 			if (next !== undefined) {
-				writeFileSync(this.authPath, next, "utf-8");
+				writeFileSync(this.authPath, next, { encoding: "utf-8", mode: 0o600 });
 				chmodSync(this.authPath, 0o600);
 			}
 			return result;
@@ -148,7 +148,7 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 			const { result, next } = await fn(current);
 			throwIfCompromised();
 			if (next !== undefined) {
-				writeFileSync(this.authPath, next, "utf-8");
+				writeFileSync(this.authPath, next, { encoding: "utf-8", mode: 0o600 });
 				chmodSync(this.authPath, 0o600);
 			}
 			throwIfCompromised();
