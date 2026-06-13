@@ -665,9 +665,15 @@ REMINDER (project rule, applies every turn):
    project context, prior decisions, and saved learnings are accessible
    ONLY via this tool.
 2. AFTER completing significant work, call \`memory_write\` to save what
-   you did and learned.
+   you did and learned. Save only NON-OBVIOUS, cross-session facts and user
+   preferences; do NOT save what the repo or git history already records.
+3. Saved notes describe a PAST state. Before you act on a recalled fact,
+   verify it against the CURRENT code (read/grep that the path or symbol still
+   exists). If it conflicts, the live observation wins. Do not delete a stale
+   note; note the divergence.
 
-These two tool calls are not optional. Skipping them violates project rules.
+The memory_search and memory_write calls are not optional. Skipping them
+violates project rules.
 </system-reminder>
 
 `;
