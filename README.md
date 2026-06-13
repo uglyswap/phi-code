@@ -241,6 +241,7 @@ Phase 1 uses the **prompt-architect pattern** to create a structured project bri
 - **Runtime-proof TEST.** TEST must paste real command output (build + run + an end-to-end probe); PASS only on observed success.
 - **`## HANDOFF` block.** Each phase ends its report with Critical-Files / State / Next, forwarded verbatim to the next phase (no fragile regex reconstruction).
 - **Security gate.** During autonomous `/plan` only, a local deterministic regex check blocks clearly destructive commands (`rm -rf` outside the workspace, `git push --force`, `git reset --hard`, `curl | sh`, ...). Interactive use is never blocked.
+- **Resumable.** Each phase checkpoints its position; `/plan --resume` continues a crashed or aborted run from where it stopped, reusing the existing `.phi/plans/` handoff files.
 
 **Commands:**
 - `/plan <description>` — Full workflow: 5 sequential agent phases with model switching
@@ -695,8 +696,11 @@ Commands are typed in the Phi Code terminal with a `/` prefix.
 | `/agents` | agents | List all configured sub-agents with model assignments |
 | `/agents <name>` | agents | Show detailed info for a specific agent |
 | `/plan` | orchestrator | Full workflow: 5 sequential agent phases (explore→plan→code→test→review), each with its own model |
+| `/plan --resume` | orchestrator | Resume a crashed or aborted orchestration from its checkpoint (reuses the existing `.phi/plans/` handoff files) |
 | `/run` | orchestrator | Re-execute an existing plan's tasks with sub-agents |
 | `/plans` | orchestrator | List all plans with status (spec only / planned / executed) |
+| `/commit` | commit | Deterministic commit of the working tree (`[phi] ...` message, secret/`--amend` safety; `--all` to stage everything) |
+| `/context` | models | Show or set the active model's context window (`/context 256k`, `/context 1M`, `/context auto`) |
 | `/skills` | skill-loader | List all discovered skills with sources and descriptions |
 | `/routing` | smart-router | Show current routing configuration and model assignments |
 | `/search <query>` | web-search | Quick web search from the terminal |
