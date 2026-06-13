@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.77.1] - 2026-06-13
+
+### Fixed
+
+- **OpenCode Go context windows.** Large-context Qwen/MiniMax models (e.g.
+  `qwen3.7-plus`, 1M tokens) that the OpenCode Go API does not report a context
+  window for no longer collapse to a misleading `128k` in the footer. The window
+  is now inferred by model family (Qwen/MiniMax 1M, Kimi 256k, GLM/MiMo 200k),
+  and `qwen3.7-plus` is added to the bundled model list. Re-run `/setup` or
+  `/phi-init` (or edit `~/.phi/agent/models.json`) to refresh an existing config.
+
 ## [0.77.0] - 2026-06-13
 
 ### Added
