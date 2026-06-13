@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.82.1] - 2026-06-14
+
+### Fixed
+
+- **EXPLORE fan-out, validated against a real run.** Two parallel read-only
+  sub-explorers ran end-to-end against the live proxy in ~17s with no rate limit
+  and produced correct, merged findings. The validation surfaced one cleanup: the
+  model's `<think>` / `<thinking>` reasoning blocks leaked into the merged brief,
+  so they are now stripped before merging.
+
 ## [0.82.0] - 2026-06-14
 
 ### Added

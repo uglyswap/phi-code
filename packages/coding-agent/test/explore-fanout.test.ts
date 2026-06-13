@@ -3,7 +3,20 @@ import {
 	defaultExplorerSpecs,
 	isRateLimited,
 	READONLY_EXPLORER_TOOLS,
+	stripThinking,
 } from "../extensions/phi/providers/explore-fanout.js";
+
+describe("stripThinking", () => {
+	test("removes <think> and <thinking> blocks, keeps the answer", () => {
+		expect(stripThinking("<think>reasoning here</think>The answer is X")).toBe("The answer is X");
+		expect(stripThinking("<thinking>\nmulti\nline\n</thinking>\nResult")).toBe("Result");
+		expect(stripThinking("before <think>mid</think> after")).toBe("before  after");
+	});
+	test("leaves plain text untouched and trims", () => {
+		expect(stripThinking("  just findings  ")).toBe("just findings");
+		expect(stripThinking("")).toBe("");
+	});
+});
 
 describe("isRateLimited", () => {
 	test("detects rate-limit / overload markers", () => {
