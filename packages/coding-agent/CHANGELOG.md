@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.84.2] - 2026-06-14
+
+### Fixed
+
+- **The `/mcp` command was missing until at least one server was configured.**
+  The bundled mcp extension returned early when `mcp.json` had no servers, so
+  `/mcp` never registered and there was no way to discover how to set MCP up. It
+  now always registers `/mcp` (plus `/mcp:start`, `/mcp:stop`, `/mcp:auth`); when
+  no servers are configured, `/mcp` prints guidance and an example `mcp.json`.
+  Servers are still only connected when one is actually configured.
+
 ## [0.84.1] - 2026-06-14
 
 ### Fixed
