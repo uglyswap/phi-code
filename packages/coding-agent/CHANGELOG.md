@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.84.0] - 2026-06-14
+
+### Added
+
+- **Four new bundled extensions** (on by default, no install, fully self-contained,
+  vendored from MIT-licensed Pi packages and adapted for phi):
+  - **Goal Mode** (`/goal`): autonomous objective loop. Runs the agent toward a
+    goal, re-continuing after each turn until `goal_complete` or an optional
+    `/goal --tokens` budget is hit. From `@narumitw/pi-goal` (narumitw).
+  - **Todo** (`/todos` + a `todo` tool): persistent task list with a
+    `pending -> in_progress -> completed` state machine and dependency tracking.
+    From `@juicesharp/rpiv-todo` (juicesharp), with its `rpiv-config` helper
+    vendored; 8 UI locales ship.
+  - **Side Questions** (`/btw`): ask a one-off question on a read-only clone of
+    the context without polluting the transcript. From `@juicesharp/rpiv-btw`.
+  - **Chrome** (`/chrome` + `chrome_*` tools): drive your real signed-in Chrome
+    profile after an explicit, time-boxed grant. From `pi-chrome`. Highest-
+    privilege extension: while authorized the agent can act as you in your
+    authenticated browser; grant only for short, supervised tasks.
+
+  Adaptation: imports rewritten to `phi-code` / `phi-code-ai` / `phi-code-tui`,
+  config moved to the phi `configDir` (`.phi`, via `getAgentDir`), MIT LICENSE +
+  attribution kept in each `extensions/phi/<name>/`. No new npm dependencies
+  (typebox already present, rpiv-config vendored, btw/chrome have none).
+
 ## [0.83.0] - 2026-06-14
 
 ### Added
