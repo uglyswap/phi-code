@@ -12,12 +12,16 @@ describe("extensions discovery", () => {
 	let extensionsDir: string;
 
 	beforeEach(() => {
+		// Isolate discovery from the package's bundled phi extensions so the
+		// exact-count assertions below reflect only the test-created extensions.
+		process.env.PHI_DISABLE_BUNDLED_EXTENSIONS = "1";
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-ext-test-"));
 		extensionsDir = path.join(tempDir, "extensions");
 		fs.mkdirSync(extensionsDir);
 	});
 
 	afterEach(() => {
+		delete process.env.PHI_DISABLE_BUNDLED_EXTENSIONS;
 		fs.rmSync(tempDir, { recursive: true, force: true });
 	});
 

@@ -1,8 +1,25 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { canonicalizePath, getCwdRelativePath, isLocalPath } from "../src/utils/paths.js";
+
+// Windows requires the SeCreateSymbolicLink privilege (Developer Mode/admin) to create
+// symlinks; probe once and skip the symlink-dependent tests when unavailable. CI runs
+// ubuntu-latest where symlinks work and these paths are fully exercised.
+function canSymlink(): boolean {
+	if (platform() !== "win32") return true;
+	const probe = mkdtempSync(join(tmpdir(), "pi-symlink-probe-"));
+	try {
+		symlinkSync(join(probe, "t"), join(probe, "l"));
+		return true;
+	} catch {
+		return false;
+	} finally {
+		rmSync(probe, { recursive: true, force: true });
+	}
+}
+const symlinkSupported = canSymlink();
 
 let tempDir: string;
 
@@ -26,7 +43,7 @@ describe("canonicalizePath", () => {
 		expect(canonicalizePath(file)).toBe(realpathSync(file));
 	});
 
-	it("resolves symlinks to their targets", () => {
+	it.skipIf(!symlinkSupported)("resolves symlinks to their targets", () => {
 		const dir = createTempDir();
 		const target = join(dir, "target.txt");
 		const link = join(dir, "link.txt");
@@ -35,7 +52,7 @@ describe("canonicalizePath", () => {
 		expect(canonicalizePath(link)).toBe(realpathSync(target));
 	});
 
-	it("resolves directory symlinks", () => {
+	it.skipIf(!symlinkSupported)("resolves directory symlinks", () => {
 		const dir = createTempDir();
 		const targetDir = join(dir, "target-dir");
 		const linkDir = join(dir, "link-dir");
@@ -50,7 +67,7 @@ describe("canonicalizePath", () => {
 		expect(canonicalizePath(nonexistent)).toBe(nonexistent);
 	});
 
-	it("falls back to the raw path for a dangling symlink", () => {
+	it.skipIf(!symlinkSupported)("falls back to the raw path for a dangling symlink", () => {
 		const dir = createTempDir();
 		const target = join(dir, "target.txt");
 		const link = join(dir, "link.txt");

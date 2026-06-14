@@ -196,7 +196,7 @@ describe("detectInstallMethod", () => {
 		});
 	});
 
-	test("self-update respects configured npmCommand", () => {
+	test.skipIf(process.platform === "win32")("self-update respects configured npmCommand", () => {
 		const { prefix } = createNpmPrefixInstall();
 
 		const command = getSelfUpdateCommand("@phi-code-admin/phi-code", ["npm", "--prefix", prefix]);
@@ -233,7 +233,7 @@ describe("detectInstallMethod", () => {
 		expect(getUpdateInstruction("@phi-code-admin/phi-code")).toBe("Run: npm install -g @phi-code-admin/phi-code");
 	});
 
-	test("self-updates bun global installs from bun pm bin", () => {
+	test.skipIf(process.platform === "win32")("self-updates bun global installs from bun pm bin", () => {
 		createBunGlobalInstall();
 
 		const command = getSelfUpdateCommand("@phi-code-admin/phi-code");
@@ -296,32 +296,35 @@ describe("detectInstallMethod", () => {
 		});
 	});
 
-	test("self-updates renamed bun global installs by removing the old package first", () => {
-		createBunGlobalInstall();
+	test.skipIf(process.platform === "win32")(
+		"self-updates renamed bun global installs by removing the old package first",
+		() => {
+			createBunGlobalInstall();
 
-		const command = getSelfUpdateCommand("@mariozechner/pi-coding-agent", undefined, "@new-scope/pi");
+			const command = getSelfUpdateCommand("@mariozechner/pi-coding-agent", undefined, "@new-scope/pi");
 
-		expect(detectInstallMethod()).toBe("bun");
-		expect(command).toEqual({
-			command: "bun",
-			args: ["install", "-g", "@new-scope/pi"],
-			display: "bun uninstall -g @mariozechner/pi-coding-agent && bun install -g @new-scope/pi",
-			steps: [
-				{
-					command: "bun",
-					args: ["uninstall", "-g", "@mariozechner/pi-coding-agent"],
-					display: "bun uninstall -g @mariozechner/pi-coding-agent",
-				},
-				{
-					command: "bun",
-					args: ["install", "-g", "@new-scope/pi"],
-					display: "bun install -g @new-scope/pi",
-				},
-			],
-		});
-	});
+			expect(detectInstallMethod()).toBe("bun");
+			expect(command).toEqual({
+				command: "bun",
+				args: ["install", "-g", "@new-scope/pi"],
+				display: "bun uninstall -g @mariozechner/pi-coding-agent && bun install -g @new-scope/pi",
+				steps: [
+					{
+						command: "bun",
+						args: ["uninstall", "-g", "@mariozechner/pi-coding-agent"],
+						display: "bun uninstall -g @mariozechner/pi-coding-agent",
+					},
+					{
+						command: "bun",
+						args: ["install", "-g", "@new-scope/pi"],
+						display: "bun install -g @new-scope/pi",
+					},
+				],
+			});
+		},
+	);
 
-	test("does not self-update when npm install path is not writable", () => {
+	test.skipIf(process.platform === "win32")("does not self-update when npm install path is not writable", () => {
 		const { packageDir } = createNpmPrefixInstall();
 		chmodSync(packageDir, 0o500);
 

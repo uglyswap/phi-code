@@ -22,6 +22,9 @@ describe("ExtensionRunner", () => {
 	const defaultKeybindings = new KeybindingsManager().getEffectiveConfig();
 
 	beforeEach(() => {
+		// Isolate the runner from the package's bundled phi extensions so the
+		// tool/command-collection counts reflect only the test's own extensions.
+		process.env.PHI_DISABLE_BUNDLED_EXTENSIONS = "1";
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-runner-test-"));
 		extensionsDir = path.join(tempDir, "extensions");
 		fs.mkdirSync(extensionsDir);
@@ -31,6 +34,7 @@ describe("ExtensionRunner", () => {
 	});
 
 	afterEach(() => {
+		delete process.env.PHI_DISABLE_BUNDLED_EXTENSIONS;
 		fs.rmSync(tempDir, { recursive: true, force: true });
 	});
 

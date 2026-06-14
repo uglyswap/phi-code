@@ -13,6 +13,9 @@ describe("Input Event", () => {
 	let extensionsDir: string;
 
 	beforeEach(() => {
+		// Isolate from the package's bundled phi extensions so hasHandlers and
+		// the runner reflect only the test's own extensions (and stay fast).
+		process.env.PHI_DISABLE_BUNDLED_EXTENSIONS = "1";
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-input-test-"));
 		extensionsDir = path.join(tempDir, "extensions");
 		fs.mkdirSync(extensionsDir);
@@ -20,7 +23,10 @@ describe("Input Event", () => {
 		delete (globalThis as any).testVar;
 	});
 
-	afterEach(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+	afterEach(() => {
+		delete process.env.PHI_DISABLE_BUNDLED_EXTENSIONS;
+		fs.rmSync(tempDir, { recursive: true, force: true });
+	});
 
 	async function createRunner(...extensions: string[]) {
 		// Clear and recreate extensions dir for clean state

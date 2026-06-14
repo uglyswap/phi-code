@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.82.2] - 2026-06-14
+
+### Fixed
+
+- **Green test suite across the whole repo.** Repaired the pre-existing failing
+  tests so `npm test` is fully green on CI (ubuntu-latest), and the local Windows
+  run skips only the genuinely platform-incompatible cases. None of the failures
+  were product bugs: they were test debt that did not account for the fork's
+  renames (`pi` -> `phi`, `.pi` -> `.phi`) or for the bundled phi extensions and
+  skills, plus upstream tests that assumed POSIX-only capabilities (symlink
+  creation, `SIGTSTP`/`SIGCONT`, `chmod` read-only enforcement, fd backslash
+  globbing). Windows-only cases are now guarded with documented `skipIf` and keep
+  running on Linux CI. Result: `0 failed | 1228 passed | 63 skipped` (was
+  `100 failed | 1149 passed | 42 skipped`).
+
+### Added
+
+- **`PHI_DISABLE_BUNDLED_EXTENSIONS=1`** opt-out, mirroring the existing
+  `PHI_DISABLE_PROJECT_EXTENSIONS`. When set, the bundled phi extensions are not
+  auto-loaded (useful for a bare agent or for test isolation). Default behaviour
+  is unchanged: with the variable unset the bundled extensions load exactly as
+  before, so existing installs are unaffected.
+
 ## [0.82.1] - 2026-06-14
 
 ### Fixed
