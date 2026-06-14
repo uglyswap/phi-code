@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.82.3] - 2026-06-14
+
+### Added
+
+- **Two newer Alibaba Coding Plan models**: `qwen3.7-plus` and `qwen3.6-plus`
+  (both 1M context, multimodal). They join `qwen3.5-plus` at the top of the
+  bundled list, so the Coding Plan now ships 10 pre-configured models.
+- **Vision (image input) for the multimodal Coding Plan models.** The qwen
+  `*-plus` flagships (3.7 / 3.6 / 3.5) and `kimi-k2.5` are now declared with
+  `input: ["text", "image"]` instead of text-only, matching their actual
+  Coding Plan capabilities. A `vision` flag was added to `AlibabaModelSpec`.
+
+### Fixed
+
+- README: the Coding Plan model table was stale (listed 8 text-only models and
+  a flat "131K context window"). It now lists all 10 models, marks the
+  vision-capable ones, and documents the real per-model context windows (up to
+  1M for the qwen `*-plus` / `*-coder` models).
+
 ## [0.82.2] - 2026-06-14
 
 ### Fixed

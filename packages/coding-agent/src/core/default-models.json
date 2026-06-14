@@ -1,5 +1,5 @@
 {
-  "$comment": "Alibaba Coding Plan bundled providers. Two variants: OpenAI-compat (/v1) for legacy compat, Anthropic-compat (/apps/anthropic) for native prompt caching (~99.7% cache hit). Both share the same API key (ALIBABA_CODING_PLAN_KEY) and the same 8 models. Choose via /setup or /phi-init. Refresh model list via scripts/refresh-alibaba-models.ts.",
+  "$comment": "Alibaba Coding Plan bundled providers. Two variants: OpenAI-compat (/v1) for legacy compat, Anthropic-compat (/apps/anthropic) for native prompt caching (~99.7% cache hit). Both share the same API key (ALIBABA_CODING_PLAN_KEY) and the same 10 models. The qwen *-plus flagships (3.7/3.6/3.5) and kimi-k2.5 are multimodal (input text+image). Choose via /setup or /phi-init. Refresh model list via scripts/refresh-alibaba-models.ts.",
   "providers": {
     "alibaba-codingplan": {
       "baseUrl": "https://coding-intl.dashscope.aliyuncs.com/v1",
@@ -7,10 +7,26 @@
       "apiKey": "ALIBABA_CODING_PLAN_KEY",
       "models": [
         {
+          "id": "qwen3.7-plus",
+          "name": "Qwen 3.7 Plus",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 1000000,
+          "maxTokens": 16384
+        },
+        {
+          "id": "qwen3.6-plus",
+          "name": "Qwen 3.6 Plus",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 1000000,
+          "maxTokens": 16384
+        },
+        {
           "id": "qwen3.5-plus",
           "name": "Qwen 3.5 Plus",
           "reasoning": true,
-          "input": ["text"],
+          "input": ["text", "image"],
           "contextWindow": 1000000,
           "maxTokens": 16384
         },
@@ -42,7 +58,7 @@
           "id": "kimi-k2.5",
           "name": "Kimi K2.5",
           "reasoning": true,
-          "input": ["text"],
+          "input": ["text", "image"],
           "contextWindow": 262144,
           "maxTokens": 16384
         },
@@ -78,10 +94,28 @@
       "apiKey": "ALIBABA_CODING_PLAN_KEY",
       "models": [
         {
+          "id": "qwen3.7-plus",
+          "name": "Qwen 3.7 Plus (Anthropic-compat)",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 1000000,
+          "maxTokens": 16384,
+          "compat": { "supportsLongCacheRetention": true }
+        },
+        {
+          "id": "qwen3.6-plus",
+          "name": "Qwen 3.6 Plus (Anthropic-compat)",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 1000000,
+          "maxTokens": 16384,
+          "compat": { "supportsLongCacheRetention": true }
+        },
+        {
           "id": "qwen3.5-plus",
           "name": "Qwen 3.5 Plus (Anthropic-compat)",
           "reasoning": true,
-          "input": ["text"],
+          "input": ["text", "image"],
           "contextWindow": 1000000,
           "maxTokens": 16384,
           "compat": { "supportsLongCacheRetention": true }
@@ -117,7 +151,7 @@
           "id": "kimi-k2.5",
           "name": "Kimi K2.5 (Anthropic-compat)",
           "reasoning": true,
-          "input": ["text"],
+          "input": ["text", "image"],
           "contextWindow": 262144,
           "maxTokens": 16384,
           "compat": { "supportsLongCacheRetention": true }

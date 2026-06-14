@@ -43,7 +43,7 @@ Phi Code takes Pi's brilliant minimal architecture and adds what's missing for s
 | **Model routing** | Manual selection | Automatic task→model switching via routing.json |
 | **Orchestration** | Manual | `/plan` → 5 sequential agent phases, each with its own model |
 | **Skills** | Community | 12 bundled coding skills loaded on demand |
-| **Pre-configured models** | BYO key | 8 Alibaba Coding Plan models included (requires API key) |
+| **Pre-configured models** | BYO key | 10 Alibaba Coding Plan models included (requires API key) |
 | **Web search** | None | Brave API + DuckDuckGo fallback |
 | **Browser automation** | None | Bundled [Camoufox](https://github.com/daijro/camoufox) (anti-detect Firefox) — 10 tools, works on Cloudflare/SPA |
 
@@ -562,20 +562,24 @@ memory_search("authentication flow")
 
 ### Built-in: Alibaba Coding Plan
 
-Phi Code ships with 8 pre-configured models from [Alibaba Cloud Coding Plan](https://help.aliyun.com/zh/model-studio/developer-reference/tongyi-qianwen-coding-plan):
+Phi Code ships with 10 pre-configured models from [Alibaba Cloud Coding Plan](https://help.aliyun.com/zh/model-studio/developer-reference/tongyi-qianwen-coding-plan):
 
-| Model | Reasoning | Best for |
-|-------|-----------|----------|
-| **Qwen 3.5 Plus** | ✅ | General tasks, code review, complex reasoning |
-| **Qwen 3 Max** | ✅ | Planning, architecture, debugging |
-| **Qwen 3 Coder Plus** | — | Code generation, refactoring |
-| **Qwen 3 Coder Next** | — | Code generation (newer version) |
-| **Kimi K2.5** | ✅ | Exploration, testing, long-context analysis |
-| **GLM 5** | — | General tasks |
-| **GLM 4.7** | — | Fast general tasks |
-| **MiniMax M2.5** | — | Efficient task execution |
+| Model | Reasoning | Vision | Best for |
+|-------|-----------|--------|----------|
+| **Qwen 3.7 Plus** | ✅ | ✅ | Flagship: general tasks, code review, agentic coding (1M context) |
+| **Qwen 3.6 Plus** | ✅ | ✅ | Agentic coding, complex reasoning (1M context) |
+| **Qwen 3.5 Plus** | ✅ | ✅ | General tasks, code review, complex reasoning |
+| **Qwen 3 Max** | ✅ | — | Planning, architecture, debugging |
+| **Qwen 3 Coder Plus** | ✅ | — | Code generation, refactoring |
+| **Qwen 3 Coder Next** | ✅ | — | Code generation (newer version) |
+| **Kimi K2.5** | ✅ | ✅ | Exploration, testing, long-context analysis |
+| **GLM 5** | ✅ | — | General tasks |
+| **GLM 4.7** | ✅ | — | Fast general tasks |
+| **MiniMax M2.5** | ✅ | — | Efficient task execution |
 
-All models have 131K context window and 16K max output tokens. Requires a [Coding Plan API key](https://help.aliyun.com/zh/model-studio/).
+Context windows vary by model: up to 1M tokens for the Qwen `*-plus` and `*-coder`
+models, 262K for Qwen 3 Max and Kimi K2.5, and 200K for the GLM models; max output
+is 16K-128K depending on the model. Requires a [Coding Plan API key](https://help.aliyun.com/zh/model-studio/).
 
 ```bash
 export ALIBABA_CODING_PLAN_KEY="sk-..."
@@ -1004,7 +1008,7 @@ Pi is exceptional. Its minimalist philosophy — a 200-token system prompt, 4 ba
 - 5 typed sub-agents with intelligent model routing
 - Orchestration for complex multi-step projects
 - 12 bundled coding skills loaded on demand
-- 8 Alibaba Coding Plan models pre-configured (works with any provider)
+- 10 Alibaba Coding Plan models pre-configured (works with any provider)
 - Web search integration
 - Bundled Camoufox browser engine (10 browser_* tools, anti-detect Firefox)
 
