@@ -1,6 +1,6 @@
 {
 	"name": "@phi-code-admin/phi-code",
-	"version": "0.84.0",
+	"version": "0.84.1",
 	"description": "Coding agent CLI with persistent memory, sub-agents, intelligent routing, and orchestration",
 	"type": "module",
 	"piConfig": {
