@@ -649,13 +649,17 @@ export async function discoverAndLoadExtensions(
 	const globalExtDir = path.join(agentDir, "extensions");
 	addPaths(discoverExtensionsInDir(globalExtDir));
 
-	// 2b. Bundled Phi Code extensions (shipped with the package)
+	// 2b. Bundled Phi Code extensions (shipped with the package). Opt out via
+	// PHI_DISABLE_BUNDLED_EXTENSIONS=1, mirroring PHI_DISABLE_PROJECT_EXTENSIONS
+	// above (useful for test isolation and for users who want a bare agent).
 	// __dirname n'existe pas en ESM : on le derive de import.meta.url (sinon
 	// Reference: __dirname is not defined au chargement des extensions).
-	const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-	const bundledExtDir = path.resolve(path.join(moduleDir, "..", "..", "..", "extensions", "phi"));
-	if (fs.existsSync(bundledExtDir)) {
-		addPaths(discoverExtensionsInDir(bundledExtDir));
+	if (process.env.PHI_DISABLE_BUNDLED_EXTENSIONS !== "1") {
+		const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+		const bundledExtDir = path.resolve(path.join(moduleDir, "..", "..", "..", "extensions", "phi"));
+		if (fs.existsSync(bundledExtDir)) {
+			addPaths(discoverExtensionsInDir(bundledExtDir));
+		}
 	}
 
 	// 3. Explicitly configured paths

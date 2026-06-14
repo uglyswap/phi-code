@@ -85,6 +85,8 @@ function createSymlinkedSessionPaths(): {
 
 const CTRL_D = "\x04";
 const CTRL_BACKSPACE = "\x1b[127;5u";
+// symlinkSync requires elevation/Developer Mode on Windows; CI runs ubuntu-latest where these run.
+const symlinkable = process.platform !== "win32";
 
 describe("session selector path/delete interactions", () => {
 	const keybindings = new KeybindingsManager();
@@ -246,7 +248,7 @@ describe("session selector path/delete interactions", () => {
 		await flushPromises();
 	});
 
-	it("threads sessions when parent and child paths use different symlink aliases", async () => {
+	it.skipIf(!symlinkable)("threads sessions when parent and child paths use different symlink aliases", async () => {
 		const paths = createSymlinkedSessionPaths();
 		tempDirs.push(paths.baseDir);
 
@@ -282,7 +284,7 @@ describe("session selector path/delete interactions", () => {
 		expect(output).toContain("└─ Child");
 	});
 
-	it("treats the current session as active across symlink aliases", async () => {
+	it.skipIf(!symlinkable)("treats the current session as active across symlink aliases", async () => {
 		const paths = createSymlinkedSessionPaths();
 		tempDirs.push(paths.baseDir);
 

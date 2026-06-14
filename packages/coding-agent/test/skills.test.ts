@@ -354,7 +354,9 @@ describe("skills", () => {
 				agentDir: emptyAgentDir,
 				cwd: emptyCwd,
 				skillPaths: [join(fixturesDir, "valid-skill")],
-				includeDefaults: true,
+				// Isolate from the package's bundled default skills: this test
+				// asserts only the explicitly provided skillPath is loaded.
+				includeDefaults: false,
 			});
 			expect(skills).toHaveLength(1);
 			expect(skills[0].sourceInfo.scope).toBe("temporary");
@@ -366,7 +368,9 @@ describe("skills", () => {
 				agentDir: emptyAgentDir,
 				cwd: emptyCwd,
 				skillPaths: ["/non/existent/path"],
-				includeDefaults: true,
+				// Isolate from the package's bundled default skills so the
+				// assertion reflects only the (missing) explicit path.
+				includeDefaults: false,
 			});
 			expect(skills).toHaveLength(0);
 			expect(diagnostics.some((d: ResourceDiagnostic) => d.message.includes("does not exist"))).toBe(true);

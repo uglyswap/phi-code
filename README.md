@@ -793,6 +793,7 @@ The `apiKey` field accepts either a literal key or an environment variable name 
 | `OPENROUTER_API_KEY` | OpenRouter (300+ models) |
 | `GROQ_API_KEY` | Groq (fast inference) |
 | `PHI_DISABLE_PROJECT_EXTENSIONS` | Set to `1` to skip auto-loading project-local extensions (`cwd/.phi/extensions`), e.g. when opening an untrusted repo (global and bundled extensions still load) |
+| `PHI_DISABLE_BUNDLED_EXTENSIONS` | Set to `1` to skip auto-loading the bundled phi extensions shipped with the package (mirrors `PHI_DISABLE_PROJECT_EXTENSIONS`); useful for a bare agent or for test isolation |
 
 ---
 
