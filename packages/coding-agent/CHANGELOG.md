@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.83.0] - 2026-06-14
+
+### Added
+
+- **Built-in MCP (Model Context Protocol) client.** phi now ships a bundled MCP
+  extension (`extensions/phi/mcp/`), on by default with no install: connect to any
+  MCP server (Supabase, Playwright, Context7, filesystem, databases, and more)
+  over `stdio`, `streamable-http`, or `sse`, including OAuth for remote servers.
+  Each server's tools are bridged into the agent as `<prefix>_<server>_<tool>`.
+  New commands: `/mcp`, `/mcp <name>`, `/mcp:start`, `/mcp:stop`, `/mcp:auth`.
+
+  Configure servers in `~/.phi/agent/mcp.json` (global) or
+  `<project>/.phi/mcp.json` (project). Vendored from the MIT-licensed
+  `pi-mcp-extension` by irahardianto and adapted for phi: imports resolve via
+  `phi-code`, config uses the phi `configDir` (`.phi`), and it ships bundled
+  instead of requiring `phi install`.
+
+- Dependencies: `@modelcontextprotocol/sdk` and `zod`, used by the bundled MCP
+  extension.
+
 ## [0.82.3] - 2026-06-14
 
 ### Added
