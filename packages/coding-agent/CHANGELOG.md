@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.84.1] - 2026-06-14
+
+### Fixed
+
+- **`phi` failed to start with "Cannot find module 'zod'" after the bundled MCP
+  extension shipped.** The postinstall scaffolds a copy of the bundled extensions
+  under `~/.phi/agent/extensions/` and symlinks their runtime deps into that
+  folder's `node_modules`, but it only linked the sigma packages, not `zod` or
+  `@modelcontextprotocol/sdk` (both added with the mcp extension in 0.83.0). The
+  global copy of `mcp/` could therefore not resolve `zod`. The postinstall now
+  also links `zod` and `@modelcontextprotocol/sdk`. (typebox and phi-code*
+  resolve through the loader's module aliases, so they do not need linking.)
+
 ## [0.84.0] - 2026-06-14
 
 ### Added
