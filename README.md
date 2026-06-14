@@ -342,6 +342,40 @@ Interactive setup wizard.
 
 ---
 
+### MCP Extension (`mcp/`)
+
+Connect phi to any [MCP](https://modelcontextprotocol.io) server (Supabase, Playwright, Context7, filesystem, databases, and anything else that speaks MCP). Bundled and on by default: no install needed. Configure servers in `~/.phi/agent/mcp.json` (global) or `<project>/.phi/mcp.json` (project, takes precedence).
+
+**Transports:** `stdio` (local subprocess), `streamable-http`, and `sse`. OAuth is supported for remote servers (browser-based flow via `/mcp:auth`).
+
+**Config example** (`~/.phi/agent/mcp.json`):
+
+```json
+{
+  "settings": { "toolPrefix": "mcp", "requestTimeoutMs": 30000 },
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"],
+      "lifecycle": "eager"
+    },
+    "supabase": {
+      "transport": "streamable-http",
+      "url": "https://mcp.supabase.com/mcp",
+      "lifecycle": "lazy"
+    }
+  }
+}
+```
+
+Each server's tools are registered as `<prefix>_<server>_<tool>` and become callable by the agent. `lifecycle: "eager"` starts the server at session start; `"lazy"` waits for `/mcp:start`.
+
+**Commands:** `/mcp` (server status), `/mcp <name>` (detail + stderr log), `/mcp:start <name>`, `/mcp:stop <name>`, `/mcp:auth <name>` (OAuth).
+
+Vendored from the MIT-licensed [`pi-mcp-extension`](https://github.com/irahardianto/pi-mcp-extension) by irahardianto, adapted for phi (native `.phi` config, shipped bundled).
+
+---
+
 ## Skills
 
 Skills are specialized knowledge files that the model loads on demand. Each skill is a directory containing a `SKILL.md` file with instructions for a specific domain.
