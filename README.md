@@ -376,6 +376,40 @@ Vendored from the MIT-licensed [`pi-mcp-extension`](https://github.com/irahardia
 
 ---
 
+### Goal Mode (`goal/`)
+
+`/goal <objective>` runs the agent autonomously toward a goal: it injects persistence rules and, after each turn that does not call `goal_complete`, sends a continuation until the objective is met, you pause it, or an optional token budget runs out (`/goal --tokens 100k`). Subcommands: `/goal pause | resume | clear | edit | status`. A `🎯` status segment shows progress; state persists in `~/.phi/agent/pi-goal-state.json`.
+
+Vendored from the MIT-licensed [`@narumitw/pi-goal`](https://www.npmjs.com/package/@narumitw/pi-goal) by narumitw, adapted for phi (native `.phi` agent dir, shipped bundled).
+
+---
+
+### Todo (`todo/`)
+
+A persistent task list the model can drive: a `todo` tool with a `pending -> in_progress -> completed` state machine (plus a `deleted` tombstone), dependency tracking (`blockedBy`), and a `/todos` command to view it. Keeps long multi-step work on track. Localized UI strings ship for 8 languages.
+
+Vendored from the MIT-licensed [`@juicesharp/rpiv-todo`](https://www.npmjs.com/package/@juicesharp/rpiv-todo) by juicesharp (with its `rpiv-config` helper), adapted for phi and shipped bundled.
+
+---
+
+### Side Questions (`btw/`)
+
+`/btw <question>` asks a one-off side question to the same model on a read-only clone of the current context, without polluting the main transcript. The answer renders in a TUI overlay; the main conversation is untouched.
+
+Vendored from the MIT-licensed [`@juicesharp/rpiv-btw`](https://www.npmjs.com/package/@juicesharp/rpiv-btw) by juicesharp, adapted for phi and shipped bundled (zero dependencies).
+
+---
+
+### Chrome (`chrome/`)
+
+Lets the agent drive your real, signed-in Chrome profile (existing tabs and authenticated sessions) after an explicit, time-boxed grant. `/chrome authorize [duration]` opens control; `/chrome revoke | status | doctor` manage it; the `chrome_*` tools stay locked until authorized.
+
+> **Security warning:** while authorized, the agent acts as YOU in your logged-in browser and can perform authenticated actions on any site. Grant only for short, supervised tasks, and revoke afterwards. This is the highest-privilege bundled extension.
+
+Vendored from the MIT-licensed [`pi-chrome`](https://www.npmjs.com/package/pi-chrome), adapted for phi and shipped bundled (zero dependencies; requires Chrome installed).
+
+---
+
 ## Skills
 
 Skills are specialized knowledge files that the model loads on demand. Each skill is a directory containing a `SKILL.md` file with instructions for a specific domain.
