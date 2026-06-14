@@ -69,10 +69,9 @@ export default async function (pi: ExtensionAPI): Promise<void> {
     return;
   }
 
-  if (Object.keys(config.mcpServers).length === 0) {
-    // No servers configured — silently exit. Users can create mcp.json later.
-    return;
-  }
+  // Even with zero configured servers we proceed so the bundled `/mcp` command
+  // is always available (discoverability); it then guides the user to create an
+  // mcp.json. Servers are still only connected when one is actually configured.
 
   // ── 2. Initialize bridge components ──────────────────────────────────────
   // Auth callbacks — opens browser and notifies user when OAuth is needed
@@ -172,6 +171,13 @@ export default async function (pi: ExtensionAPI): Promise<void> {
           .filter(Boolean)
           .join("\n");
         ctx.ui.notify(detail, "info");
+      } else if (manager.getAllServers().length === 0) {
+        // No servers configured yet: guide the user instead of showing nothing.
+        ctx.ui.notify(
+          'No MCP servers configured. Create ~/.phi/agent/mcp.json (global) or .phi/mcp.json (project) with an "mcpServers" block, e.g.:\n' +
+            '{ "mcpServers": { "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "."], "lifecycle": "eager" } } }',
+          "info",
+        );
       } else {
         // Summary view: all servers
         ctx.ui.notify(manager.getStatusSummary(), "info");
