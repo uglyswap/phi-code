@@ -29,6 +29,7 @@ import {
 	parsePhaseVerdict,
 } from "./providers/orchestrator-helpers.js";
 import { defaultExplorerSpecs, READONLY_EXPLORER_TOOLS, runExploreFanout } from "./providers/explore-fanout.js";
+import { type AgentDef, loadAgentDef } from "./providers/agent-def.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -212,12 +213,6 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
 	// ─── Orchestration State ─────────────────────────────────────────
 
-	interface AgentDef {
-		name: string;
-		tools: string[];
-		systemPrompt: string;
-	}
-
 	interface OrchestratorPhase {
 		key: string;
 		label: string;
@@ -331,44 +326,17 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 - **Internal orchestration data:** notes injected as "Previous phase summary" or budget/handoff reminders are for YOUR use only. Do not repeat them back to the user.`;
 
 	/**
-	 * Parse agent .md file with YAML frontmatter
-	 */
-	function loadAgentDef(name: string): AgentDef | null {
-		const dirs = [
-			join(process.cwd(), ".phi", "agents"),
-			join(homedir(), ".phi", "agent", "agents"),
-		];
-		for (const dir of dirs) {
-			const filePath = join(dir, `${name}.md`);
-			try {
-				const content = readFileSync(filePath, "utf-8");
-				const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
-				if (!fmMatch) continue;
-				const fields: Record<string, string> = {};
-				for (const line of fmMatch[1].split("\n")) {
-					const m = line.match(/^(\w+):\s*(.*)$/);
-					if (m) fields[m[1]] = m[2].trim();
-				}
-				return {
-					name: fields.name || name,
-					tools: (fields.tools || "").split(",").map(t => t.trim()).filter(Boolean),
-					systemPrompt: fmMatch[2].trim(),
-				};
-			} catch { continue; }
-		}
-		return null;
-	}
-
-	/**
 	 * Load a skill body (SKILL.md) so a phase instruction can embed it verbatim.
-	 * Search order mirrors loadAgentDef: project .phi/skills first, then the
-	 * global ~/.phi/agent/skills (where postinstall copies the bundled skills).
-	 * YAML frontmatter is stripped. Returns null when the skill is not installed.
+	 * Search order mirrors agent-def.ts: project .phi/skills, then the global
+	 * ~/.phi/agent/skills (postinstall copies bundled skills there), then the
+	 * bundled <package>/skills for the repo layout. YAML frontmatter is
+	 * stripped. Returns null when the skill is not installed.
 	 */
 	function loadSkillContent(name: string): string | null {
 		const dirs = [
 			join(process.cwd(), ".phi", "skills"),
 			join(homedir(), ".phi", "agent", "skills"),
+			join(__dirname, "..", "..", "skills"),
 		];
 		for (const dir of dirs) {
 			try {

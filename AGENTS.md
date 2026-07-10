@@ -20,9 +20,9 @@ Only 2 lines of Pi's original code are modified — everything else is additive.
 
 ## Key Directories
 
-- `agents/` — Sub-agent definitions (explore, plan, code, test, review)
-- `skills/` — Bundled coding skills (12 skills)
-- `config/` — Default routing and model configuration
+- `packages/coding-agent/agents/` — Sub-agent definitions (explore, plan, code, test, review)
+- `packages/coding-agent/skills/` — Bundled coding skills (12 skills)
+- `packages/coding-agent/config/` — Routing schema + example (defaults live in `SmartRouter.defaultConfig()`)
 - `packages/coding-agent/extensions/phi/` — Core Phi Code extensions
 
 ## Models (Alibaba Coding Plan — Free)

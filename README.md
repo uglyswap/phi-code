@@ -491,7 +491,7 @@ Phi Code defines 5 specialized sub-agents, each optimized for a specific task ty
 
 > **Note**: Agent model assignments are configured by `/phi-init`. All agents use `model: default` in their definition — the routing system and orchestrator determine the actual model at runtime based on `routing.json`.
 
-Each agent has a structured output format defined in its `.md` file (in the `agents/` directory). This ensures consistent, parseable results.
+Each agent has a structured output format defined in its `.md` file (in the `packages/coding-agent/agents/` directory). This ensures consistent, parseable results.
 
 ### Agent Definitions
 
