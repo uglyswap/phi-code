@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.88.0] - 2026-07-10
+
+### Changed
+
+- **The /plan phase contract is now structured-primary with a text fallback**
+  (see `docs/adr/0001-phase-contract.md`). A phase agent CALLS a new
+  `phase_result` tool to emit its verdict / blocking / handoff as data;
+  `resolvePhaseOutcome` merges that structured emission field-by-field with the
+  regex-scraped markdown report, preferring the structured value. TEST and
+  REVIEW are instructed to call it. When a model does not call the tool,
+  behavior is identical to the previous text-only path — the change cannot make
+  any run worse. This replaces "regex luck" with an exact machine-read path for
+  the control-flow-critical signals (verdict, BLOCKED, the review-fix cycle).
+
+### Added
+
+- **End-to-end integration test of the orchestrator.** The real orchestrator
+  extension is now driven through a full multi-phase run against a simulated Pi
+  runtime (`test/orchestrator-integration.test.ts`): phase progression, handoff
+  propagation, the review-FAIL → fix → re-review cycle, and the BLOCKED pause
+  are all exercised together, not just the pure decision function. (Scripted
+  phase outcomes — deterministic, no live model.)
+- **An eval harness** (`evals/`) — the measurement infrastructure that did not
+  exist. Tasks with deterministic pass/fail verifiers, a runnable baseline
+  strategy (`npx tsx evals/run.ts`), unit-tested scoring/aggregation
+  (`test/evals-lib.test.ts`), and a demonstrated real run (2/2 baseline tasks on
+  a live model). `evals/README.md` documents the methodology and is honest that
+  the /plan-vs-baseline head-to-head is not yet a single number.
+- **Two ADRs** documenting the phase-contract decision and the independent-review
+  release gate (`docs/adr/`).
+
+### Fixed
+
+- Bugs found by an **independent adversarial review** of the phase-contract
+  change (see `docs/adr/0002-independent-review.md`), each now pinned by a
+  regression test:
+  - **State leak between runs**: `currentPhaseResult` was reset only in
+    `sendNextPhase`, but the first phase of each `/plan` run launches directly —
+    a stale structured result (e.g. a BLOCKED verdict) from a previous run could
+    abort a fresh run at phase 1. Reset on every run start + a phase-identity
+    stamp so a stale/late result is never mistaken for the current phase.
+  - **Field erasure on multi-call**: a second `phase_result` call replaced the
+    whole object, wiping a verdict set by the first; it now merges only the
+    fields each call sets.
+  - **Dead text fallback for PLAN/CODE**: `readPhaseReport` looked for
+    `<key>-<ts>.md` but PLAN writes `todo-<ts>.md` and CODE `progress-<ts>.md`,
+    so their handoff blocks were never read. Mapped key → report file.
+  - **`extractSection` over-matching**: a prose line starting with a section
+    word (e.g. "Blocking issues remain: 2") could be read as that section's
+    header. The plain-label form now requires `:` or end-of-line.
+- A TEST/REVIEW phase that finished with tool work but emitted no verdict at all
+  (neither structured nor a VERDICT line) is now surfaced instead of silently
+  passing.
+- **The eval runner** had two Windows bugs its first real run caught: temp-dir
+  cleanup raced `EPERM` (now retries), and `shell:true` with an args array
+  mangled the prompt (now a single quoted command string).
+
+### Tooling
+
+- Biome now also lints `evals/`.
+
 ## [0.87.0] - 2026-07-10
 
 ### Added
