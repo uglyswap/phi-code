@@ -61,6 +61,26 @@ completes, then verifies the result. It loads the orchestrator from the phi
 install (`~/.phi/agent`), so keep `npm i -g @phi-code-admin/phi-code` in sync
 with the code under test, or pass `--sdk <path-to-dist/index.js>`.
 
+### Measured result (2026-07-10, opencode-go/glm-5.2, n=3)
+
+| Strategy | Pass rate | Mean time |
+|----------|-----------|-----------|
+| baseline | 3/3 (100%) | 43s |
+| /plan    | 3/3 (100%) | 605s |
+
+On this small set — including `semver-parse`, written with strict edge cases to
+favor the plan/test/review machinery — **`/plan` did not beat the baseline; it
+tied at ~14× the wall-clock (and far more tokens).** Because both strategies
+passed everything, this measures *cost*, not *quality*: a capable model already
+solves these single-shot, so the extra phases add overhead with no observable
+benefit. A quality difference can only appear on tasks where the baseline
+actually fails — which these are not. That regime is what SWE-bench-lite
+provides, and measuring it fairly needs the official per-instance Docker harness
+(the repos do not build at an old commit on a bare Windows/Python-3.14 box) plus
+a real token budget. Until that runs, the honest status of the /plan thesis is:
+**unproven, with the preliminary evidence pointing the other way on anything a
+good model handles in one shot.**
+
 ### What the head-to-head measures (and its limits)
 
 This is a **small, honest** comparison, not the official SWE-bench-lite 300-set
