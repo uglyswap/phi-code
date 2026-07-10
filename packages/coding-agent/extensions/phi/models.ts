@@ -16,6 +16,7 @@
  */
 
 import { ApiKeyStore, type ConfigWatcher, type ExtensionAPI, getApiKeyStore, getConfigWatcher } from "phi-code";
+import { getModels } from "phi-code-ai";
 import {
 	buildOpenCodeGoAnthropicProviderConfig,
 	buildOpenCodeGoProviderConfig,
@@ -25,7 +26,9 @@ import { formatWindow, inferContextWindow, parseContextWindow } from "./provider
 import { fetchLiveModels, peekCache, resetLiveModelsCache, toPersistedModel } from "./providers/live-models.js";
 
 const PROVIDER_DISPLAY: Record<string, string> = {
+	opencode: "OpenCode Zen",
 	"opencode-go": "OpenCode Go",
+	"opencode-go-anthropic": "OpenCode Go (Anthropic-compat)",
 	"alibaba-codingplan": "Alibaba Coding Plan (OpenAI-compat)",
 	"alibaba-codingplan-anthropic": "Alibaba Coding Plan (Anthropic-compat)",
 	openai: "OpenAI",
@@ -37,8 +40,60 @@ const PROVIDER_DISPLAY: Record<string, string> = {
 	"lm-studio": "LM Studio (local)",
 };
 
+/**
+ * Providers the live-models dispatcher can actually re-fetch (see
+ * live-models.ts dispatchFetch + refreshOpenCodeGo). Used to extend the
+ * startup/manual refresh to providers that are authenticated via auth.json or
+ * env vars but have no models.json entry yet — without it, a user who set a
+ * key with /auth (and never ran /setup) would never see new upstream models.
+ */
+const REFRESHABLE_PROVIDERS: ReadonlySet<string> = new Set([
+	"opencode",
+	"opencode-go",
+	"opencode-go-anthropic",
+	"alibaba-codingplan",
+	"alibaba-codingplan-anthropic",
+	"openai",
+	"anthropic",
+	"google",
+	"openrouter",
+	"groq",
+	"ollama",
+	"lm-studio",
+]);
+
 function displayName(id: string): string {
 	return PROVIDER_DISPLAY[id] ?? id;
+}
+
+/** Default discovery base URLs for providers whose models.json entry is created by a refresh. */
+const DEFAULT_BASE_URLS: Record<string, string> = {
+	opencode: "https://opencode.ai/zen/v1",
+	"opencode-go": "https://opencode.ai/zen/go/v1",
+	"alibaba-codingplan": "https://coding-intl.dashscope.aliyuncs.com/v1",
+	"alibaba-codingplan-anthropic": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
+	openai: "https://api.openai.com/v1",
+	anthropic: "https://api.anthropic.com/v1",
+	google: "https://generativelanguage.googleapis.com/v1beta",
+	openrouter: "https://openrouter.ai/api/v1",
+	groq: "https://api.groq.com/openai/v1",
+	ollama: "http://localhost:11434/v1",
+	"lm-studio": "http://localhost:1234/v1",
+};
+
+/**
+ * Built-in (models.generated.ts) model ids for a provider. Persisting only the
+ * models NOT in this set keeps the rich built-in definitions (costs, image
+ * input, thinking-level maps) authoritative — models.json carries just the
+ * delta the static catalog does not know about yet.
+ */
+function builtinModelIds(providerId: string): Set<string> {
+	try {
+		const models = getModels(providerId as Parameters<typeof getModels>[0]) as Array<{ id: string }>;
+		return new Set(models.map((m) => m.id));
+	} catch {
+		return new Set();
+	}
 }
 
 interface RefreshOutcome {
@@ -68,7 +123,21 @@ async function refreshOpenCodeGo(
 			? buildOpenCodeGoAnthropicProviderConfig(keyForBuild, models)
 			: buildOpenCodeGoProviderConfig(keyForBuild, models);
 
-	if (config.models.length === 0) {
+	// Persist only models the built-in catalog does not know yet; built-ins stay
+	// authoritative (costs, image input) and models.json carries the delta.
+	const builtin = builtinModelIds(providerId);
+	const newModels = config.models.filter((m) => !builtin.has(m.id));
+
+	if (newModels.length === 0) {
+		if (stored && Array.isArray(stored.models) && stored.models.length > 0) {
+			// Clean up previously persisted models that have since become built-in.
+			watcher.muteForWrite("models_json_changed");
+			store.setKey(providerId, stored.apiKey ?? apiKey ?? "local", {
+				baseUrl: stored.baseUrl ?? config.baseUrl,
+				api: stored.api ?? config.api,
+				models: [],
+			});
+		}
 		return { provider: providerId, source: source === "fallback" ? "fallback" : "skipped", count: 0 };
 	}
 
@@ -76,22 +145,26 @@ async function refreshOpenCodeGo(
 	store.setKey(providerId, stored?.apiKey ?? apiKey ?? "local", {
 		baseUrl: stored?.baseUrl ?? config.baseUrl,
 		api: stored?.api ?? config.api,
-		models: config.models,
+		models: newModels,
 	});
 
 	const outcomeSource = source === "live" ? "live" : source === "cache" ? "cache" : "fallback";
-	return { provider: providerId, source: outcomeSource, count: config.models.length };
+	return { provider: providerId, source: outcomeSource, count: newModels.length };
 }
 
 async function refreshOne(
 	store: ApiKeyStore,
 	watcher: ConfigWatcher,
 	providerId: string,
+	resolvedApiKey?: string,
 ): Promise<RefreshOutcome> {
 	const stored = store.getProvider(providerId);
-	const apiKey = stored?.apiKey && !stored.apiKey.startsWith("$") && stored.apiKey !== "local"
+	const storedKey = stored?.apiKey && !stored.apiKey.startsWith("$") && stored.apiKey !== "local"
 		? stored.apiKey
 		: undefined;
+	// Prefer the key stored in models.json, else the one resolved from
+	// auth.json/env by the model registry (providers set up via /auth only).
+	const apiKey = storedKey ?? resolvedApiKey;
 
 	// OpenCode Go is a provider pair the generic fetchLiveModels path can't express
 	// (and never handled the Anthropic side), so refresh it from the shared catalog.
@@ -110,38 +183,28 @@ async function refreshOne(
 		return { provider: providerId, source: "skipped", count: 0, error: result.error };
 	}
 
-	const persisted = result.models.map(toPersistedModel);
-	if (persisted.length === 0) {
-		return { provider: providerId, source: result.source, count: 0, error: result.error };
-	}
+	// Persist only the delta the built-in catalog does not know yet (see
+	// builtinModelIds). Built-in definitions keep their costs/capabilities.
+	const builtin = builtinModelIds(providerId);
+	const persisted = result.models.map(toPersistedModel).filter((m) => !builtin.has(m.id));
 
 	// Preserve baseUrl/api/apiKey/headers from existing config; only models change.
-	const baseUrl =
-		stored?.baseUrl ??
-		(providerId === "opencode-go"
-			? "https://opencode.ai/zen/go/v1"
-			: providerId === "alibaba-codingplan"
-				? "https://coding-intl.dashscope.aliyuncs.com/v1"
-				: providerId === "alibaba-codingplan-anthropic"
-					? "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic"
-					: providerId === "openai"
-						? "https://api.openai.com/v1"
-						: providerId === "anthropic"
-							? "https://api.anthropic.com/v1"
-							: providerId === "google"
-								? "https://generativelanguage.googleapis.com/v1beta"
-								: providerId === "openrouter"
-									? "https://openrouter.ai/api/v1"
-									: providerId === "groq"
-										? "https://api.groq.com/openai/v1"
-										: providerId === "ollama"
-											? "http://localhost:11434/v1"
-											: providerId === "lm-studio"
-												? "http://localhost:1234/v1"
-												: undefined);
-
+	const baseUrl = stored?.baseUrl ?? DEFAULT_BASE_URLS[providerId];
 	if (!baseUrl) {
 		return { provider: providerId, source: "skipped", count: 0, error: "unknown baseUrl" };
+	}
+
+	if (persisted.length === 0) {
+		if (stored && Array.isArray(stored.models) && stored.models.length > 0) {
+			// Clean up previously persisted models that have since become built-in.
+			watcher.muteForWrite("models_json_changed");
+			store.setKey(providerId, stored.apiKey ?? "local", {
+				baseUrl,
+				api: stored.api,
+				models: [],
+			});
+		}
+		return { provider: providerId, source: result.source, count: 0, error: result.error };
 	}
 
 	// Mute the config watcher so it does not echo this programmatic write back
@@ -311,29 +374,73 @@ export default function modelsExtension(pi: ExtensionAPI) {
 		ctx.ui.notify(out, "info");
 	}
 
+	interface RefreshTarget {
+		id: string;
+		resolvedApiKey?: string;
+	}
+
+	/**
+	 * Providers to refresh: every provider persisted in models.json, plus every
+	 * refreshable provider that is authenticated (auth.json / env vars) but has
+	 * no models.json entry yet. API keys are resolved through the registry so
+	 * providers configured via /auth alone still get authenticated listings.
+	 */
+	async function resolveRefreshTargets(registry: {
+		getAvailable(): Array<{ provider: string }>;
+		getApiKeyForProvider(provider: string): Promise<string | undefined>;
+	}): Promise<RefreshTarget[]> {
+		const targets = new Map<string, RefreshTarget>();
+		for (const id of store.listProviders()) {
+			targets.set(id, { id });
+		}
+		try {
+			for (const model of registry.getAvailable()) {
+				const id = model.provider;
+				if (!targets.has(id) && REFRESHABLE_PROVIDERS.has(id)) {
+					targets.set(id, { id });
+				}
+			}
+		} catch {
+			// registry unavailable — fall back to models.json providers only
+		}
+		for (const target of targets.values()) {
+			try {
+				target.resolvedApiKey = await registry.getApiKeyForProvider(target.id);
+			} catch {
+				// no resolvable key — refreshOne will try the stored/keyless path
+			}
+		}
+		return [...targets.values()];
+	}
+
 	// Background refresh on session_start so every new Phi Code session reflects
 	// the latest provider catalogs without the user typing `/models refresh`.
 	// Failures are silent — startup must never be blocked by upstream API hiccups.
 	pi.on("session_start", async (_event, ctx) => {
+		if (process.env.PI_OFFLINE) return;
 		try {
 			store.load();
 		} catch {
 			// no models.json yet
 		}
-		const providers = store.listProviders();
-		if (providers.length === 0) return;
+		const targets = await resolveRefreshTargets(ctx.modelRegistry);
+		if (targets.length === 0) return;
 
 		// Fire-and-forget. Hot-reload via models_json_changed event surfaces results.
 		void (async () => {
-			let changed = 0;
-			for (const id of providers) {
-				const outcome = await refreshOne(store, watcher, id).catch(() => undefined);
-				if (outcome && outcome.source === "live" && outcome.count > 0) changed++;
+			let discovered = 0;
+			let changedProviders = 0;
+			for (const target of targets) {
+				const outcome = await refreshOne(store, watcher, target.id, target.resolvedApiKey).catch(() => undefined);
+				if (outcome && outcome.source === "live" && outcome.count > 0) {
+					changedProviders++;
+					discovered += outcome.count;
+				}
 			}
-			if (changed > 0) {
+			if (changedProviders > 0) {
 				try {
 					ctx.ui.notify(
-						`Refreshed ${changed}/${providers.length} provider catalog(s) in the background.`,
+						`Discovered ${discovered} new model(s) across ${changedProviders} provider(s). See /model.`,
 						"info",
 					);
 				} catch {
@@ -346,20 +453,33 @@ export default function modelsExtension(pi: ExtensionAPI) {
 
 	async function refreshCommand(
 		target: string | undefined,
-		ctx: { ui: { notify: (m: string, t?: "info" | "warning" | "error") => void; setStatus?: (k: string, v?: string) => void } },
+		ctx: {
+			ui: { notify: (m: string, t?: "info" | "warning" | "error") => void; setStatus?: (k: string, v?: string) => void };
+			modelRegistry: {
+				getAvailable(): Array<{ provider: string }>;
+				getApiKeyForProvider(provider: string): Promise<string | undefined>;
+			};
+		},
 	): Promise<void> {
-		const providers = target ? [target] : store.listProviders();
-		if (providers.length === 0) {
+		const targets = target ? [{ id: target } as RefreshTarget] : await resolveRefreshTargets(ctx.modelRegistry);
+		if (target) {
+			try {
+				targets[0].resolvedApiKey = await ctx.modelRegistry.getApiKeyForProvider(target);
+			} catch {
+				// keep undefined
+			}
+		}
+		if (targets.length === 0) {
 			ctx.ui.notify("No providers configured.", "warning");
 			return;
 		}
-		ctx.ui.notify(`Refreshing ${providers.length} provider(s)...`, "info");
+		ctx.ui.notify(`Refreshing ${targets.length} provider(s)...`, "info");
 		ctx.ui.setStatus?.("models-refresh", "Fetching live model catalogs...");
 
 		const outcomes: RefreshOutcome[] = [];
-		for (const id of providers) {
-			const outcome = await refreshOne(store, watcher, id).catch((err) => ({
-				provider: id,
+		for (const t of targets) {
+			const outcome = await refreshOne(store, watcher, t.id, t.resolvedApiKey).catch((err) => ({
+				provider: t.id,
 				source: "skipped" as const,
 				count: 0,
 				error: err instanceof Error ? err.message : String(err),
@@ -371,9 +491,10 @@ export default function modelsExtension(pi: ExtensionAPI) {
 		let out = "**Refresh report:**\n";
 		for (const o of outcomes) {
 			const icon = o.source === "live" ? "[ok]" : o.source === "fallback" ? "[fb]" : o.source === "cache" ? "[c]" : "[--]";
-			out += `  ${icon} ${displayName(o.provider)} \`${o.provider}\` — ${o.count} model(s) (${o.source}${o.error ? `, ${o.error}` : ""})\n`;
+			out += `  ${icon} ${displayName(o.provider)} \`${o.provider}\` — ${o.count} new model(s) (${o.source}${o.error ? `, ${o.error}` : ""})\n`;
 		}
-		out += `\nModels persisted to \`${store.configPath}\`. \`/model\` picker now reflects this catalog.`;
+		out += `\nOnly models missing from the built-in catalog are persisted to \`${store.configPath}\`;\n`;
+		out += `built-in models stay available either way. \`/model\` picker reflects the merged catalog.`;
 		ctx.ui.notify(out, "info");
 		pi.events.emit("models_json_changed", { source: "models-refresh" });
 	}

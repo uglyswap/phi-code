@@ -110,6 +110,15 @@ function getProviderCatalog(): ProviderEntry[] {
 			docUrl: OPENCODE_GO_AUTH_URL,
 		},
 		{
+			id: "opencode",
+			displayName: "OpenCode Zen",
+			envVar: "OPENCODE_API_KEY",
+			baseUrl: "https://opencode.ai/zen/v1",
+			api: "openai-completions",
+			staticModels: [],
+			docUrl: OPENCODE_GO_AUTH_URL,
+		},
+		{
 			id: "openai",
 			displayName: "OpenAI",
 			envVar: "OPENAI_API_KEY",
