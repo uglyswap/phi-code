@@ -1,0 +1,48 @@
+name: Refresh model catalog
+
+# Keeps packages/ai/src/models.generated.ts fresh WITHOUT making builds
+# non-deterministic: generation is never part of `npm run build` (see
+# docs/fork-policy.md). This job regenerates from models.dev on a schedule and
+# opens a PR when the catalog changed, so a human reviews and merges the diff.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # Mondays 06:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Regenerate model catalog
+        run: npm run generate --workspace=packages/ai
+
+      - name: Open PR if the catalog changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: 'chore(ai): refresh generated model catalog from models.dev'
+          title: 'chore(ai): refresh generated model catalog'
+          body: |
+            Automated weekly regeneration of `packages/ai/src/models.generated.ts`
+            and `image-models.generated.ts` from models.dev.
+
+            Builds stay deterministic — this catalog is a committed source file and
+            `npm run build` never regenerates it. Review the diff and merge to adopt
+            new upstream models; a matching `packages/ai` version bump is required
+            before publishing.
+          branch: automated/refresh-models
+          delete-branch: true
+          add-paths: |
+            packages/ai/src/models.generated.ts
+            packages/ai/src/image-models.generated.ts
