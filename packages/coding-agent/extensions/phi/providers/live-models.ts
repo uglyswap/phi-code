@@ -27,7 +27,7 @@ import {
 import { ALIBABA_MODELS, ALIBABA_PROVIDERS, pingAlibaba } from "./alibaba.js";
 import { inferContextWindow } from "./context-window.js";
 
-export const LAST_VERIFIED = "2026-05-15";
+export const LAST_VERIFIED = "2026-07-10";
 
 export interface LiveModel {
 	id: string;
@@ -203,8 +203,27 @@ const STATIC_OPENROUTER: LiveModel[] = [
 	{ id: "minimax/MiniMax-M2.7", name: "MiniMax M2.7", reasoning: true },
 ];
 
+// OpenCode Zen (https://opencode.ai/zen) — the non-Go catalog. The models
+// endpoint is reachable without a key (like OpenRouter); inference needs one.
+const STATIC_OPENCODE_ZEN: LiveModel[] = [
+	{ id: "claude-fable-5", name: "Claude Fable 5", contextWindow: 200_000, reasoning: true },
+	{ id: "claude-opus-4-8", name: "Claude Opus 4.8", contextWindow: 200_000, reasoning: true },
+	{ id: "claude-sonnet-5", name: "Claude Sonnet 5", contextWindow: 200_000, reasoning: true },
+	{ id: "claude-haiku-4-5", name: "Claude Haiku 4.5", contextWindow: 200_000, reasoning: true },
+	{ id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", contextWindow: 1_000_000, reasoning: true },
+	{ id: "gemini-3.1-pro", name: "Gemini 3.1 Pro", contextWindow: 1_000_000, reasoning: true },
+	{ id: "gpt-5.5", name: "GPT-5.5", contextWindow: 400_000, reasoning: true },
+	{ id: "gpt-5.4", name: "GPT-5.4", contextWindow: 400_000, reasoning: true },
+	{ id: "glm-5.2", name: "GLM 5.2", contextWindow: 200_000, reasoning: true },
+	{ id: "glm-5.1", name: "GLM 5.1", contextWindow: 200_000, reasoning: true },
+	{ id: "kimi-k2.6", name: "Kimi K2.6", contextWindow: 256_000, reasoning: true },
+	{ id: "minimax-m2.7", name: "MiniMax M2.7", contextWindow: 1_000_000, reasoning: true },
+];
+
 function staticFallbackFor(providerId: string): LiveModel[] {
 	switch (providerId) {
+		case "opencode":
+			return STATIC_OPENCODE_ZEN;
 		case "opencode-go":
 			return OPENCODE_GO_FALLBACK_MODELS.map((m) => ({
 				id: m.id,
@@ -272,6 +291,15 @@ async function fetchOpenRouter(apiKey: string | undefined, timeoutMs: number): P
 	if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 	const raw = (await fetchJson("https://openrouter.ai/api/v1/models", headers, timeoutMs)) as OpenAIModelsResponse;
 	return mapOpenAIModels(raw);
+}
+
+async function fetchOpenCodeZen(apiKey: string | undefined, timeoutMs: number): Promise<LiveModel[]> {
+	const headers: Record<string, string> = { Accept: "application/json" };
+	if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+	const raw = (await fetchJson("https://opencode.ai/zen/v1/models", headers, timeoutMs)) as OpenAIModelsResponse;
+	// The Zen endpoint reports neither context windows nor reasoning support;
+	// frontier catalog models all expose reasoning, so default to true.
+	return mapOpenAIModels(raw).map((m) => ({ ...m, reasoning: true }));
 }
 
 async function fetchGroq(apiKey: string, timeoutMs: number): Promise<LiveModel[]> {
@@ -351,6 +379,8 @@ async function dispatchFetch(providerId: string, options: FetchOptions): Promise
 			return await fetchGoogle(apiKey, timeoutMs);
 		case "openrouter":
 			return await fetchOpenRouter(apiKey, timeoutMs);
+		case "opencode":
+			return await fetchOpenCodeZen(apiKey, timeoutMs);
 		case "groq":
 			if (!apiKey) throw new Error("Groq requires an API key for live listing");
 			return await fetchGroq(apiKey, timeoutMs);
