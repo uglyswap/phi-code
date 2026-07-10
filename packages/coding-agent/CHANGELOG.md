@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.86.0] - 2026-07-10
+
+### Changed
+
+- **Single source of truth for bundled assets.** The duplicated root-level
+  `agents/`, `skills/` and `config/` directories (which had silently diverged
+  from the published copies) are gone; `packages/coding-agent/{agents,skills,config}`
+  is now the only copy. Routing defaults live in `SmartRouter.defaultConfig()`
+  with `config/routing.example.json` + `config/routing.schema.json` as
+  documentation, kept in sync by a dedicated test. Agent `.md` parsing is
+  unified in `extensions/phi/providers/agent-def.ts`, shared by the /plan
+  orchestrator and the /agents command (they previously had two drifting
+  parsers, and /agents' bundled-agents path resolved nowhere in either
+  layout).
+- **Rebrand completed for everything user-facing** (see the new
+  [docs/fork-policy.md](docs/fork-policy.md) for what deliberately stays "pi"
+  to keep upstream merges cheap):
+  - The npm README and all docs/ now document `phi`, `~/.phi/` and
+    `@phi-code-admin/phi-code` (they still documented upstream `pi` commands,
+    `~/.pi/` paths and the upstream install).
+  - The system prompt now introduces the agent as phi (it said "operating
+    inside pi", so the model described itself as pi).
+  - `--help`/`update` texts, the config selector's `~/.pi/` label (factually
+    wrong), the tmux hint, the "Location of executable" message and the HTTP
+    User-Agent now derive from the configured app name. `phi update pi` keeps
+    working as a hidden legacy alias of `update self`.
+  - The bun-binary fallback download link pointed at upstream Pi releases; it
+    now points at phi-code releases. Cloudflare attribution UA is `phi-code`.
+  - Docs now name the runtime env vars `PHI_CODING_AGENT_DIR` /
+    `PHI_CODING_AGENT_SESSION_DIR` (the `PI_*` names they documented do not
+    exist at runtime; all other `PI_*` variables are unchanged and stay
+    supported).
+
+### Removed
+
+- **Dead code**: `sigma-agents` no longer ships the unused `SubAgentManager`
+  and `ModelProfiler` (never imported by anything; the orchestrator has its
+  own phase logic). Legacy root-level `_legacy/`, `pi-test.sh`, `pi-test.ps1`
+  and `test.sh` (which still targeted `~/.pi/`) are deleted.
+
 ## [0.85.0] - 2026-07-10
 
 ### Fixed
