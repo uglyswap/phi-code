@@ -135,8 +135,8 @@ function getAttributionHeaders(
 
 	if (model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai")) {
 		return {
-			"HTTP-Referer": "https://pi.dev",
-			"X-OpenRouter-Title": "pi",
+			"HTTP-Referer": "https://github.com/uglyswap/phi-code",
+			"X-OpenRouter-Title": "phi-code",
 			"X-OpenRouter-Categories": "cli-agent",
 		};
 	}

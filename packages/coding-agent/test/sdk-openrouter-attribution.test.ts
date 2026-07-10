@@ -140,8 +140,8 @@ describe("createAgentSession OpenRouter attribution headers", () => {
 	it("adds default attribution headers for OpenRouter models", async () => {
 		const headers = await captureHeaders(createModel("openrouter", "https://openrouter.ai/api/v1"));
 
-		expect(headers?.["HTTP-Referer"]).toBe("https://pi.dev");
-		expect(headers?.["X-OpenRouter-Title"]).toBe("pi");
+		expect(headers?.["HTTP-Referer"]).toBe("https://github.com/uglyswap/phi-code");
+		expect(headers?.["X-OpenRouter-Title"]).toBe("phi-code");
 		expect(headers?.["X-OpenRouter-Categories"]).toBe("cli-agent");
 	});
 
@@ -158,8 +158,8 @@ describe("createAgentSession OpenRouter attribution headers", () => {
 	it("adds attribution headers for custom providers routed through OpenRouter", async () => {
 		const headers = await captureHeaders(createModel("custom-openrouter", "https://openrouter.ai/api/v1"));
 
-		expect(headers?.["HTTP-Referer"]).toBe("https://pi.dev");
-		expect(headers?.["X-OpenRouter-Title"]).toBe("pi");
+		expect(headers?.["HTTP-Referer"]).toBe("https://github.com/uglyswap/phi-code");
+		expect(headers?.["X-OpenRouter-Title"]).toBe("phi-code");
 		expect(headers?.["X-OpenRouter-Categories"]).toBe("cli-agent");
 	});
 
