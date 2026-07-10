@@ -8,12 +8,12 @@
  * Command: /routing — show config, enable/disable, test, reload
  */
 
-import type { ExtensionAPI } from "phi-code";
-import { SmartRouter } from "sigma-agents";
-import type { RoutingConfig, TaskCategory } from "sigma-agents";
-import { readFile, mkdir, writeFile, access } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
+import { join } from "node:path";
+import type { ExtensionAPI } from "phi-code";
+import type { RoutingConfig } from "sigma-agents";
+import { SmartRouter } from "sigma-agents";
 
 // ─── Extension Config ────────────────────────────────────────────────────
 
@@ -40,7 +40,7 @@ export default function smartRouterExtension(pi: ExtensionAPI) {
 	const configPath = join(configDir, "routing.json");
 
 	let router = new SmartRouter(SmartRouter.defaultConfig());
-	let extConfig: ExtensionConfig = {
+	const extConfig: ExtensionConfig = {
 		enabled: true,
 		autoSwitch: false,
 		notifyOnRecommendation: false,
@@ -70,7 +70,7 @@ export default function smartRouterExtension(pi: ExtensionAPI) {
 	 * If the preferred model exists in the registry, use it.
 	 * Otherwise, fall back to the current model.
 	 */
-	function resolveModel(preferredModel: string, ctx: any): string {
+	function _resolveModel(preferredModel: string, ctx: any): string {
 		try {
 			const available = ctx.modelRegistry?.getAvailable?.() || [];
 			if (available.some((m: any) => m.id === preferredModel)) {

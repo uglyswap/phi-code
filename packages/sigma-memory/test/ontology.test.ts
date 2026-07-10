@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import { existsSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { OntologyManager } from "../src/ontology.js";
-import type { MemoryConfig, OntologyEntity } from "../src/types.js";
+import type { MemoryConfig } from "../src/types.js";
 
 describe("OntologyManager", () => {
 	let ontologyManager: OntologyManager;
@@ -11,7 +11,7 @@ describe("OntologyManager", () => {
 
 	beforeEach(() => {
 		// Create temporary test directory
-		tempDir = join(process.cwd(), "test-ontology-" + Date.now());
+		tempDir = join(process.cwd(), `test-ontology-${Date.now()}`);
 		mkdirSync(tempDir, { recursive: true });
 
 		const config: MemoryConfig = {
@@ -160,14 +160,14 @@ describe("OntologyManager", () => {
 
 		const stats = ontologyManager.stats();
 
-		assert.equal(stats.entitiesByType["Person"], 2);
-		assert.equal(stats.entitiesByType["Project"], 1);
-		assert.equal(stats.relationsByType["owns"], 1);
+		assert.equal(stats.entitiesByType.Person, 2);
+		assert.equal(stats.entitiesByType.Project, 1);
+		assert.equal(stats.relationsByType.owns, 1);
 	});
 
 	test("export should return all entities and relations", () => {
 		ontologyManager.addEntity({ type: "Person", name: "Alice", properties: {} });
-		const projectId = ontologyManager.addEntity({ type: "Project", name: "Project", properties: {} });
+		const _projectId = ontologyManager.addEntity({ type: "Project", name: "Project", properties: {} });
 
 		const exported = ontologyManager.export();
 

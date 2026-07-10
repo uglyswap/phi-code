@@ -115,12 +115,12 @@ export class VectorStore {
 			// embeddings. Override with PHI_EMBEDDING_DTYPE=fp32|fp16|q8.
 			const requestedDtype = process.env.PHI_EMBEDDING_DTYPE;
 			const dtype: "fp32" | "fp16" | "q8" =
-				requestedDtype === "fp32" || requestedDtype === "fp16" || requestedDtype === "q8"
-					? requestedDtype
-					: "q8";
+				requestedDtype === "fp32" || requestedDtype === "fp16" || requestedDtype === "q8" ? requestedDtype : "q8";
 
 			vlog(`[VectorStore] Loading embedding model (Xenova/all-MiniLM-L6-v2, dtype=${dtype})...`);
-			vlog(`[VectorStore] First run may download the model (~${dtype === "q8" ? "22" : dtype === "fp16" ? "45" : "90"}MB).`);
+			vlog(
+				`[VectorStore] First run may download the model (~${dtype === "q8" ? "22" : dtype === "fp16" ? "45" : "90"}MB).`,
+			);
 
 			// Dynamic ESM import for @huggingface/transformers (ESM-only package)
 			const { pipeline: createPipeline } = await esmImport("@huggingface/transformers");
@@ -203,7 +203,7 @@ export class VectorStore {
 						rawChunks.push(current.trim());
 						current = sentence;
 					} else {
-						current = current ? current + " " + sentence : sentence;
+						current = current ? `${current} ${sentence}` : sentence;
 					}
 				}
 
@@ -222,7 +222,7 @@ export class VectorStore {
 		for (let i = 1; i < rawChunks.length; i++) {
 			const prevChunk = rawChunks[i - 1];
 			const overlap = prevChunk.slice(-OVERLAP);
-			chunks.push(overlap + " " + rawChunks[i]);
+			chunks.push(`${overlap} ${rawChunks[i]}`);
 		}
 
 		return chunks;

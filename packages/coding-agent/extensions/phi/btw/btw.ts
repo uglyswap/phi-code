@@ -10,19 +10,13 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-	type AssistantMessage,
-	completeSimple,
-	type Message,
-	type StopReason,
-	type UserMessage,
-} from "phi-code-ai";
-import {
 	convertToLlm,
 	type ExtensionAPI,
 	type ExtensionCommandContext,
 	type ExtensionContext,
 	type SessionEntry,
 } from "phi-code";
+import { type AssistantMessage, completeSimple, type Message, type StopReason, type UserMessage } from "phi-code-ai";
 import { showBtwOverlay } from "./btw-ui.js";
 
 // ---------------------------------------------------------------------------

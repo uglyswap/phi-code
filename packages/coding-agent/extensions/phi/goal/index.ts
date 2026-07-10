@@ -1,7 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import process from "node:process";
-import { randomUUID } from "node:crypto";
 import { defineTool, type ExtensionAPI, getAgentDir } from "phi-code";
 import { Type } from "typebox";
 
@@ -218,12 +217,7 @@ export default function goal(pi: ExtensionAPI) {
 	});
 }
 
-async function startGoal(
-	objective: string,
-	tokenBudget: number | undefined,
-	pi: ExtensionAPI,
-	ctx: StatusContext,
-) {
+async function startGoal(objective: string, tokenBudget: number | undefined, pi: ExtensionAPI, ctx: StatusContext) {
 	const validationError = validateObjective(objective);
 	if (validationError) {
 		ctx.ui.notify(validationError, "warning");
@@ -300,12 +294,7 @@ function clearGoal(ctx: StatusContext) {
 	ctx.ui.notify(`Goal cleared: ${stoppedGoal}`, "warning");
 }
 
-async function editGoal(
-	objective: string,
-	tokenBudget: number | undefined,
-	pi: ExtensionAPI,
-	ctx: StatusContext,
-) {
+async function editGoal(objective: string, tokenBudget: number | undefined, pi: ExtensionAPI, ctx: StatusContext) {
 	const validationError = validateObjective(objective);
 	if (validationError) {
 		ctx.ui.notify(validationError, "warning");
@@ -368,11 +357,7 @@ function editedGoalStatus(status: GoalStatus): GoalStatus {
 }
 
 function normalizeGoalForBudget(goal: ActiveGoal): ActiveGoal {
-	if (
-		goal.status === "active" &&
-		goal.tokenBudget !== undefined &&
-		goal.tokensUsed >= goal.tokenBudget
-	) {
+	if (goal.status === "active" && goal.tokenBudget !== undefined && goal.tokensUsed >= goal.tokenBudget) {
 		return { ...goal, status: "budget_limited" };
 	}
 	return goal;
@@ -382,11 +367,7 @@ function incrementGoal(goal: ActiveGoal): ActiveGoal {
 	return { ...goal, iteration: goal.iteration + 1, updatedAt: Date.now() };
 }
 
-function pauseGoalAfterAgentEnd(
-	ctx: StatusContext,
-	goal: ActiveGoal,
-	assistant: AssistantMessageLike,
-) {
+function pauseGoalAfterAgentEnd(ctx: StatusContext, goal: ActiveGoal, assistant: AssistantMessageLike) {
 	cancelContinuationPending();
 	activeGoal = transitionGoal(goal, "paused");
 	persistGoal(activeGoal);
@@ -582,7 +563,8 @@ function buildResumePrompt(goal: ActiveGoal) {
 }
 
 export function buildGoalSystemPrompt(goal: ActiveGoal) {
-	const budgetLine = goal.tokenBudget === undefined ? "" : `\n- Respect the goal token budget (${formatBudget(goal)} used).`;
+	const budgetLine =
+		goal.tokenBudget === undefined ? "" : `\n- Respect the goal token budget (${formatBudget(goal)} used).`;
 	return `Active /goal:\n${goalObjectiveBlock(goal)}\n\nGoal-mode rules:\n- Keep going until the active goal is completely resolved end-to-end.\n- Treat the current worktree, command output, tests, and external state as authoritative.\n- Do not redefine the goal into a smaller task; audit every requirement before completion.\n- Do not stop at analysis, a plan, TODO list, partial fixes, or suggested next steps.\n- Autonomously perform implementation and verification with the available tools when they are needed to complete the goal.\n- Persevere through recoverable tool failures by trying reasonable alternatives instead of yielding early.\n- If the goal is not complete at the end of a turn, expect an automatic continuation and keep working from where you left off.\n- Only call the goal_complete tool after the goal is fully complete and verified.${budgetLine}`;
 }
 
@@ -709,12 +691,10 @@ function loadGoalFromSession(ctx: StatusContext): ActiveGoal | undefined {
 		| {
 				getBranch?: () => Array<{ type?: string; customType?: string; data?: unknown }>;
 				getEntries?: () => Array<{ type?: string; customType?: string; data?: unknown }>;
-			}
+		  }
 		| undefined;
 	const entries = sessionManager?.getBranch?.() ?? sessionManager?.getEntries?.() ?? [];
-	const entry = entries
-		.filter((entry) => entry.type === "custom" && entry.customType === GOAL_STATE_ENTRY_TYPE)
-		.pop();
+	const entry = entries.filter((entry) => entry.type === "custom" && entry.customType === GOAL_STATE_ENTRY_TYPE).pop();
 	const data = entry?.data as GoalStateEntryData | undefined;
 	return isGoal(data?.goal) && data.goal.status !== "complete" ? data.goal : undefined;
 }
@@ -750,9 +730,7 @@ function readState(): Record<string, unknown> {
 	if (!existsSync(STATE_FILE)) return {};
 	try {
 		const parsed = JSON.parse(readFileSync(STATE_FILE, "utf8")) as unknown;
-		return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-			? (parsed as Record<string, unknown>)
-			: {};
+		return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
 	} catch {
 		return {};
 	}
@@ -765,7 +743,6 @@ function clearLegacyPersistedGoal(cwd: string) {
 	mkdirSync(dirname(STATE_FILE), { recursive: true });
 	writeFileSync(STATE_FILE, `${JSON.stringify(goals, null, 2)}\n`);
 }
-
 
 function isGoal(value: unknown): value is ActiveGoal {
 	if (!value || typeof value !== "object") return false;

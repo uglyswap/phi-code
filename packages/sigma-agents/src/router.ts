@@ -104,9 +104,7 @@ export class SmartRouter {
 			const parsed: unknown = JSON.parse(content);
 
 			if (!SmartRouter.validateRoutingConfig(parsed)) {
-				console.warn(
-					`Invalid routing config structure in ${configPath}; falling back to defaults`,
-				);
+				console.warn(`Invalid routing config structure in ${configPath}; falling back to defaults`);
 				return SmartRouter.defaultConfig();
 			}
 

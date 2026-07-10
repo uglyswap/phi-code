@@ -19,13 +19,9 @@
  * are exposed so the wizard can show *something* before the first live fetch.
  */
 
-import {
-	OPENCODE_GO_FALLBACK_MODELS,
-	getOpenCodeGoModels,
-	pingOpenCodeGo,
-} from "./opencode-go.js";
 import { ALIBABA_MODELS, ALIBABA_PROVIDERS, pingAlibaba } from "./alibaba.js";
 import { inferContextWindow } from "./context-window.js";
+import { getOpenCodeGoModels, OPENCODE_GO_FALLBACK_MODELS, pingOpenCodeGo } from "./opencode-go.js";
 
 export const LAST_VERIFIED = "2026-07-10";
 
@@ -66,11 +62,7 @@ function isCacheValid(entry: CacheEntry | undefined, now: number): boolean {
 	return entry !== undefined && now - entry.fetchedAt < CACHE_TTL_MS;
 }
 
-async function fetchJson(
-	url: string,
-	headers: Record<string, string>,
-	timeoutMs: number,
-): Promise<unknown> {
+async function fetchJson(url: string, headers: Record<string, string>, timeoutMs: number): Promise<unknown> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeoutMs);
 	try {
@@ -401,10 +393,7 @@ async function dispatchFetch(providerId: string, options: FetchOptions): Promise
  *  3. Previous cache entry, if any (even if stale).
  *  4. Static fallback (versioned).
  */
-export async function fetchLiveModels(
-	providerId: string,
-	options: FetchOptions = {},
-): Promise<LiveModelsResult> {
+export async function fetchLiveModels(providerId: string, options: FetchOptions = {}): Promise<LiveModelsResult> {
 	const now = Date.now();
 	const force = options.forceRefresh === true;
 
@@ -425,9 +414,7 @@ export async function fetchLiveModels(
 		const models = await promise;
 		if (models.length === 0) {
 			const fallback = staticFallbackFor(providerId);
-			return fallback.length > 0
-				? { models: fallback, source: "fallback" }
-				: { models: [], source: "unsupported" };
+			return fallback.length > 0 ? { models: fallback, source: "fallback" } : { models: [], source: "unsupported" };
 		}
 		cache.set(providerId, { models, fetchedAt: now });
 		return { models, source: "live" };
@@ -466,9 +453,7 @@ export async function pingProvider(
 		default: {
 			try {
 				const models = await dispatchFetch(providerId, { apiKey, timeoutMs, forceRefresh: true });
-				return models.length > 0
-					? { ok: true }
-					: { ok: false, error: "no models returned" };
+				return models.length > 0 ? { ok: true } : { ok: false, error: "no models returned" };
 			} catch (err) {
 				return { ok: false, error: err instanceof Error ? err.message : String(err) };
 			}

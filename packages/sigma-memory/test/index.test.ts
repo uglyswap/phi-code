@@ -10,7 +10,7 @@ describe("SigmaMemory", () => {
 
 	beforeEach(() => {
 		// Create temporary test directory
-		tempDir = join(process.cwd(), "test-sigma-" + Date.now());
+		tempDir = join(process.cwd(), `test-sigma-${Date.now()}`);
 		mkdirSync(tempDir, { recursive: true });
 
 		const config = {
@@ -66,7 +66,7 @@ describe("SigmaMemory", () => {
 		sigmaMemory.notes.write("This is a test note about machine learning algorithms", "ml-notes.md");
 
 		// 2. Ontology
-		const personId = sigmaMemory.ontology.addEntity({
+		const _personId = sigmaMemory.ontology.addEntity({
 			type: "Person",
 			name: "machine learning expert",
 			properties: { specialty: "algorithms" },
@@ -143,7 +143,7 @@ describe("SigmaMemory", () => {
 
 		// Add test data
 		sigmaMemory.notes.write("Test note content", "test.md");
-		const personId = sigmaMemory.ontology.addEntity({
+		const _personId = sigmaMemory.ontology.addEntity({
 			type: "Person",
 			name: "Test Person",
 			properties: {},

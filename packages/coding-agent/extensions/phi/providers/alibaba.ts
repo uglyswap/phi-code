@@ -51,16 +51,65 @@ export interface AlibabaModelSpec {
  * are multimodal); the qwen3-coder / qwen3-max / glm / MiniMax entries are text.
  */
 export const ALIBABA_MODELS: readonly AlibabaModelSpec[] = [
-	{ id: "qwen3.7-plus", name: "Qwen 3.7 Plus", contextWindow: 1_000_000, maxTokens: 16_384, reasoning: true, vision: true },
-	{ id: "qwen3.6-plus", name: "Qwen 3.6 Plus", contextWindow: 1_000_000, maxTokens: 16_384, reasoning: true, vision: true },
-	{ id: "qwen3.5-plus", name: "Qwen 3.5 Plus", contextWindow: 1_000_000, maxTokens: 16_384, reasoning: true, vision: true },
-	{ id: "qwen3-max-2026-01-23", name: "Qwen 3 Max", contextWindow: 262_144, maxTokens: 16_384, reasoning: true, vision: false },
-	{ id: "qwen3-coder-plus", name: "Qwen 3 Coder Plus", contextWindow: 1_000_000, maxTokens: 16_384, reasoning: true, vision: false },
-	{ id: "qwen3-coder-next", name: "Qwen 3 Coder Next", contextWindow: 1_000_000, maxTokens: 16_384, reasoning: true, vision: false },
+	{
+		id: "qwen3.7-plus",
+		name: "Qwen 3.7 Plus",
+		contextWindow: 1_000_000,
+		maxTokens: 16_384,
+		reasoning: true,
+		vision: true,
+	},
+	{
+		id: "qwen3.6-plus",
+		name: "Qwen 3.6 Plus",
+		contextWindow: 1_000_000,
+		maxTokens: 16_384,
+		reasoning: true,
+		vision: true,
+	},
+	{
+		id: "qwen3.5-plus",
+		name: "Qwen 3.5 Plus",
+		contextWindow: 1_000_000,
+		maxTokens: 16_384,
+		reasoning: true,
+		vision: true,
+	},
+	{
+		id: "qwen3-max-2026-01-23",
+		name: "Qwen 3 Max",
+		contextWindow: 262_144,
+		maxTokens: 16_384,
+		reasoning: true,
+		vision: false,
+	},
+	{
+		id: "qwen3-coder-plus",
+		name: "Qwen 3 Coder Plus",
+		contextWindow: 1_000_000,
+		maxTokens: 16_384,
+		reasoning: true,
+		vision: false,
+	},
+	{
+		id: "qwen3-coder-next",
+		name: "Qwen 3 Coder Next",
+		contextWindow: 1_000_000,
+		maxTokens: 16_384,
+		reasoning: true,
+		vision: false,
+	},
 	{ id: "kimi-k2.5", name: "Kimi K2.5", contextWindow: 262_144, maxTokens: 16_384, reasoning: true, vision: true },
 	{ id: "glm-5", name: "GLM 5", contextWindow: 200_000, maxTokens: 128_000, reasoning: true, vision: false },
 	{ id: "glm-4.7", name: "GLM 4.7", contextWindow: 200_000, maxTokens: 128_000, reasoning: true, vision: false },
-	{ id: "MiniMax-M2.5", name: "MiniMax M2.5", contextWindow: 1_000_000, maxTokens: 16_384, reasoning: true, vision: false },
+	{
+		id: "MiniMax-M2.5",
+		name: "MiniMax M2.5",
+		contextWindow: 1_000_000,
+		maxTokens: 16_384,
+		reasoning: true,
+		vision: false,
+	},
 ] as const;
 
 export const ALIBABA_RATE_LIMITS = {

@@ -17,10 +17,10 @@
  * - /benchmark clear      — Clear all results
  */
 
-import type { ExtensionAPI, ExtensionContext } from "phi-code";
-import { writeFile, mkdir, readFile, access } from "node:fs/promises";
-import { join } from "node:path";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
+import { join } from "node:path";
+import type { ExtensionAPI, ExtensionContext } from "phi-code";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -88,12 +88,12 @@ Respond with ONLY the function code, no explanations.`,
 					{ test: /(<=\s*0|===?\s*0|<\s*1)/.test(code), detail: "Handles edge case n=0" },
 					{ test: /(===?\s*1|<=\s*1)/.test(code), detail: "Handles edge case n=1" },
 				];
-				const passed = checks.filter(c => c.test).length;
+				const passed = checks.filter((c) => c.test).length;
 				const total = checks.length;
 				return {
 					passed: passed >= 5,
 					score: Math.round((passed / total) * 100),
-					details: checks.map(c => `${c.test ? "✅" : "❌"} ${c.detail}`).join("\n"),
+					details: checks.map((c) => `${c.test ? "✅" : "❌"} ${c.detail}`).join("\n"),
 				};
 			},
 		},
@@ -125,16 +125,29 @@ Explain the bug and provide the fixed code.`,
 			validate: (response: string) => {
 				const lower = response.toLowerCase();
 				const checks = [
-					{ test: /reference|shallow|copy|spread|\[\.\.\./.test(lower), detail: "Identifies reference/copy issue" },
-					{ test: /\[\.\.\.arr1\]|\[\.\.\.arr1,|Array\.from|\.slice\(\)|structuredClone|concat/.test(response), detail: "Uses spread/copy/concat fix" },
+					{
+						test: /reference|shallow|copy|spread|\[\.\.\./.test(lower),
+						detail: "Identifies reference/copy issue",
+					},
+					{
+						test: /\[\.\.\.arr1\]|\[\.\.\.arr1,|Array\.from|\.slice\(\)|structuredClone|concat/.test(response),
+						detail: "Uses spread/copy/concat fix",
+					},
 					{ test: /mutate|modify|original|side.?effect/.test(lower), detail: "Explains the mutation problem" },
-					{ test: /const result\s*=\s*\[/.test(response) || /\.slice\(/.test(response) || /\.concat\(/.test(response) || /Array\.from/.test(response), detail: "Creates new array in fix" },
+					{
+						test:
+							/const result\s*=\s*\[/.test(response) ||
+							/\.slice\(/.test(response) ||
+							/\.concat\(/.test(response) ||
+							/Array\.from/.test(response),
+						detail: "Creates new array in fix",
+					},
 				];
-				const passed = checks.filter(c => c.test).length;
+				const passed = checks.filter((c) => c.test).length;
 				return {
 					passed: passed >= 3,
 					score: Math.round((passed / checks.length) * 100),
-					details: checks.map(c => `${c.test ? "✅" : "❌"} ${c.detail}`).join("\n"),
+					details: checks.map((c) => `${c.test ? "✅" : "❌"} ${c.detail}`).join("\n"),
 				};
 			},
 		},
@@ -170,11 +183,11 @@ Provide a structured plan with specific files to create/modify, dependencies to 
 					{ test: /env|secret|config/.test(lower), detail: "Addresses secret management" },
 					{ test: /step|phase|\d\.|create|modify|add/.test(lower), detail: "Provides structured steps" },
 				];
-				const passed = checks.filter(c => c.test).length;
+				const passed = checks.filter((c) => c.test).length;
 				return {
 					passed: passed >= 6,
 					score: Math.round((passed / checks.length) * 100),
-					details: checks.map(c => `${c.test ? "✅" : "❌"} ${c.detail}`).join("\n"),
+					details: checks.map((c) => `${c.test ? "✅" : "❌"} ${c.detail}`).join("\n"),
 				};
 			},
 		},
@@ -219,9 +232,15 @@ Output ONLY the JSON.`,
 					checks.push({ test: obj?.name?.first === "Alice", detail: 'name.first = "Alice"' });
 					checks.push({ test: obj?.name?.last === "Smith", detail: 'name.last = "Smith"' });
 					checks.push({ test: obj?.email === "alice@example.com", detail: "Correct email" });
-					checks.push({ test: typeof obj?.profile?.age === "number" && obj.profile.age === 28, detail: "Age is number 28" });
+					checks.push({
+						test: typeof obj?.profile?.age === "number" && obj.profile.age === 28,
+						detail: "Age is number 28",
+					});
 					checks.push({ test: obj?.preferences?.theme === "dark", detail: 'theme = "dark"' });
-					checks.push({ test: obj?.preferences?.notifications?.email === true, detail: "email notifications = true" });
+					checks.push({
+						test: obj?.preferences?.notifications?.email === true,
+						detail: "email notifications = true",
+					});
 				} catch {
 					checks.push({ test: false, detail: "Valid JSON (parse failed)" });
 					checks.push({ test: false, detail: "name.first" });
@@ -232,11 +251,11 @@ Output ONLY the JSON.`,
 					checks.push({ test: false, detail: "notifications" });
 				}
 
-				const passed = checks.filter(c => c.test).length;
+				const passed = checks.filter((c) => c.test).length;
 				return {
 					passed: passed >= 5,
 					score: Math.round((passed / checks.length) * 100),
-					details: checks.map(c => `${c.test ? "✅" : "❌"} ${c.detail}`).join("\n"),
+					details: checks.map((c) => `${c.test ? "✅" : "❌"} ${c.detail}`).join("\n"),
 				};
 			},
 		},
@@ -248,7 +267,11 @@ Output ONLY the JSON.`,
 			weight: 1,
 			prompt: `Reply with exactly this text and nothing else: "Hello, World!"`,
 			validate: (response: string) => {
-				const trimmed = response.trim().replace(/^["']|["']$/g, "").replace(/```\w*\n?/g, "").trim();
+				const trimmed = response
+					.trim()
+					.replace(/^["']|["']$/g, "")
+					.replace(/```\w*\n?/g, "")
+					.trim();
 				const exact = trimmed === "Hello, World!";
 				const close = trimmed.toLowerCase().includes("hello, world");
 				return {
@@ -287,15 +310,23 @@ Be specific and technical.`,
 					{ test: /memory.?leak|leak/.test(lower), detail: "Identifies memory leak" },
 					{ test: /stream|buffer|file|upload|temp|cleanup/.test(lower), detail: "Links to file upload handling" },
 					{ test: /close|destroy|cleanup|dispose|gc|garbage/.test(lower), detail: "Suggests resource cleanup" },
-					{ test: /event.?listener|handler|remove|off/.test(lower) || /stream|pipe/.test(lower), detail: "Checks for handler/stream leaks" },
-					{ test: /heapdump|heap.?snapshot|inspect|profile|--max-old-space/.test(lower) || /process\.memoryUsage/.test(lower), detail: "Suggests debugging tools" },
+					{
+						test: /event.?listener|handler|remove|off/.test(lower) || /stream|pipe/.test(lower),
+						detail: "Checks for handler/stream leaks",
+					},
+					{
+						test:
+							/heapdump|heap.?snapshot|inspect|profile|--max-old-space/.test(lower) ||
+							/process\.memoryUsage/.test(lower),
+						detail: "Suggests debugging tools",
+					},
 					{ test: /monitor|alert|metric|prometheus|grafana|threshold/.test(lower), detail: "Suggests monitoring" },
 				];
-				const passed = checks.filter(c => c.test).length;
+				const passed = checks.filter((c) => c.test).length;
 				return {
 					passed: passed >= 4,
 					score: Math.round((passed / checks.length) * 100),
-					details: checks.map(c => `${c.test ? "✅" : "❌"} ${c.detail}`).join("\n"),
+					details: checks.map((c) => `${c.test ? "✅" : "❌"} ${c.detail}`).join("\n"),
 				};
 			},
 		},
@@ -322,7 +353,16 @@ function getProviderConfigs(): ProviderConfig[] {
 			name: "alibaba-codingplan",
 			envVar: "ALIBABA_CODING_PLAN_KEY",
 			baseUrl: "https://coding-intl.dashscope.aliyuncs.com/v1",
-			models: ["qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-plus", "qwen3-coder-next", "kimi-k2.5", "glm-5", "glm-4.7", "MiniMax-M2.5"],
+			models: [
+				"qwen3.5-plus",
+				"qwen3-max-2026-01-23",
+				"qwen3-coder-plus",
+				"qwen3-coder-next",
+				"kimi-k2.5",
+				"glm-5",
+				"glm-4.7",
+				"MiniMax-M2.5",
+			],
 		},
 		{
 			name: "openai",
@@ -386,14 +426,16 @@ async function getAvailableModels(): Promise<Array<{ id: string; provider: strin
 						for (const m of providerConfig.models) {
 							const modelId = typeof m === "string" ? m : m.id;
 							// Skip if already added from env vars
-							if (!models.some(existing => existing.id === modelId && existing.baseUrl === baseUrl)) {
+							if (!models.some((existing) => existing.id === modelId && existing.baseUrl === baseUrl)) {
 								models.push({ id: modelId, provider: id, baseUrl, apiKey });
 							}
 						}
 					}
 				}
 			}
-		} catch { /* ignore parse errors */ }
+		} catch {
+			/* ignore parse errors */
+		}
 	}
 
 	// 3. Try to detect LM Studio (port 1234) and Ollama (port 11434) directly
@@ -402,7 +444,7 @@ async function getAvailableModels(): Promise<Array<{ id: string; provider: strin
 		{ name: "ollama", port: 11434, baseUrl: "http://localhost:11434/v1" },
 	]) {
 		// Skip if already discovered via models.json
-		if (models.some(m => m.baseUrl === local.baseUrl)) continue;
+		if (models.some((m) => m.baseUrl === local.baseUrl)) continue;
 
 		try {
 			const controller = new AbortController();
@@ -411,16 +453,18 @@ async function getAvailableModels(): Promise<Array<{ id: string; provider: strin
 			clearTimeout(timeout);
 
 			if (resp.ok) {
-				const data = await resp.json() as any;
+				const data = (await resp.json()) as any;
 				const modelList = data?.data || [];
 				for (const m of modelList) {
 					const modelId = m.id || m.name;
-					if (modelId && !models.some(existing => existing.id === modelId)) {
+					if (modelId && !models.some((existing) => existing.id === modelId)) {
 						models.push({ id: modelId, provider: local.name, baseUrl: local.baseUrl, apiKey: "local" });
 					}
 				}
 			}
-		} catch { /* not running */ }
+		} catch {
+			/* not running */
+		}
 	}
 
 	return models;
@@ -514,7 +558,7 @@ export default function benchmarkExtension(pi: ExtensionAPI) {
 		for (let testIdx = 0; testIdx < tests.length; testIdx++) {
 			const test = tests[testIdx];
 			// Rate limiting: 1.5s between API calls to avoid throttling
-			if (testIdx > 0) await new Promise(r => setTimeout(r, 1500));
+			if (testIdx > 0) await new Promise((r) => setTimeout(r, 1500));
 			ctx.ui.notify(`  ⏳ ${test.category}: ${test.name}...`, "info");
 
 			try {
@@ -586,15 +630,24 @@ export default function benchmarkExtension(pi: ExtensionAPI) {
 		report += "**Leaderboard:**\n";
 		sorted.forEach((r, i) => {
 			const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`;
-			const tier = r.totalScore >= 80 ? "S" : r.totalScore >= 65 ? "A" : r.totalScore >= 50 ? "B" : r.totalScore >= 35 ? "C" : "D";
+			const tier =
+				r.totalScore >= 80
+					? "S"
+					: r.totalScore >= 65
+						? "A"
+						: r.totalScore >= 50
+							? "B"
+							: r.totalScore >= 35
+								? "C"
+								: "D";
 			report += `${medal} **${r.modelId}** — ${r.totalScore}/100 [${tier}] (avg ${r.avgTimeMs}ms)\n`;
 		});
 
 		// Category breakdown
 		report += "\n**Category Breakdown:**\n```\n";
-		const header = "Model".padEnd(25) + categories.map(c => c.substring(0, 8).padEnd(10)).join("") + "TOTAL\n";
+		const header = `${"Model".padEnd(25) + categories.map((c) => c.substring(0, 8).padEnd(10)).join("")}TOTAL\n`;
 		report += header;
-		report += "-".repeat(header.length) + "\n";
+		report += `${"-".repeat(header.length)}\n`;
 
 		for (const r of sorted) {
 			let line = r.modelId.substring(0, 24).padEnd(25);
@@ -603,7 +656,7 @@ export default function benchmarkExtension(pi: ExtensionAPI) {
 				line += String(score).padEnd(10);
 			}
 			line += String(r.totalScore);
-			report += line + "\n";
+			report += `${line}\n`;
 		}
 		report += "```\n";
 
@@ -627,7 +680,8 @@ export default function benchmarkExtension(pi: ExtensionAPI) {
 	// ─── Command ─────────────────────────────────────────────────────────
 
 	pi.registerCommand("benchmark", {
-		description: "Run AI model benchmarks (6 categories: code-gen, debug, planning, tool-calling, speed, orchestration)",
+		description:
+			"Run AI model benchmarks (6 categories: code-gen, debug, planning, tool-calling, speed, orchestration)",
 		handler: async (args, ctx) => {
 			const arg = args.trim().toLowerCase();
 
@@ -658,7 +712,8 @@ export default function benchmarkExtension(pi: ExtensionAPI) {
 
 			// Help
 			if (arg === "help" || arg === "?") {
-				ctx.ui.notify(`**Phi Code Benchmark** — 6 categories, real API calls
+				ctx.ui.notify(
+					`**Phi Code Benchmark** — 6 categories, real API calls
 
 Commands:
   /benchmark              Run on current model
@@ -676,7 +731,9 @@ Categories tested (weighted):
   ⏱️ speed (×1)          — Response latency
   🧩 orchestration (×2)  — Multi-step analysis
 
-Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`, "info");
+Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`,
+					"info",
+				);
 				return;
 			}
 
@@ -684,8 +741,13 @@ Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`, "info");
 			const available = await getAvailableModels();
 			if (available.length === 0) {
 				const providers = getProviderConfigs();
-				const hint = providers.map(p => `  ${p.envVar}: ${process.env[p.envVar] ? "set but no models configured" : "not set"}`).join("\n");
-				ctx.ui.notify(`❌ No benchmarkable models found.\n\nProvider status:\n${hint}\n\nSet at least one API key with known models.`, "warning");
+				const hint = providers
+					.map((p) => `  ${p.envVar}: ${process.env[p.envVar] ? "set but no models configured" : "not set"}`)
+					.join("\n");
+				ctx.ui.notify(
+					`❌ No benchmarkable models found.\n\nProvider status:\n${hint}\n\nSet at least one API key with known models.`,
+					"warning",
+				);
 				return;
 			}
 
@@ -700,7 +762,7 @@ Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`, "info");
 					const result = await benchmarkModel(model.id, model.provider, model.baseUrl, model.apiKey, ctx);
 
 					// Replace existing result for this model
-					store.results = store.results.filter(r => r.modelId !== model.id);
+					store.results = store.results.filter((r) => r.modelId !== model.id);
 					store.results.push(result);
 					await saveStore(store);
 				}
@@ -713,21 +775,27 @@ Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`, "info");
 			if (arg) {
 				// Benchmark specific model: prefer exact id match, then require an
 				// unambiguous substring match to avoid benchmarking the wrong model.
-				const exact = available.find(m => m.id.toLowerCase() === arg);
-				const matches = available.filter(m => m.id.toLowerCase().includes(arg));
+				const exact = available.find((m) => m.id.toLowerCase() === arg);
+				const matches = available.filter((m) => m.id.toLowerCase().includes(arg));
 				const model = exact ?? (matches.length === 1 ? matches[0] : undefined);
 				if (!model) {
 					if (!exact && matches.length > 1) {
-						ctx.ui.notify(`Model "${arg}" is ambiguous. Did you mean:\n${matches.map(m => `  - ${m.id} (${m.provider})`).join("\n")}`, "warning");
+						ctx.ui.notify(
+							`Model "${arg}" is ambiguous. Did you mean:\n${matches.map((m) => `  - ${m.id} (${m.provider})`).join("\n")}`,
+							"warning",
+						);
 						return;
 					}
-					ctx.ui.notify(`Model "${arg}" not found or no API key. Available:\n${available.map(m => `  - ${m.id} (${m.provider})`).join("\n")}`, "warning");
+					ctx.ui.notify(
+						`Model "${arg}" not found or no API key. Available:\n${available.map((m) => `  - ${m.id} (${m.provider})`).join("\n")}`,
+						"warning",
+					);
 					return;
 				}
 
 				ctx.ui.notify(`🧪 Benchmarking **${model.id}** (6 categories)...\n`, "info");
 				const result = await benchmarkModel(model.id, model.provider, model.baseUrl, model.apiKey, ctx);
-				store.results = store.results.filter(r => r.modelId !== model.id);
+				store.results = store.results.filter((r) => r.modelId !== model.id);
 				store.results.push(result);
 				await saveStore(store);
 
@@ -739,11 +807,17 @@ Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`, "info");
 			// Try to find current model in available list
 			const currentModel = ctx.model;
 			if (currentModel) {
-				const modelConfig = available.find(m => m.id === currentModel.id);
+				const modelConfig = available.find((m) => m.id === currentModel.id);
 				if (modelConfig) {
 					ctx.ui.notify(`🧪 Benchmarking current model **${currentModel.id}** (6 categories)...\n`, "info");
-					const result = await benchmarkModel(modelConfig.id, modelConfig.provider, modelConfig.baseUrl, modelConfig.apiKey, ctx);
-					store.results = store.results.filter(r => r.modelId !== modelConfig.id);
+					const result = await benchmarkModel(
+						modelConfig.id,
+						modelConfig.provider,
+						modelConfig.baseUrl,
+						modelConfig.apiKey,
+						ctx,
+					);
+					store.results = store.results.filter((r) => r.modelId !== modelConfig.id);
 					store.results.push(result);
 					await saveStore(store);
 					ctx.ui.notify(`\n✅ **${currentModel.id}** — Total: ${result.totalScore}/100`, "info");
@@ -752,7 +826,10 @@ Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`, "info");
 			}
 
 			// Fallback: show available models
-			ctx.ui.notify(`Available models for benchmark:\n${available.map(m => `  - ${m.id} (${m.provider})`).join("\n")}\n\nUsage: /benchmark <model-id> or /benchmark all`, "info");
+			ctx.ui.notify(
+				`Available models for benchmark:\n${available.map((m) => `  - ${m.id} (${m.provider})`).join("\n")}\n\nUsage: /benchmark <model-id> or /benchmark all`,
+				"info",
+			);
 		},
 	});
 
@@ -761,7 +838,10 @@ Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`, "info");
 		try {
 			const store = await loadStore();
 			if (store.results.length > 0) {
-				ctx.ui.notify(`🧪 ${store.results.length} benchmark results available. /benchmark results to view.`, "info");
+				ctx.ui.notify(
+					`🧪 ${store.results.length} benchmark results available. /benchmark results to view.`,
+					"info",
+				);
 			}
 		} catch {
 			// ignore

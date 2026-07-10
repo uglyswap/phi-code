@@ -20,22 +20,19 @@
  * - /skills command to list available skills
  */
 
-import type { ExtensionAPI } from "phi-code";
-import { SkillScanner, SkillLoader } from "sigma-skills";
-import type { SkillsConfig } from "sigma-skills";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { homedir } from "node:os";
+import { join } from "node:path";
+import type { ExtensionAPI } from "phi-code";
+import type { SkillsConfig } from "sigma-skills";
+import { SkillLoader, SkillScanner } from "sigma-skills";
 
 export default function skillLoaderExtension(pi: ExtensionAPI) {
 	// Bundled skills live at <package>/skills in the repo layout (two hops up
 	// from extensions/phi/); postinstall copies them to ~/.phi/agent/skills
 	// (== globalDir) in the installed layout. Probe both (the scanner dedupes
 	// by skill name).
-	const bundledCandidates = [
-		join(__dirname, "..", "..", "skills"),
-		join(homedir(), ".phi", "agent", "skills"),
-	];
+	const bundledCandidates = [join(__dirname, "..", "..", "skills"), join(homedir(), ".phi", "agent", "skills")];
 	const config: SkillsConfig = {
 		globalDir: join(homedir(), ".phi", "agent", "skills"),
 		projectDir: join(process.cwd(), ".phi", "skills"),
@@ -103,10 +100,10 @@ export default function skillLoaderExtension(pi: ExtensionAPI) {
 				if (skills.length === 0) {
 					ctx.ui.notify(
 						"No skills found. Create skill directories with SKILL.md files in:\n" +
-						`- \`${config.projectDir}\` (project-local)\n` +
-						`- \`${config.globalDir}\` (global)\n` +
-						"Or install bundled skills via `/phi-init`.",
-						"info"
+							`- \`${config.projectDir}\` (project-local)\n` +
+							`- \`${config.globalDir}\` (global)\n` +
+							"Or install bundled skills via `/phi-init`.",
+						"info",
 					);
 					return;
 				}
@@ -122,13 +119,13 @@ export default function skillLoaderExtension(pi: ExtensionAPI) {
 				// Show specific skill
 				const content = loader.getSkillContext(query);
 				if (content) {
-					const skill = loader.listSkills().find(s => s.name === query);
+					const skill = loader.listSkills().find((s) => s.name === query);
 					ctx.ui.notify(
 						`**📚 Skill: ${query}**\n\n` +
-						`Path: \`${skill?.path || "unknown"}\`\n` +
-						`Keywords: ${skill?.keywords.slice(0, 10).join(", ") || "none"}\n\n` +
-						`---\n\n${content.slice(0, 2000)}${content.length > 2000 ? "\n\n... (truncated, use `read` for full content)" : ""}`,
-						"info"
+							`Path: \`${skill?.path || "unknown"}\`\n` +
+							`Keywords: ${skill?.keywords.slice(0, 10).join(", ") || "none"}\n\n` +
+							`---\n\n${content.slice(0, 2000)}${content.length > 2000 ? "\n\n... (truncated, use `read` for full content)" : ""}`,
+						"info",
 					);
 				} else {
 					ctx.ui.notify(`Skill "${query}" not found. Use \`/skills\` to list available skills.`, "warning");

@@ -5,8 +5,8 @@ import { join } from "path";
 import { VectorStore } from "../src/vector-store.js";
 
 // Mock the embedding function to avoid downloading models in tests
-const mockEmbedding = new Float32Array([0.1, 0.2, 0.3, 0.4]);
-const originalEsmImport = (global as any).Function;
+const _mockEmbedding = new Float32Array([0.1, 0.2, 0.3, 0.4]);
+const _originalEsmImport = (global as any).Function;
 
 describe("VectorStore", () => {
 	let vectorStore: VectorStore;
@@ -15,7 +15,7 @@ describe("VectorStore", () => {
 
 	beforeEach(() => {
 		// Create temporary test directory
-		tempDir = join(process.cwd(), "test-vectors-" + Date.now());
+		tempDir = join(process.cwd(), `test-vectors-${Date.now()}`);
 		mkdirSync(tempDir, { recursive: true });
 		dbPath = join(tempDir, "test-vectors.db");
 
@@ -77,7 +77,7 @@ describe("VectorStore", () => {
 		await vectorStore.init();
 
 		await vectorStore.addDocument("test.md", "Original content");
-		const firstStats = vectorStore.getStats();
+		const _firstStats = vectorStore.getStats();
 
 		await vectorStore.addDocument("test.md", "Updated content that is much longer and will create different chunks");
 		const secondStats = vectorStore.getStats();

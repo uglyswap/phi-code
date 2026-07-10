@@ -23,7 +23,7 @@ import { readFileSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI, ExtensionContext } from "phi-code";
+import type { ExtensionAPI } from "phi-code";
 import { SigmaMemory } from "sigma-memory";
 
 /**
@@ -717,7 +717,7 @@ violates project rules.
 			if (parts.length > 0) {
 				ctx.ui.notify(`🧠 Memory: ${parts.join(", ")}`, "info");
 			}
-		} catch (error) {
+		} catch (_error) {
 			// Non-critical, don't spam errors
 		}
 	});

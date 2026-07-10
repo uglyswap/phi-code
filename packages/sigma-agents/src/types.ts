@@ -12,4 +12,3 @@ export interface RoutingConfig {
 	>;
 	default: { model: string; agent: string | null };
 }
-
