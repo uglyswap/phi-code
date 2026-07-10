@@ -1,0 +1,7 @@
+{
+	"id": "sum-array",
+	"description": "Write a function that sums an array of numbers",
+	"prompt": "Create a file sum.js (CommonJS) exporting a function `sum` taking an array of numbers and returning their total. Empty array returns 0. Do not add anything else.",
+	"verify": "node -e \"const m=require('./sum.js'); const sum=typeof m==='function'?m:m.sum; const a=require('assert'); a.strictEqual(sum([1,2,3]),6); a.strictEqual(sum([]),0); a.strictEqual(sum([-1,1]),0); console.log('ok');\"",
+	"timeoutSec": 240
+}
