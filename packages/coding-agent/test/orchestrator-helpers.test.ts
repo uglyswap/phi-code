@@ -21,6 +21,17 @@ describe("parsePhaseVerdict", () => {
 		expect(parsePhaseVerdict("# Report\nno verdict here")).toBeNull();
 		expect(parsePhaseVerdict("")).toBeNull();
 	});
+	test("only matches a verdict at the start of a line (not mid-sentence prose)", () => {
+		// A model that writes 'the VERDICT: is unclear' mid-paragraph must NOT be
+		// read as a real verdict; the contract is a leading line.
+		expect(parsePhaseVerdict("The final verdict: pass or fail is unclear.")).toBeNull();
+	});
+	test("takes the FIRST verdict line when the report accidentally has several", () => {
+		expect(parsePhaseVerdict("## VERDICT: FAIL\n...\n## VERDICT: PASS")).toBe("FAIL");
+	});
+	test("rejects an unknown verdict token", () => {
+		expect(parsePhaseVerdict("VERDICT: MAYBE")).toBeNull();
+	});
 });
 
 describe("extractBlockingFindings / extractHandoff", () => {
@@ -53,6 +64,30 @@ describe("extractBlockingFindings / extractHandoff", () => {
 	test("returns empty string when section is absent", () => {
 		expect(extractBlockingFindings("# no blocking")).toBe("");
 		expect(extractHandoff("")).toBe("");
+	});
+	test("extracts a HANDOFF written as a heading, a bold label, or a plain label", () => {
+		// Models emit all three shapes for the same section — tolerate each.
+		expect(extractHandoff("### HANDOFF\nNext: ship it\n")).toContain("Next: ship it");
+		expect(extractHandoff("**HANDOFF**\nNext: bold form\n")).toContain("Next: bold form");
+		expect(extractHandoff("HANDOFF:\nNext: plain form\n")).toContain("Next: plain form");
+	});
+	test("stops the section at the next heading of any level", () => {
+		const r = "## BLOCKING\n- fix x\n### Sub\n- detail\n## HANDOFF\nNext: y";
+		const b = extractBlockingFindings(r);
+		expect(b).toContain("fix x");
+		expect(b).not.toContain("Next: y");
+	});
+	test("splits a report written entirely with bold labels (no headings)", () => {
+		const r = "**BLOCKING**\n- fix the deref\n**HANDOFF**\nNext: patch it";
+		expect(extractBlockingFindings(r)).toContain("fix the deref");
+		expect(extractBlockingFindings(r)).not.toContain("Next: patch it");
+		expect(extractHandoff(r)).toContain("Next: patch it");
+	});
+	test("does not truncate a body that contains inline bold", () => {
+		const r = "## BLOCKING\n- **Critical**: null deref in a.ts\n- **High**: missing await\n## HANDOFF\nNext: fix";
+		const b = extractBlockingFindings(r);
+		expect(b).toContain("null deref");
+		expect(b).toContain("missing await");
 	});
 });
 

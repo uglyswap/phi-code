@@ -21,14 +21,28 @@ export function parsePhaseVerdict(content: string): PhaseVerdict | null {
 }
 
 /**
- * Extract the body of a markdown section by heading name (e.g. "BLOCKING",
- * "HANDOFF"), up to the next heading or end of file. Returns "" if absent.
+ * Extract the body of a section by name (e.g. "BLOCKING", "HANDOFF"), up to the
+ * next section header or end of file. Returns "" if absent.
+ *
+ * Tolerant of the three header shapes models actually emit for the same
+ * section: a markdown heading (`## HANDOFF`), a standalone bold label
+ * (`**HANDOFF**`), or a plain label line (`HANDOFF:`). Termination stops at the
+ * next markdown heading or the next standalone bold/plain label line, so a
+ * report written entirely with bold labels still splits into sections instead
+ * of the first one swallowing the rest.
  */
 export function extractSection(content: string, heading: string): string {
 	if (!content) return "";
-	const re = new RegExp(`#{1,6}\\s*\\**\\s*${heading}\\b[^\\n]*\\n([\\s\\S]*?)(?:\\n#{1,6}\\s|$)`, "i");
-	const m = content.match(re);
-	return m ? m[1].trim() : "";
+	// Header line: optional leading heading hashes and/or bold stars, then the name.
+	const start = new RegExp(`(?:^|\\n)[ \\t]{0,3}(?:#{1,6}[ \\t]*)?\\*{0,2}[ \\t]*${heading}\\b[^\\n]*\\n`, "i");
+	const m = start.exec(content);
+	if (!m) return "";
+	const rest = content.slice(m.index + m[0].length);
+	// Next section boundary: a markdown heading line, or a line that is ONLY a
+	// bold label (`**LABEL**`) — not inline bold inside a bullet, which would
+	// truncate the body.
+	const end = rest.search(/\n[ \t]{0,3}(?:#{1,6}[ \t]|\*{2}[A-Za-z][^\n]*\*{2}[ \t]*(?:\n|$))/);
+	return (end === -1 ? rest : rest.slice(0, end)).trim();
 }
 
 export function extractBlockingFindings(content: string): string {
