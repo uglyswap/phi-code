@@ -9,41 +9,68 @@ export class SmartRouter {
 	}
 
 	/**
-	 * Analyse le prompt et retourne la catégorie de tâche
-	 * Priorité : debug > code > plan > review > test > explore > general
+	 * Analyse le prompt et retourne la catégorie de tâche.
+	 *
+	 * Scoring: whole-word keyword matches per category (naive plural folding,
+	 * multi-word keywords match as substrings). Best score wins. Ties break by
+	 * intent priority — categories whose keywords are strong action verbs
+	 * (debug, test, explore, review) beat categories that also match on generic
+	 * nouns like "code" or "structure" (code, plan):
+	 * debug > test > explore > review > code > plan > general.
+	 *
+	 * Whole-word matching matters: the previous substring match classified
+	 * "functionality" as code (contains "function") and "codebase" as code.
 	 */
 	classifyTask(prompt: string): TaskCategory {
 		const lowerPrompt = prompt.toLowerCase();
-		const categories: TaskCategory[] = [];
-
 		if (!this.config?.routes) {
 			return "general";
 		}
 
-		// Check each category
-		for (const [category, route] of Object.entries(this.config.routes)) {
-			if (!Array.isArray(route?.keywords)) continue;
-			const hasKeyword = route.keywords.some((keyword) => lowerPrompt.includes(keyword.toLowerCase()));
-
-			if (hasKeyword) {
-				categories.push(category as TaskCategory);
+		// Tokenize into whole words, folding naive plurals ("tests" -> "test").
+		const words = new Set<string>();
+		for (const word of lowerPrompt.match(/[\p{L}\p{N}]+/gu) ?? []) {
+			words.add(word);
+			if (word.length > 3 && word.endsWith("s")) {
+				words.add(word.slice(0, -1));
 			}
 		}
 
-		if (categories.length === 0) {
+		const scores = new Map<TaskCategory, number>();
+		for (const [category, route] of Object.entries(this.config.routes)) {
+			if (!Array.isArray(route?.keywords)) continue;
+			let score = 0;
+			// Dedupe so a keyword listed twice in a config cannot double-count.
+			for (const needle of new Set(route.keywords.map((k) => k.toLowerCase()))) {
+				const matched = needle.includes(" ") ? lowerPrompt.includes(needle) : words.has(needle);
+				if (matched) score++;
+			}
+			if (score > 0) {
+				scores.set(category as TaskCategory, score);
+			}
+		}
+
+		if (scores.size === 0) {
 			return "general";
 		}
 
-		// Apply priorities
-		const priorityOrder: TaskCategory[] = ["debug", "code", "plan", "review", "test", "explore", "general"];
-
-		for (const priority of priorityOrder) {
-			if (categories.includes(priority)) {
-				return priority;
+		const priorityOrder: TaskCategory[] = ["debug", "test", "explore", "review", "code", "plan", "general"];
+		let best: TaskCategory | undefined;
+		let bestScore = 0;
+		for (const [category, score] of scores) {
+			if (
+				score > bestScore ||
+				(score === bestScore &&
+					best !== undefined &&
+					priorityOrder.indexOf(category) !== -1 &&
+					priorityOrder.indexOf(category) < priorityOrder.indexOf(best))
+			) {
+				best = category;
+				bestScore = score;
 			}
 		}
 
-		return categories[0];
+		return best ?? "general";
 	}
 
 	/**
@@ -193,7 +220,6 @@ export class SmartRouter {
 						"examine",
 						"investigate",
 						"study",
-						"review",
 						"explorer",
 						"analyser",
 						"comprendre",
@@ -213,7 +239,6 @@ export class SmartRouter {
 						"organize",
 						"concevoir",
 						"planifier",
-						"architecture",
 					],
 				},
 				test: {
