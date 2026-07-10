@@ -360,6 +360,28 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	}
 
 	/**
+	 * Load a skill body (SKILL.md) so a phase instruction can embed it verbatim.
+	 * Search order mirrors loadAgentDef: project .phi/skills first, then the
+	 * global ~/.phi/agent/skills (where postinstall copies the bundled skills).
+	 * YAML frontmatter is stripped. Returns null when the skill is not installed.
+	 */
+	function loadSkillContent(name: string): string | null {
+		const dirs = [
+			join(process.cwd(), ".phi", "skills"),
+			join(homedir(), ".phi", "agent", "skills"),
+		];
+		for (const dir of dirs) {
+			try {
+				const content = readFileSync(join(dir, name, "SKILL.md"), "utf-8");
+				const fmMatch = content.match(/^---\s*\n[\s\S]*?\n---\s*\n([\s\S]*)$/);
+				const body = (fmMatch ? fmMatch[1] : content).trim();
+				if (body) return body;
+			} catch { /* try next dir */ }
+		}
+		return null;
+	}
+
+	/**
 	 * Load routing config and build phase queue with model assignments + agent definitions.
 	 * Each phase now reads outputs from previous phases and writes structured outputs.
 	 */
@@ -391,6 +413,15 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			? `\nShell: bash (Git Bash), NOT cmd.exe. Always use Unix syntax: rm not del, test -f not if exist, / not \\\\`
 			: '';
 		const runtimeInfo = `\n\nRuntime: ${process.platform} (${process.arch})${shellNote}`;
+
+		// Embed the prompt-architect skill so the PLAN phase applies it to every
+		// task it writes. The skill ships bundled and is copied to
+		// ~/.phi/agent/skills by postinstall; when missing, the inline task format
+		// still enforces the [CONTEXT]/[TASK]/[FORMAT]/[CONSTRAINTS] structure.
+		const promptArchitectSkill = loadSkillContent("prompt-architect");
+		const promptArchitectSection = promptArchitectSkill
+			? `\n**Prompt-architect skill (apply it to every task you write):**\n\n${promptArchitectSkill}\n`
+			: "";
 
 		const phases: OrchestratorPhase[] = [
 			{
@@ -466,29 +497,37 @@ After your analysis, use \`ontology_add\` to save key project entities AND their
 **Step 1:** Read \`.phi/plans/brief-*.md\` (created by the explore phase)
 **Step 2:** Read \`.phi/plans/explore-*.md\` to understand the codebase analysis
 **Step 3:** Design the architecture based on findings
-**Step 4:** Create a DETAILED TODO LIST in \`.phi/plans/todo-${ts}.md\`:
-   For each task:
-   - Task number and title
-   - Agent assignment (code/test)
-   - Files to create/modify
-   - Specific implementation details
-   - Dependencies on other tasks
+**Step 4:** Create a DETAILED TODO LIST in \`.phi/plans/todo-${ts}.md\`.
+   Every task is a PROMPT for the CODE agent, which starts with ZERO memory of
+   this conversation. Write each task with the prompt-architect structure:
+   - **[CONTEXT]** what exists and why this task (real paths from the explore phase)
+   - **[TASK]** exactly what to do — files to create/modify with full paths
+   - **[FORMAT]** expected deliverable — exports, signatures, style, tests
+   - **[CONSTRAINTS]** what NOT to break, patterns to respect
+   Plus: task number + title, agent assignment (code/test), dependencies.
 
 **Format for the todo list:**
 \`\`\`markdown
 # TODO: Project Tasks
 
 ## Task 1: [Task Title] [agent-type]
-- [ ] Specific implementation details
-- [ ] Files to create: path/to/file.ext
-- [ ] Expected behavior
+**[CONTEXT]** [What exists now, why this task, real paths (src/x.ts:42)]
+**[TASK]**
+- [ ] Create path/to/file.ext with [specific behavior]
+- [ ] Modify path/to/other.ext: [exact change]
+**[FORMAT]** [Expected exports/signatures/tests]
+**[CONSTRAINTS]** [What not to break, patterns to follow]
 - Dependencies: None
 
 ## Task 2: [Task Title] [agent-type]
-- [ ] Implementation details
+**[CONTEXT]** ...
+**[TASK]**
+- [ ] ...
+**[FORMAT]** ...
+**[CONSTRAINTS]** ...
 - Dependencies: Task 1
 \`\`\`
-
+${promptArchitectSection}
 Before finishing, use \`memory_write\` to save your plan summary with relevant tags for future reference.` + runtimeInfo + COMMON_PHASE_RULES,
 			},
 			{

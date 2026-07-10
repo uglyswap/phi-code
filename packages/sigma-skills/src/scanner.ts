@@ -61,19 +61,33 @@ export class SkillScanner {
 			const content = fs.readFileSync(skillMdPath, "utf-8");
 			const name = path.basename(dir);
 
-			// Extract description from first paragraph after title
-			const lines = content.split("\n");
+			// Prefer the explicit YAML frontmatter description when present,
+			// else fall back to the first paragraph after a markdown title.
 			let description = "";
+			const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
+			if (fmMatch) {
+				const descLine = fmMatch[1].split("\n").find((l) => l.match(/^description:\s*/));
+				if (descLine) {
+					description = descLine
+						.replace(/^description:\s*/, "")
+						.replace(/^["']|["']$/g, "")
+						.trim();
+				}
+			}
+
+			const lines = content.split("\n");
 			let foundHeader = false;
 
-			for (const line of lines) {
-				if (line.startsWith("#")) {
-					foundHeader = true;
-					continue;
-				}
-				if (foundHeader && line.trim()) {
-					description = line.trim();
-					break;
+			if (!description) {
+				for (const line of lines) {
+					if (line.startsWith("#")) {
+						foundHeader = true;
+						continue;
+					}
+					if (foundHeader && line.trim()) {
+						description = line.trim();
+						break;
+					}
 				}
 			}
 
