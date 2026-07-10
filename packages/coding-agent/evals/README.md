@@ -44,14 +44,32 @@ style choices — assert the behavior, not the export shape. (A real run here
 caught a verifier that failed a correct solution only because the model used
 `module.exports = fn` instead of `{ fn }`; the verifiers now accept both.)
 
-## Baseline vs /plan — the honest status
+## Baseline vs /plan — head-to-head
 
-The runner currently measures the **baseline** strategy: a single `phi --print`
-call. The reason the /plan-vs-baseline head-to-head is not yet a single number
-is that `/plan` runs inside the interactive orchestrator (it registers a command
-and drives phases via UI events), which is not scriptable through `--print`. The
-harness is built so a `plan` strategy plugs into `run.ts` alongside `baseline`
-once /plan is drivable headlessly (e.g. via RPC mode); `lib.ts` already
-aggregates and compares multiple strategies (see the `summarize` tests). Until
-then this measures the floor, and claims about /plan beating the baseline stay
-unproven rather than asserted.
+Both strategies are now runnable:
+
+```bash
+npx tsx evals/run.ts       --model opencode-go/glm-5.2   # baseline: one phi --print
+npx tsx evals/run-plan.ts  --model opencode-go/glm-5.2   # /plan: the 5-phase orchestrator, headless
+```
+
+`/plan` chains its phases through UI events that `--print` does not pump, so it
+is not scriptable as a subprocess. `run-plan.ts` drives it in-process via the
+SDK (`createAgentSession`): it dispatches `/plan <task>` and polls the
+orchestrator's `globalThis.__phiOrchestrationActive` flag until the run
+completes, then verifies the result. It loads the orchestrator from the phi
+install (`~/.phi/agent`), so keep `npm i -g @phi-code-admin/phi-code` in sync
+with the code under test, or pass `--sdk <path-to-dist/index.js>`.
+
+### What the head-to-head measures (and its limits)
+
+This is a **small, honest** comparison, not the official SWE-bench-lite 300-set
+(which needs per-instance Docker environments and a real budget — each `/plan`
+run is five agentic phases, minutes and many tokens per task). It answers a
+narrower question on a handful of tasks with objective verifiers: does the
+extra explore→plan→code→test→review machinery produce a *better result* than a
+single shot, and at what cost? Read the numbers as a directional signal on a
+tiny sample, not a benchmark ranking. The honest expectation going in: `/plan`
+costs multiples more time/tokens, so it only earns its keep on tasks where a
+single shot actually fails — the trivial tasks are there precisely to show the
+cost overhead when it does *not* help.
