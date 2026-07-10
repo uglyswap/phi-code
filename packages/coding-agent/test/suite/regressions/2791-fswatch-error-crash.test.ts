@@ -39,7 +39,9 @@ describe("issue #2791 fs.watch error event crashes process", () => {
 		rmSync(tempRoot, { recursive: true, force: true });
 	});
 
-	it("process should survive an error event on the theme FSWatcher", () => {
+	// 40s budget: the child is `npx tsx` — under full-suite load on Windows its
+	// startup alone can exceed the previous 10s and made this test flaky.
+	it("process should survive an error event on the theme FSWatcher", { timeout: 45_000 }, () => {
 		const themeModulePath = pathToFileURL(join(__dirname, "../../../src/modes/interactive/theme/theme.js")).href;
 		const agentDir = join(tempRoot, "agent").replace(/\\/g, "/");
 
@@ -90,7 +92,7 @@ process.exit(0);
 		let exitCode: number;
 		try {
 			_stdout = execFileSync("npx", ["tsx", scriptPath], {
-				timeout: 10000,
+				timeout: 40_000,
 				encoding: "utf-8",
 				env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PHI_CODING_AGENT_DIR: agentDir },
 				stdio: ["pipe", "pipe", "pipe"],
