@@ -103,7 +103,9 @@ export class NotesManager {
 					date: stats.mtime.toISOString(),
 				};
 			})
-			.sort((a, b) => b.date.localeCompare(a.date));
+			// Tie-break by name (descending) so same-mtime files keep a stable
+			// order; default note names are dates, so newer names sort first too.
+			.sort((a, b) => b.date.localeCompare(a.date) || b.name.localeCompare(a.name));
 	}
 
 	/**

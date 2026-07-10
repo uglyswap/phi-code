@@ -21,20 +21,20 @@ describe("SigmaMemory", () => {
 
 		sigmaMemory = new SigmaMemory(config);
 
-		// Mock the vector store embedding to avoid downloads
+		// Mock the vector store embedding to avoid downloads.
+		// The real transformers pipeline is a callable, not an object with a
+		// .call method — embed() invokes `this.pipeline(text, options)` directly.
 		(sigmaMemory.vectors as any).ensurePipeline = async () => {
-			(sigmaMemory.vectors as any).pipeline = {
-				async call(text: string) {
-					const length = text.length;
-					return {
-						data: new Float32Array([
-							length / 100,
-							(length % 10) / 10,
-							Math.sin(length) / 2 + 0.5,
-							Math.cos(length) / 2 + 0.5,
-						]),
-					};
-				},
+			(sigmaMemory.vectors as any).pipeline = async (text: string) => {
+				const length = text.length;
+				return {
+					data: new Float32Array([
+						length / 100,
+						(length % 10) / 10,
+						Math.sin(length) / 2 + 0.5,
+						Math.cos(length) / 2 + 0.5,
+					]),
+				};
 			};
 		};
 	});

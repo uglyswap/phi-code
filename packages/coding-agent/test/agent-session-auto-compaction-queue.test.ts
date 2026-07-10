@@ -238,7 +238,12 @@ describe("AgentSession auto-compaction queue resume", () => {
 	it("should trigger threshold compaction for error messages using last successful usage", async () => {
 		const model = session.model!;
 
-		// A successful assistant message with high token usage (near context limit)
+		// A successful assistant message with high token usage (near context limit).
+		// Derive from the model's real contextWindow so a registry refresh that
+		// grows the window (e.g. 200k -> 1M) cannot silently unbreach the
+		// threshold (contextWindow - reserveTokens, reserve defaults to 16384).
+		const nearLimitInput = model.contextWindow - 10_000;
+		const nearLimitOutput = 5_000;
 		const successfulAssistant: AssistantMessage = {
 			role: "assistant",
 			content: [{ type: "text", text: "large successful response" }],
@@ -246,11 +251,11 @@ describe("AgentSession auto-compaction queue resume", () => {
 			provider: model.provider,
 			model: model.id,
 			usage: {
-				input: 180_000,
-				output: 10_000,
+				input: nearLimitInput,
+				output: nearLimitOutput,
 				cacheRead: 0,
 				cacheWrite: 0,
-				totalTokens: 190_000,
+				totalTokens: nearLimitInput + nearLimitOutput,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
 			stopReason: "stop",
