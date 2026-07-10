@@ -29,6 +29,7 @@
 			"packages/*/test/**/*.ts",
 			"packages/coding-agent/examples/**/*.ts",
 			"packages/coding-agent/extensions/**/*.ts",
+			"packages/coding-agent/evals/**/*.ts",
 			"packages/sigma-agents/src/**/*.ts",
 			"packages/sigma-skills/src/**/*.ts",
 			"packages/sigma-memory/src/**/*.ts",

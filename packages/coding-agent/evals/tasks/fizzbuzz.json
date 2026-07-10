@@ -1,0 +1,7 @@
+{
+	"id": "fizzbuzz",
+	"description": "Classic FizzBuzz as a pure function",
+	"prompt": "Create fizzbuzz.js (CommonJS) exporting a function `fizzbuzz(n)` that returns 'Fizz' if n divisible by 3, 'Buzz' if by 5, 'FizzBuzz' if by both, else the number as a string. Nothing else.",
+	"verify": "node -e \"const m=require('./fizzbuzz.js'); const fb=typeof m==='function'?m:m.fizzbuzz; const a=require('assert'); a.strictEqual(fb(3),'Fizz'); a.strictEqual(fb(5),'Buzz'); a.strictEqual(fb(15),'FizzBuzz'); a.strictEqual(fb(7),'7'); console.log('ok');\"",
+	"timeoutSec": 240
+}
