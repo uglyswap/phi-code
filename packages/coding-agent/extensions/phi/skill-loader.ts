@@ -3,8 +3,10 @@
  *
  * Uses sigma-skills SkillScanner and SkillLoader for skill discovery and matching.
  * Skills are folders containing SKILL.md files with specialized knowledge.
- * When skill-related keywords are detected in user input, the model is notified
- * and can load the full skill content via the `read` tool.
+ * When skill-related keywords are detected in user input, a compact skill hint
+ * (name, description, SKILL.md path) is appended to the message so the model
+ * actually SEES it and can load the full content via the `read` tool. A UI
+ * notification alone never reaches the model.
  *
  * Discovery locations (in priority order):
  * 1. .phi/skills/ (project-local, highest priority)
@@ -13,27 +15,40 @@
  *
  * Features:
  * - Automatic skill discovery at startup
- * - Keyword-based skill detection and loading
+ * - Keyword-based skill detection with an injection threshold
+ * - Auto-injection of skill hints into the model context (autoInject)
  * - /skills command to list available skills
- * - Contextual skill notification via ui.notify
  */
 
-import type { ExtensionAPI, ExtensionContext } from "phi-code";
+import type { ExtensionAPI } from "phi-code";
 import { SkillScanner, SkillLoader } from "sigma-skills";
 import type { SkillsConfig } from "sigma-skills";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
 export default function skillLoaderExtension(pi: ExtensionAPI) {
+	// Bundled skills live inside the package in the repo layout; postinstall
+	// copies them to ~/.phi/agent/skills (== globalDir) in the installed layout,
+	// where the relative hop from ~/.phi/agent/extensions/ would point at the
+	// non-existent ~/skills. Probe both (the scanner dedupes by skill name).
+	const bundledCandidates = [
+		join(__dirname, "..", "..", "..", "skills"),
+		join(homedir(), ".phi", "agent", "skills"),
+	];
 	const config: SkillsConfig = {
 		globalDir: join(homedir(), ".phi", "agent", "skills"),
 		projectDir: join(process.cwd(), ".phi", "skills"),
-		bundledDir: join(__dirname, "..", "..", "..", "skills"),
+		bundledDir: bundledCandidates.find((dir) => existsSync(dir)) ?? bundledCandidates[0],
 		autoInject: true,
 	};
 
 	const scanner = new SkillScanner(config);
 	const loader = new SkillLoader(scanner);
+
+	// Skills already hinted this session — hint each skill once, not on every
+	// message of a long conversation about the same topic.
+	const hintedSkills = new Set<string>();
 
 	// ─── Input Event: Match skills to user input ─────────────────────
 
@@ -41,24 +56,37 @@ export default function skillLoaderExtension(pi: ExtensionAPI) {
 		if (event.source === "extension") {
 			return { action: "continue" };
 		}
-
-		const matches = loader.findRelevantSkills(event.text);
-
-		if (matches.length > 0) {
-			// Notify about top matches (max 3)
-			const topMatches = matches.slice(0, 3);
-			for (const match of topMatches) {
-				ctx.ui.notify(
-					`📚 Relevant skill: **${match.skill.name}** — ${match.skill.description}\nUse \`read ${match.skill.path}/SKILL.md\` for full content.`,
-					"info"
-				);
-			}
-
-			const skillNames = topMatches.map(m => m.skill.name).join(", ");
-			ctx.ui.notify(`🧠 Loaded ${topMatches.length} skill(s): ${skillNames}`, "info");
+		// Slash commands and skill blocks are not prose — nothing to match.
+		if (event.text.trimStart().startsWith("/")) {
+			return { action: "continue" };
 		}
 
-		return { action: "continue" };
+		const matches = loader.findRelevantSkills(event.text);
+		// findRelevantSkills scores any shared word; require a clear signal
+		// (name match or several keywords) before surfacing a skill.
+		const strong = matches.filter((m) => m.score >= 3 && !hintedSkills.has(m.skill.name)).slice(0, 2);
+		if (strong.length === 0) {
+			return { action: "continue" };
+		}
+		for (const match of strong) {
+			hintedSkills.add(match.skill.name);
+		}
+
+		const names = strong.map((m) => m.skill.name).join(", ");
+		ctx.ui.notify(`📚 Skill hint: ${names} (injected into context)`, "info");
+
+		if (!config.autoInject) {
+			return { action: "continue" };
+		}
+
+		const hints = strong
+			.map((m) => `- ${m.skill.name}: ${m.skill.description} — full content: read ${join(m.skill.path, "SKILL.md")}`)
+			.join("\n");
+		return {
+			action: "transform",
+			text: `${event.text}\n\n[Skill hints — relevant local skills detected for this request. Read the SKILL.md before applying:\n${hints}]`,
+			images: event.images,
+		};
 	});
 
 	// ─── /skills Command ─────────────────────────────────────────────
@@ -107,12 +135,5 @@ export default function skillLoaderExtension(pi: ExtensionAPI) {
 				}
 			}
 		},
-	});
-
-	// ─── Session Start: Load skills ──────────────────────────────────
-
-	pi.on("session_start", async (_event, _ctx) => {
-		const skills = loader.listSkills();
-		console.log(`[skill-loader] Loaded ${skills.length} skills from 3 locations`);
 	});
 }

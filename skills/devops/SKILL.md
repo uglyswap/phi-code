@@ -1,3 +1,6 @@
+---
+description: "CI/CD pipelines, deployment, monitoring, and infrastructure"
+---
 # DevOps Skill
 
 ## When to use

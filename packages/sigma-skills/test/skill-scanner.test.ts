@@ -253,10 +253,12 @@ Use when working with REST APIs, JSON/XML data, HTTP(S) requests.
 		assert(keywords.includes("data"));
 		assert(keywords.includes("http"));
 		assert(keywords.includes("requests"));
-		assert(keywords.includes("get"));
+		// "get" is deliberately a stop word (see isStopWord) — too common to be a useful skill keyword
+		assert(!keywords.includes("get"));
 		assert(keywords.includes("post"));
 		assert(keywords.includes("put"));
-		assert(keywords.includes("oauth"));
+		// "OAuth2.0" tokenizes to "oauth2" ("." and "-" become spaces, digits stay attached)
+		assert(keywords.includes("oauth2"));
 		assert(keywords.includes("authentication"));
 		assert(keywords.includes("rate"));
 		assert(keywords.includes("limiting"));

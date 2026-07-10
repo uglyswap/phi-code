@@ -1,3 +1,6 @@
+---
+description: "REST API design patterns, versioning, error handling, and documentation"
+---
 # API Design Skill
 
 ## When to use

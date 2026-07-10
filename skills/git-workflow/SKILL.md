@@ -1,3 +1,6 @@
+---
+description: "Git branching, commits, merges, and collaboration workflows"
+---
 # Git Workflow Skill
 
 ## When to use

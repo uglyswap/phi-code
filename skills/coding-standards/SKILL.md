@@ -1,3 +1,6 @@
+---
+description: "Code quality standards, naming conventions, and best practices"
+---
 # Coding Standards Skill
 
 ## When to use

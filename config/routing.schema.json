@@ -1,0 +1,58 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"title": "phi-code routing configuration",
+	"description": "Maps task categories to models and agents. The runtime file lives at ~/.phi/agent/routing.json (written by /phi-init or /plan-models); this schema documents its shape.",
+	"type": "object",
+	"required": ["version", "routes"],
+	"properties": {
+		"$schema": { "type": "string" },
+		"$comment": { "type": "string" },
+		"version": {
+			"type": "integer",
+			"description": "Config format version",
+			"const": 1
+		},
+		"routes": {
+			"type": "object",
+			"description": "One route per task category (code, debug, explore, plan, test, review)",
+			"additionalProperties": {
+				"type": "object",
+				"required": ["preferredModel"],
+				"properties": {
+					"description": {
+						"type": "string",
+						"description": "Human-readable description of the category"
+					},
+					"keywords": {
+						"type": "array",
+						"items": { "type": "string" },
+						"description": "Keywords that classify a prompt into this category"
+					},
+					"preferredModel": {
+						"type": "string",
+						"description": "Model reference: 'provider/model-id', bare 'model-id', or 'default'"
+					},
+					"fallback": {
+						"type": "string",
+						"description": "Model used when the preferred one is unavailable or times out"
+					},
+					"agent": {
+						"type": ["string", "null"],
+						"description": "Agent definition (agents/<name>.md) applied for this category"
+					}
+				},
+				"additionalProperties": false
+			}
+		},
+		"default": {
+			"type": "object",
+			"description": "Fallback when no route matches",
+			"properties": {
+				"model": { "type": "string" },
+				"agent": { "type": ["string", "null"] }
+			},
+			"additionalProperties": false
+		}
+	},
+	"additionalProperties": false
+}
