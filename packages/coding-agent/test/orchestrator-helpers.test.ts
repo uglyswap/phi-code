@@ -89,6 +89,16 @@ describe("extractBlockingFindings / extractHandoff", () => {
 		expect(b).toContain("null deref");
 		expect(b).toContain("missing await");
 	});
+	test("does not treat a prose line starting with the section word as a header (F7)", () => {
+		// "Blocking issues remain: 2" must NOT be read as a BLOCKING header.
+		const r = "# Report\nBlocking issues remain: 2 in total.\n## BLOCKING\n- the real one\n## HANDOFF\nNext: go";
+		const b = extractBlockingFindings(r);
+		expect(b).toContain("the real one");
+		expect(b).not.toContain("remain: 2");
+	});
+	test("still accepts heading with trailing text (## HANDOFF notes)", () => {
+		expect(extractHandoff("## HANDOFF notes\nNext: ship")).toContain("Next: ship");
+	});
 });
 
 describe("isTransientError", () => {

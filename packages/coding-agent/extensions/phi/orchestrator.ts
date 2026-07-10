@@ -24,8 +24,13 @@ import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "phi-code";
 import { type AgentDef, loadAgentDef } from "./providers/agent-def.js";
 import { defaultExplorerSpecs, READONLY_EXPLORER_TOOLS, runExploreFanout } from "./providers/explore-fanout.js";
-import { extractBlockingFindings, extractHandoff, parsePhaseVerdict } from "./providers/orchestrator-helpers.js";
-import { analyzePhaseMessages, buildNextBrief, decidePhaseTransition } from "./providers/phase-machine.js";
+import {
+	analyzePhaseMessages,
+	buildNextBrief,
+	decidePhaseTransition,
+	resolvePhaseOutcome,
+	type StructuredPhaseResult,
+} from "./providers/phase-machine.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -309,11 +314,85 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	// Set true right before an INTERNAL ctx.abort() (phase timeout) so the
 	// resulting agent_end is not mistaken for a user Ctrl+C cancellation.
 	let internalAbort = false;
+	// Structured result emitted by the current phase via the `phase_result` tool
+	// (robust primary path). Reset at each phase start; read in agent_end and
+	// merged with the parsed markdown report (fallback) by resolvePhaseOutcome.
+	// currentPhaseResultKey stamps which phase produced it, so a stale result
+	// from a previous run/phase (or a tool call that lands after the phase
+	// transition) is never mistaken for the current phase's output.
+	let currentPhaseResult: StructuredPhaseResult | null = null;
+	let currentPhaseResultKey: string | null = null;
 
-	/** Read a phase's report file (.phi/plans/<key>-<ts>.md). Null-safe. */
+	// ─── phase_result Tool — structured phase outcome (robust primary path) ───
+	// A phase agent CALLS this to emit its verdict/handoff/blocking as data
+	// instead of relying on the orchestrator regex-scraping its markdown report.
+	// It is only meaningful during /plan; outside orchestration it is a no-op so
+	// a stray call never errors. The markdown report is still written (it is the
+	// human-readable artifact); this just makes the machine-read path exact.
+	pi.registerTool({
+		name: "phase_result",
+		label: "Phase Result",
+		description:
+			"Report THIS /plan phase's structured outcome so the orchestrator reads it exactly instead of parsing your markdown. Call it once, at the end, IN ADDITION to writing your report file. TEST and REVIEW phases MUST call it with a verdict.",
+		promptGuidelines: [
+			"During a /plan phase, after writing your report file, call phase_result once with your verdict (TEST/REVIEW) and a concise handoff for the next phase.",
+			"verdict: PASS only if you OBSERVED success; FAIL if any blocking issue; BLOCKED if you could not run; SKIP if not applicable.",
+			"blocking: the must-fix findings (REVIEW), one per line. handoff: what is done, open risks, and the single most important next action.",
+		],
+		parameters: Type.Object({
+			verdict: Type.Optional(
+				Type.Union([Type.Literal("PASS"), Type.Literal("FAIL"), Type.Literal("BLOCKED"), Type.Literal("SKIP")], {
+					description: "Phase verdict (required for TEST and REVIEW phases)",
+				}),
+			),
+			blocking: Type.Optional(
+				Type.String({ description: "Must-fix findings, one per line (REVIEW). Empty when none." }),
+			),
+			handoff: Type.Optional(
+				Type.String({ description: "Concise handoff for the next phase: state, open risks, next action." }),
+			),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+			if (!orchestrationActive) {
+				return {
+					content: [{ type: "text", text: "phase_result is only used during /plan orchestration; ignored here." }],
+					details: undefined,
+				};
+			}
+			const raw = params as { verdict?: StructuredPhaseResult["verdict"]; blocking?: string; handoff?: string };
+			// Merge only the fields this call actually set, so a phase that emits
+			// its result across several calls (verdict first, handoff later — a
+			// common LLM pattern) does not erase earlier fields. Start fresh when
+			// the previous result belonged to a different phase.
+			const defined: StructuredPhaseResult = {};
+			if (raw.verdict !== undefined) defined.verdict = raw.verdict;
+			if (typeof raw.blocking === "string") defined.blocking = raw.blocking;
+			if (typeof raw.handoff === "string") defined.handoff = raw.handoff;
+			const samePhase = currentPhaseResultKey === (currentPhase?.key ?? null);
+			currentPhaseResult = { ...(samePhase && currentPhaseResult ? currentPhaseResult : {}), ...defined };
+			currentPhaseResultKey = currentPhase?.key ?? null;
+			const parts = [
+				raw.verdict ? `verdict ${raw.verdict}` : null,
+				raw.blocking?.trim() ? "blocking findings" : null,
+				raw.handoff?.trim() ? "handoff" : null,
+			].filter(Boolean);
+			return {
+				content: [{ type: "text", text: `Phase result recorded${parts.length ? ` (${parts.join(", ")})` : ""}.` }],
+				details: undefined,
+			};
+		},
+	});
+
+	// A phase's report file is not always named <key>-<ts>.md: PLAN writes its
+	// handoff into todo-<ts>.md and CODE into progress-<ts>.md. Map key -> file
+	// stem so the text fallback for HANDOFF/BLOCKING actually finds them.
+	const REPORT_FILE_STEM: Record<string, string> = { plan: "todo", code: "progress" };
+
+	/** Read a phase's report file (.phi/plans/<stem>-<ts>.md). Null-safe. */
 	function readPhaseReport(key: string, ts: string): string | null {
 		try {
-			const f = join(process.cwd(), ".phi", "plans", `${key}-${ts}.md`);
+			const stem = REPORT_FILE_STEM[key] ?? key;
+			const f = join(process.cwd(), ".phi", "plans", `${stem}-${ts}.md`);
 			if (existsSync(f)) return readFileSync(f, "utf-8");
 		} catch {
 			/* ignore */
@@ -658,6 +737,7 @@ After implementation, use \`memory_write\` to save a summary of what was built, 
    - Running \`npm test\` alone is NOT sufficient proof for a feature.
 **Step 4:** Fix any real errors you find (root cause, not a workaround).
 **Step 5:** Write test results to \`.phi/plans/test-${ts}.md\`, starting the file with a VERDICT line.
+**Step 6 (MANDATORY):** Call the \`phase_result\` tool with your \`verdict\` (PASS/FAIL/BLOCKED) and a concise \`handoff\`. This is how the orchestrator reads your outcome exactly; the report file above is the human-readable copy.
 
 **Test report format (the FIRST line MUST be the verdict):**
 \`\`\`markdown
@@ -731,6 +811,7 @@ After testing, use \`memory_write\` to save test results, bugs found, and lesson
    - **REFUTED** - drop it. Only refute if you can quote the line that proves it cannot happen (a type, guard, or constant). When unsure, keep it PLAUSIBLE.
    Keep only CONFIRMED + PLAUSIBLE. A finding with no concrete failure scenario is noise: drop it.
 **Step 4:** Write \`.phi/plans/review-${ts}.md\`, starting with the VERDICT line.
+**Step 5 (MANDATORY):** Call the \`phase_result\` tool with your \`verdict\` (PASS/FAIL), the \`blocking\` findings (one per line, empty when none), and a short \`handoff\`. A FAIL here drives the one bounded fix→re-review cycle, so the orchestrator must read it exactly — do not rely on markdown parsing alone.
 
 **Final report format (the FIRST line MUST be the verdict):**
 \`\`\`markdown
@@ -844,9 +925,16 @@ Tag the note with relevant keywords for vector search.
 			activeAgentPrompt = agentDef.systemPrompt;
 			// Restrict tools to agent's allowed tools
 			if (agentDef.tools.length > 0) {
-				// Always include memory tools in orchestration phases
-				const memoryTools = ["memory_search", "memory_write", "memory_read", "ontology_add", "ontology_query"];
-				const agentTools = [...agentDef.tools, ...memoryTools.filter((t) => !agentDef.tools.includes(t))];
+				// Always include the memory tools and phase_result in orchestration phases.
+				const forcedTools = [
+					"memory_search",
+					"memory_write",
+					"memory_read",
+					"ontology_add",
+					"ontology_query",
+					"phase_result",
+				];
+				const agentTools = [...agentDef.tools, ...forcedTools.filter((t) => !agentDef.tools.includes(t))];
 				_activeAgentTools = agentTools;
 				pi.setActiveTools(agentTools);
 			} else if (savedTools) {
@@ -959,6 +1047,10 @@ Tag the note with relevant keywords for vector search.
 		const phase = phaseQueue.shift()!;
 		phasePending = true;
 		currentPhase = phase;
+		// New phase starts with no structured result; it is set only if this
+		// phase's agent calls phase_result.
+		currentPhaseResult = null;
+		currentPhaseResultKey = null;
 
 		switchModelForPhase(phase, ctx).then(({ modelId, warning }) => {
 			activateAgent(phase, ctx);
@@ -1063,13 +1155,18 @@ Tag the note with relevant keywords for vector search.
 			phaseTimeoutId = null;
 		}
 
+		// Resolve the phase outcome: prefer the structured phase_result emission
+		// (exact) and fall back per-field to the regex-scraped markdown report.
+		// Only trust a structured result stamped with THIS phase's key — a stale
+		// result from a previous run or a late tool call is ignored.
 		const reportContent = currentPhase ? readPhaseReport(currentPhase.key, currentRunTs) : null;
-		const verdict = reportContent ? parsePhaseVerdict(reportContent) : null;
+		const structuredForThisPhase = currentPhaseResultKey === (currentPhase?.key ?? null) ? currentPhaseResult : null;
+		const outcome = resolvePhaseOutcome(structuredForThisPhase, reportContent);
+		const verdict = outcome.verdict;
 		const decision = decidePhaseTransition({
 			analysis,
 			phase: currentPhase ? { key: currentPhase.key, retried: currentPhase.retried } : null,
 			verdict,
-			hasReport: reportContent !== null,
 			reviewFixRounds,
 			maxToolCallsPerPhase: MAX_TOOL_CALLS_PER_PHASE,
 		});
@@ -1123,22 +1220,21 @@ Tag the note with relevant keywords for vector search.
 		}
 
 		if (decision.action === "continue" && decision.missingVerdict && currentPhase) {
-			// The model deviated from the text contract: this phase must start its
-			// report with "VERDICT: ..." and nothing parseable was found. Surface it
-			// instead of silently treating the phase as passed.
+			// The model deviated from BOTH contract paths: it neither called
+			// phase_result with a verdict nor wrote a parseable "VERDICT:" line.
+			// Surface it instead of silently treating the phase as passed.
 			ctx.ui.notify(
-				`\n⚠️ **${currentPhase.label} wrote no parseable VERDICT line** in \`.phi/plans/${currentPhase.key}-${currentRunTs}.md\` — treating it as passed. Check the report manually.`,
+				`\n⚠️ **${currentPhase.label} reported no verdict** (no phase_result call and no VERDICT line in \`.phi/plans/${currentPhase.key}-${currentRunTs}.md\`) — treating it as passed. Check the report manually.`,
 				"warning",
 			);
 		}
 
-		// Prefer the phase's canonical "## HANDOFF" block (a deterministic text
-		// contract written to its report file) over the heuristic summary; fall back
-		// to the heuristic when the model did not write one.
-		const handoff = reportContent ? extractHandoff(reportContent) : "";
+		// Prefer the resolved HANDOFF (structured phase_result, else the report's
+		// "## HANDOFF" block) over the heuristic summary; fall back to the
+		// heuristic when neither was provided.
 		const nextBrief = buildNextBrief(
 			analysis,
-			handoff,
+			outcome.handoff,
 			currentPhase?.label || "previous phase",
 			MAX_TOOL_CALLS_PER_PHASE,
 		);
@@ -1149,7 +1245,7 @@ Tag the note with relevant keywords for vector search.
 		if (decision.action === "review-fix-cycle" && currentPhase) {
 			// REVIEW FAIL: open ONE bounded fix -> re-review cycle.
 			reviewFixRounds++;
-			const blocking = (reportContent ? extractBlockingFindings(reportContent) : "").slice(0, 4000);
+			const blocking = outcome.blocking.slice(0, 4000);
 			const fixPhase: OrchestratorPhase = {
 				key: "code",
 				label: "🔧 Fix — CODE (review remediation)",
@@ -1217,6 +1313,10 @@ Tag the note with relevant keywords for vector search.
 				skippedPhases = 0;
 				reviewFixRounds = 0;
 				internalAbort = false;
+				// Clear any structured result left over from a prior run so this
+				// resumed phase's outcome is read fresh (see phase-result leak guard).
+				currentPhaseResult = null;
+				currentPhaseResultKey = null;
 				phaseStartTime = Date.now();
 				const firstResume = remaining[0];
 				currentPhase = firstResume;
@@ -1279,6 +1379,11 @@ Tag the note with relevant keywords for vector search.
 			skippedPhases = 0;
 			reviewFixRounds = 0;
 			internalAbort = false;
+			// Clear any structured result left over from a previous /plan run in
+			// this session; the first phase is launched directly (not via
+			// sendNextPhase), so without this a stale verdict/handoff would leak.
+			currentPhaseResult = null;
+			currentPhaseResultKey = null;
 			const firstPhase = phases[0];
 			currentPhase = firstPhase;
 

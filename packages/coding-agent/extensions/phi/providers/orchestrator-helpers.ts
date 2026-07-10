@@ -33,8 +33,20 @@ export function parsePhaseVerdict(content: string): PhaseVerdict | null {
  */
 export function extractSection(content: string, heading: string): string {
 	if (!content) return "";
-	// Header line: optional leading heading hashes and/or bold stars, then the name.
-	const start = new RegExp(`(?:^|\\n)[ \\t]{0,3}(?:#{1,6}[ \\t]*)?\\*{0,2}[ \\t]*${heading}\\b[^\\n]*\\n`, "i");
+	// Header line, in one of three shapes, anchored to line start:
+	//   `## HANDOFF ...`  (markdown heading — trailing text allowed)
+	//   `**HANDOFF**`     (bold label — closing stars, then only trailing space)
+	//   `HANDOFF:` / `HANDOFF` (plain label — must be the whole line or end in ":")
+	// The plain form requires ":" or end-of-line after the name so a prose line
+	// like "Blocking issues remain: 2" is not mistaken for a "BLOCKING" header.
+	const start = new RegExp(
+		`(?:^|\\n)[ \\t]{0,3}(?:` +
+			`#{1,6}[ \\t]*\\*{0,2}[ \\t]*${heading}\\b[^\\n]*` + // heading
+			`|\\*{2}[ \\t]*${heading}[ \\t]*\\*{2}[ \\t]*` + // bold label
+			`|${heading}[ \\t]*:?[ \\t]*` + // plain label (bare or "name:")
+			`)\\n`,
+		"i",
+	);
 	const m = start.exec(content);
 	if (!m) return "";
 	const rest = content.slice(m.index + m[0].length);

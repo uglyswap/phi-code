@@ -5,6 +5,7 @@ import {
 	buildPhaseSummary,
 	decidePhaseTransition,
 	type PhaseEndAnalysis,
+	resolvePhaseOutcome,
 } from "../extensions/phi/providers/phase-machine.js";
 
 const MAX = 60;
@@ -94,7 +95,6 @@ describe("decidePhaseTransition — priority ordering", () => {
 			analysis: baseAnalysis({ userAborted: true, hasAuthError: true, transient: true }),
 			phase: phase("code"),
 			verdict: "BLOCKED",
-			hasReport: true,
 			reviewFixRounds: 0,
 			maxToolCallsPerPhase: MAX,
 		});
@@ -106,7 +106,6 @@ describe("decidePhaseTransition — priority ordering", () => {
 			analysis: baseAnalysis({ hasAuthError: true, transient: true }),
 			phase: phase("code"),
 			verdict: null,
-			hasReport: true,
 			reviewFixRounds: 0,
 			maxToolCallsPerPhase: MAX,
 		});
@@ -117,7 +116,6 @@ describe("decidePhaseTransition — priority ordering", () => {
 		const input = {
 			analysis: baseAnalysis({ transient: true }),
 			verdict: null,
-			hasReport: true,
 			reviewFixRounds: 0,
 			maxToolCallsPerPhase: MAX,
 		};
@@ -131,7 +129,6 @@ describe("decidePhaseTransition — priority ordering", () => {
 			analysis: baseAnalysis(),
 			phase: phase("test"),
 			verdict: "BLOCKED",
-			hasReport: true,
 			reviewFixRounds: 0,
 			maxToolCallsPerPhase: MAX,
 		});
@@ -143,7 +140,6 @@ describe("decidePhaseTransition — priority ordering", () => {
 			analysis: baseAnalysis(),
 			phase: phase("review"),
 			verdict: "FAIL" as const,
-			hasReport: true,
 			maxToolCallsPerPhase: MAX,
 		};
 		expect(decidePhaseTransition({ ...input, reviewFixRounds: 0 }).action).toBe("review-fix-cycle");
@@ -156,7 +152,6 @@ describe("decidePhaseTransition — priority ordering", () => {
 			analysis: baseAnalysis({ toolCallCount: MAX + 50 }),
 			phase: phase("review"),
 			verdict: "FAIL",
-			hasReport: true,
 			reviewFixRounds: 0,
 			maxToolCallsPerPhase: MAX,
 		});
@@ -168,7 +163,6 @@ describe("decidePhaseTransition — priority ordering", () => {
 			analysis: baseAnalysis(),
 			phase: phase("test"),
 			verdict: "FAIL",
-			hasReport: true,
 			reviewFixRounds: 0,
 			maxToolCallsPerPhase: MAX,
 		});
@@ -183,7 +177,6 @@ describe("decidePhaseTransition — model deviating from the text contract", () 
 				analysis: baseAnalysis(),
 				phase: { key },
 				verdict: null, // model wrote a report but no parseable VERDICT
-				hasReport: true,
 				reviewFixRounds: 0,
 				maxToolCallsPerPhase: MAX,
 			});
@@ -197,7 +190,6 @@ describe("decidePhaseTransition — model deviating from the text contract", () 
 				analysis: baseAnalysis(),
 				phase: { key },
 				verdict: null,
-				hasReport: true,
 				reviewFixRounds: 0,
 				maxToolCallsPerPhase: MAX,
 			});
@@ -205,17 +197,28 @@ describe("decidePhaseTransition — model deviating from the text contract", () 
 		}
 	});
 
-	it("does not flag a missing verdict when no report file was written at all", () => {
-		// No report is a separate (handoff-fallback) situation, not a contract deviation.
+	it("flags a verdict phase that did tool work but emitted no verdict at all", () => {
+		// phase_result is mandatory for test/review; a completed phase with tool
+		// calls but neither structured nor text verdict is a real deviation.
 		const d = decidePhaseTransition({
-			analysis: baseAnalysis(),
+			analysis: baseAnalysis({ toolCallCount: 8 }),
 			phase: { key: "review" },
 			verdict: null,
-			hasReport: false,
 			reviewFixRounds: 0,
 			maxToolCallsPerPhase: MAX,
 		});
-		expect(d).toMatchObject({ action: "continue", missingVerdict: false });
+		expect(d).toMatchObject({ action: "continue", missingVerdict: true });
+	});
+
+	it("does NOT double-warn: a zero-tool-call verdict phase is flagged as zeroToolCalls, not missingVerdict", () => {
+		const d = decidePhaseTransition({
+			analysis: baseAnalysis({ toolCallCount: 0 }),
+			phase: { key: "review" },
+			verdict: null,
+			reviewFixRounds: 0,
+			maxToolCallsPerPhase: MAX,
+		});
+		expect(d).toMatchObject({ action: "continue", zeroToolCalls: true, missingVerdict: false });
 	});
 
 	it("surfaces a text-only phase (0 tool calls) as a continue with the flag set", () => {
@@ -223,7 +226,6 @@ describe("decidePhaseTransition — model deviating from the text contract", () 
 			analysis: baseAnalysis({ toolCallCount: 0 }),
 			phase: { key: "plan" },
 			verdict: null,
-			hasReport: false,
 			reviewFixRounds: 0,
 			maxToolCallsPerPhase: MAX,
 		});
@@ -235,11 +237,61 @@ describe("decidePhaseTransition — model deviating from the text contract", () 
 			analysis: baseAnalysis(),
 			phase: null,
 			verdict: null,
-			hasReport: false,
 			reviewFixRounds: 0,
 			maxToolCallsPerPhase: MAX,
 		});
 		expect(d.action).toBe("continue");
+	});
+});
+
+describe("resolvePhaseOutcome — structured primary, text fallback", () => {
+	const report = ["## VERDICT: FAIL", "## BLOCKING", "- a.ts:1 - null deref", "## HANDOFF", "Next: fix a.ts"].join(
+		"\n",
+	);
+
+	it("uses the structured result when the agent called phase_result", () => {
+		const o = resolvePhaseOutcome({ verdict: "PASS", blocking: "", handoff: "State: shipped\nNext: done" }, null);
+		expect(o.verdict).toBe("PASS");
+		expect(o.handoff).toContain("shipped");
+		expect(o.source).toBe("structured");
+	});
+
+	it("falls back to the parsed report when no structured result was emitted", () => {
+		const o = resolvePhaseOutcome(null, report);
+		expect(o.verdict).toBe("FAIL");
+		expect(o.blocking).toContain("null deref");
+		expect(o.handoff).toContain("fix a.ts");
+		expect(o.source).toBe("text");
+	});
+
+	it("merges field-by-field: structured verdict wins, report supplies the missing handoff", () => {
+		const o = resolvePhaseOutcome({ verdict: "FAIL" }, report);
+		expect(o.verdict).toBe("FAIL");
+		// verdict came from structured, blocking+handoff from the report
+		expect(o.blocking).toContain("null deref");
+		expect(o.handoff).toContain("fix a.ts");
+		expect(o.source).toBe("mixed");
+	});
+
+	it("a structured FAIL overrides a report that (wrongly) says PASS", () => {
+		const passReport = "## VERDICT: PASS\n# Report";
+		const o = resolvePhaseOutcome({ verdict: "FAIL", blocking: "- must fix" }, passReport);
+		expect(o.verdict).toBe("FAIL");
+		expect(o.blocking).toContain("must fix");
+	});
+
+	it("returns a null verdict and source 'none' when neither path produced anything", () => {
+		const o = resolvePhaseOutcome(null, "# Report with no verdict");
+		expect(o.verdict).toBeNull();
+		expect(o.source).toBe("none");
+		expect(o.blocking).toBe("");
+		expect(o.handoff).toBe("");
+	});
+
+	it("ignores empty structured fields and uses the report instead", () => {
+		const o = resolvePhaseOutcome({ blocking: "   ", handoff: "" }, report);
+		expect(o.blocking).toContain("null deref");
+		expect(o.handoff).toContain("fix a.ts");
 	});
 });
 
