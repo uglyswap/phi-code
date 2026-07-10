@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.85.0] - 2026-07-10
+
+### Fixed
+
+- **"Update Available" fired for upstream Pi releases instead of phi-code.**
+  The startup version check queried `https://pi.dev/api/latest-version` (the
+  upstream Pi endpoint), so it announced Pi versions (e.g. 0.80.5) with a Pi
+  changelog link, and had been disabled as a stopgap. It now queries the npm
+  registry for `@phi-code-admin/phi-code`, the notification links to the
+  phi-code changelog, and both the update and package-update notifications are
+  re-enabled. `phi update` already targeted the right package.
+- **Install telemetry pinged the upstream Pi server.** The inherited
+  `https://pi.dev/api/report-install` ping leaked phi-code install events to a
+  third party and polluted upstream stats; it is now a no-op (phi-code sends no
+  telemetry). OpenRouter attribution headers now credit phi-code, not pi.dev.
+- **The bundled agents installed to `~/.phi/agent/agents/` were stale.** The
+  package copies of `code/explore/review/test.md` had missed the v0.72 prompt
+  improvements (mandatory memory recall, cross-platform test commands); root
+  and package copies are now identical, and the bundled skills gained their
+  frontmatter descriptions on both sides.
+- **The skill loader's bundled-skills path was wrong after install.** In the
+  installed layout (`~/.phi/agent/extensions/`) it pointed at the non-existent
+  `~/skills`; it now probes both layouts. Its startup `console.log` no longer
+  pollutes the TUI.
+- **Smart-router classification matched keyword substrings.** "functionality"
+  classified as code (contains "function"), "codebase" as code, and category
+  priority ignored how many keywords matched. Classification now uses
+  whole-word matching with per-category scores (ties break by intent priority),
+  and the sigma test suites — which had never executed due to a broken
+  `dist/test` glob — now run and pass (65 tests across sigma-agents,
+  sigma-skills, sigma-memory).
+
+### Added
+
+- **The /plan PLAN phase now applies the prompt-architect skill.** The bundled
+  `skills/prompt-architect/SKILL.md` is loaded from disk and embedded in the
+  PLAN phase instruction, and every task in `todo-<ts>.md` must follow the
+  `[CONTEXT] → [TASK] → [FORMAT] → [CONSTRAINTS]` structure so the CODE phase
+  receives self-contained, unambiguous prompts. `agents/plan.md` documents the
+  same task format.
+- **Skill hints are injected into the model context.** When user input matches
+  a skill (score threshold, once per skill per session), a compact hint with
+  the SKILL.md path is appended to the message — previously skills were only
+  surfaced as a UI notification the model never saw.
+- **OpenCode Zen is now a live provider.** `opencode` gets a runtime model
+  catalog (`https://opencode.ai/zen/v1/models`), a `/setup` wizard entry, a
+  static fallback, and appears in `/models refresh`.
+- **New models are discovered at startup for providers configured via /auth or
+  env vars alone.** The session-start catalog refresh previously only covered
+  providers already present in `models.json`, so a user who set
+  `OPENCODE_API_KEY` never saw new upstream models (e.g. GLM 5.2 on OpenCode
+  Go). Refreshes now also cover authenticated built-in providers, resolve API
+  keys through the registry, persist only the models missing from the built-in
+  catalog (built-in cost/capability metadata stays authoritative), and respect
+  `PI_OFFLINE`.
+- **Refreshed built-in catalogs.** `models.generated.ts` regenerated
+  (OpenCode Zen/Go now include GLM 5.2, MiniMax M3, Kimi K2.7 Code, Qwen 3.7
+  Max…), OpenCode Go static fallback updated to the 2026-07-10 live list, and
+  `config/routing.schema.json` added for the routing config.
+
 ## [0.84.2] - 2026-06-14
 
 ### Fixed
