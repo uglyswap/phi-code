@@ -3,13 +3,13 @@
 	"title": "phi-code routing configuration",
 	"description": "Maps task categories to models and agents. The runtime file lives at ~/.phi/agent/routing.json (written by /phi-init or /plan-models); this schema documents its shape.",
 	"type": "object",
-	"required": ["version", "routes"],
+	"required": ["routes"],
 	"properties": {
 		"$schema": { "type": "string" },
 		"$comment": { "type": "string" },
 		"version": {
 			"type": "integer",
-			"description": "Config format version",
+			"description": "Config format version (optional; written by /phi-init)",
 			"const": 1
 		},
 		"routes": {

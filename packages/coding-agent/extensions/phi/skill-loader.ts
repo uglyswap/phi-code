@@ -28,12 +28,12 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 export default function skillLoaderExtension(pi: ExtensionAPI) {
-	// Bundled skills live inside the package in the repo layout; postinstall
-	// copies them to ~/.phi/agent/skills (== globalDir) in the installed layout,
-	// where the relative hop from ~/.phi/agent/extensions/ would point at the
-	// non-existent ~/skills. Probe both (the scanner dedupes by skill name).
+	// Bundled skills live at <package>/skills in the repo layout (two hops up
+	// from extensions/phi/); postinstall copies them to ~/.phi/agent/skills
+	// (== globalDir) in the installed layout. Probe both (the scanner dedupes
+	// by skill name).
 	const bundledCandidates = [
-		join(__dirname, "..", "..", "..", "skills"),
+		join(__dirname, "..", "..", "skills"),
 		join(homedir(), ".phi", "agent", "skills"),
 	];
 	const config: SkillsConfig = {

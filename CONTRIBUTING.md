@@ -34,10 +34,11 @@ Phi Code is a monorepo managed with npm workspaces. The main packages are:
 
 ## Architecture Principles
 
-1. **Minimal core modifications**: Phi Code is a fork of Pi. We keep Pi's core intact and add features via extensions and new packages.
+1. **Minimal core modifications**: Phi Code is a fork of Pi. We keep Pi's core intact and add features via extensions and new packages. Branding rules (what says "phi", what deliberately stays "pi" for clean upstream merges) are codified in [packages/coding-agent/docs/fork-policy.md](packages/coding-agent/docs/fork-policy.md) — read it before touching any pi/phi naming.
 2. **Extension-first**: New features should be extensions (in `packages/coding-agent/extensions/phi/`) when possible.
 3. **No external dependencies**: Extensions should use only Node.js built-ins and `@sinclair/typebox`.
 4. **Free models by default**: Everything works out of the box with Alibaba Coding Plan (free unlimited).
+5. **Single source of truth**: bundled agents/skills/config live in `packages/coding-agent/{agents,skills,config}` only (the published package). Routing defaults come from `SmartRouter.defaultConfig()`; `config/routing.example.json` is documentation kept in sync by `test/routing-config.test.ts`. Agent `.md` parsing goes through `extensions/phi/providers/agent-def.ts`.
 
 ## Adding an Extension
 
@@ -57,13 +58,13 @@ export default function myExtension(pi: ExtensionAPI) {
 
 ## Adding a Skill
 
-1. Create a directory in `skills/<skill-name>/`
+1. Create a directory in `packages/coding-agent/skills/<skill-name>/`
 2. Add a `SKILL.md` with usage instructions
 3. The skill-loader extension will automatically detect it
 
 ## Adding a Sub-Agent
 
-1. Create a `.md` file in `agents/` with YAML frontmatter:
+1. Create a `.md` file in `packages/coding-agent/agents/` with YAML frontmatter:
 
 ```markdown
 ---
