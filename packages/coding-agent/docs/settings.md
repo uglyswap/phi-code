@@ -50,9 +50,9 @@ Edit directly or use `/settings` for common options.
 
 ### Telemetry and update checks
 
-`enableInstallTelemetry` only controls the anonymous install/update ping to `https://pi.dev/api/report-install`. Opting out of telemetry does not disable update checks; Pi can still fetch `https://pi.dev/api/latest-version` to look for the latest version.
+phi-code sends no install/update telemetry (the inherited upstream ping to `pi.dev` was removed; `enableInstallTelemetry` is kept for settings compatibility but has no effect). The update check fetches `https://registry.npmjs.org/@phi-code-admin/phi-code/latest` to look for a newer phi-code release.
 
-Set `PI_SKIP_VERSION_CHECK=1` to disable the Pi version update check. Use `--offline` or `PI_OFFLINE=1` to disable all startup network operations described here, including update checks, package update checks, and install/update telemetry.
+Set `PI_SKIP_VERSION_CHECK=1` to disable the phi-code version update check. Use `--offline` or `PI_OFFLINE=1` to disable all startup network operations described here, including update checks and package update checks.
 
 ### Warnings
 
