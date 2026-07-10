@@ -51,7 +51,8 @@ describe("version checks", () => {
 			`https://registry.npmjs.org/${PACKAGE_NAME}/latest`,
 			expect.objectContaining({
 				headers: expect.objectContaining({
-					"User-Agent": expect.stringMatching(/^pi\/1\.2\.3 /),
+					// APP_NAME-driven UA: "phi/<version>" for phi-code builds
+					"User-Agent": expect.stringMatching(/^phi\/1\.2\.3 /),
 					accept: "application/json",
 				}),
 			}),
