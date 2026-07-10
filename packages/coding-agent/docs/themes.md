@@ -1,4 +1,4 @@
-> pi can create themes. Ask it to build one for your setup.
+> phi can create themes. Ask it to build one for your setup.
 
 # Themes
 
@@ -16,11 +16,11 @@ Themes are JSON files that define colors for the TUI.
 
 ## Locations
 
-Pi loads themes from:
+phi loads themes from:
 
 - Built-in: `dark`, `light`
-- Global: `~/.pi/agent/themes/*.json`
-- Project: `.pi/themes/*.json`
+- Global: `~/.phi/agent/themes/*.json`
+- Project: `.phi/themes/*.json`
 - Packages: `themes/` directories or `pi.themes` entries in `package.json`
 - Settings: `themes` array with files or directories
 - CLI: `--theme <path>` (repeatable)
@@ -37,15 +37,15 @@ Select a theme via `/settings` or in `settings.json`:
 }
 ```
 
-On first run, pi detects your terminal background and defaults to `dark` or `light`.
+On first run, phi detects your terminal background and defaults to `dark` or `light`.
 
 ## Creating a Custom Theme
 
 1. Create a theme file:
 
 ```bash
-mkdir -p ~/.pi/agent/themes
-vim ~/.pi/agent/themes/my-theme.json
+mkdir -p ~/.phi/agent/themes
+vim ~/.phi/agent/themes/my-theme.json
 ```
 
 2. Define the theme with all required colors (see [Color Tokens](#color-tokens)):
@@ -116,7 +116,7 @@ vim ~/.pi/agent/themes/my-theme.json
 
 3. Select the theme via `/settings`.
 
-**Hot reload:** When you edit the currently active custom theme file, pi reloads it automatically for immediate visual feedback.
+**Hot reload:** When you edit the currently active custom theme file, phi reloads it automatically for immediate visual feedback.
 
 ## Theme Format
 
@@ -268,7 +268,7 @@ Four formats are supported:
 
 ### Terminal Compatibility
 
-Pi uses 24-bit RGB colors. Most modern terminals support this (iTerm2, Kitty, WezTerm, Windows Terminal, VS Code). For older terminals with only 256-color support, pi falls back to the nearest approximation.
+phi uses 24-bit RGB colors. Most modern terminals support this (iTerm2, Kitty, WezTerm, Windows Terminal, VS Code). For older terminals with only 256-color support, phi falls back to the nearest approximation.
 
 Check truecolor support:
 

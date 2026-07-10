@@ -30,7 +30,7 @@ See these complete provider examples:
 ## Quick Reference
 
 ```typescript
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@phi-code-admin/phi-code";
 
 export default function (pi: ExtensionAPI) {
   // Override baseUrl for existing provider
@@ -59,7 +59,7 @@ export default function (pi: ExtensionAPI) {
 }
 ```
 
-The extension factory can also be `async`. For dynamic model discovery, fetch and register models in the factory instead of `session_start`. pi waits for the factory before startup continues, so the provider is available during interactive startup and to `pi --list-models`.
+The extension factory can also be `async`. For dynamic model discovery, fetch and register models in the factory instead of `session_start`. phi waits for the factory before startup continues, so the provider is available during interactive startup and to `phi --list-models`.
 
 ## Override Existing Provider
 
@@ -96,7 +96,7 @@ To add a completely new provider, specify `models` along with the required confi
 If the model list comes from a remote endpoint, use an async extension factory:
 
 ```typescript
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@phi-code-admin/phi-code";
 
 export default async function (pi: ExtensionAPI) {
   const response = await fetch("http://localhost:1234/v1/models");
@@ -330,7 +330,7 @@ interface OAuthLoginCallbacks {
 
 ### OAuthCredentials
 
-Credentials are persisted in `~/.pi/agent/auth.json`:
+Credentials are persisted in `~/.phi/agent/auth.json`:
 
 ```typescript
 interface OAuthCredentials {
