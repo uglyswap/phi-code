@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { existsSync, mkdirSync, rmSync } from "fs";
+import { existsSync, mkdirSync, rmSync, utimesSync } from "fs";
 import { join } from "path";
 import { NotesManager } from "../src/notes.js";
 import type { MemoryConfig } from "../src/types.js";
@@ -59,6 +59,11 @@ describe("NotesManager", () => {
 	test("list should return files sorted by date descending", () => {
 		notesManager.write("Content 1", "file1.md");
 		notesManager.write("Content 2", "file2.md");
+
+		// Two writes can land in the same mtime millisecond; make the order
+		// unambiguous instead of relying on write timing.
+		const earlier = new Date(Date.now() - 60_000);
+		utimesSync(join(tempDir, "notes", "file1.md"), earlier, earlier);
 
 		const files = notesManager.list();
 

@@ -1,13 +1,13 @@
 {
 	"name": "sigma-memory",
-	"version": "0.2.6",
+	"version": "0.2.7",
 	"description": "Persistent memory for Phi Code — embedded vector search + Ontology graph + Markdown notes",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
 	"scripts": {
 		"build": "tsc",
 		"clean": "rm -rf dist",
-		"test": "node --test dist/test/*.test.js"
+		"test": "tsx --test test/*.test.ts"
 	},
 	"dependencies": {
 		"@huggingface/transformers": "^3.8.1",

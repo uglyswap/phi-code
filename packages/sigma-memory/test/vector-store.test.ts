@@ -21,21 +21,21 @@ describe("VectorStore", () => {
 
 		vectorStore = new VectorStore(dbPath);
 
-		// Mock the embedding pipeline to avoid downloading models
+		// Mock the embedding pipeline to avoid downloading models.
+		// The real transformers pipeline is a callable, not an object with a
+		// .call method — embed() invokes `this.pipeline(text, options)` directly.
 		(vectorStore as any).ensurePipeline = async () => {
-			(vectorStore as any).pipeline = {
-				async call(text: string) {
-					// Return a simple mock embedding based on text length
-					const length = text.length;
-					return {
-						data: new Float32Array([
-							length / 100,
-							(length % 10) / 10,
-							Math.sin(length) / 2 + 0.5,
-							Math.cos(length) / 2 + 0.5,
-						]),
-					};
-				},
+			(vectorStore as any).pipeline = async (text: string) => {
+				// Return a simple mock embedding based on text length
+				const length = text.length;
+				return {
+					data: new Float32Array([
+						length / 100,
+						(length % 10) / 10,
+						Math.sin(length) / 2 + 0.5,
+						Math.cos(length) / 2 + 0.5,
+					]),
+				};
 			};
 		};
 	});
@@ -148,20 +148,18 @@ describe("VectorStore", () => {
 		// Create new instance and verify data persisted
 		const newVectorStore = new VectorStore(dbPath);
 
-		// Mock the pipeline again for the new instance
+		// Mock the pipeline again for the new instance (callable, see above)
 		(newVectorStore as any).ensurePipeline = async () => {
-			(newVectorStore as any).pipeline = {
-				async call(text: string) {
-					const length = text.length;
-					return {
-						data: new Float32Array([
-							length / 100,
-							(length % 10) / 10,
-							Math.sin(length) / 2 + 0.5,
-							Math.cos(length) / 2 + 0.5,
-						]),
-					};
-				},
+			(newVectorStore as any).pipeline = async (text: string) => {
+				const length = text.length;
+				return {
+					data: new Float32Array([
+						length / 100,
+						(length % 10) / 10,
+						Math.sin(length) / 2 + 0.5,
+						Math.cos(length) / 2 + 0.5,
+					]),
+				};
 			};
 		};
 
