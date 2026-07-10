@@ -13,7 +13,13 @@
  *   > continue (with diagnostics).
  */
 
-import { isTransientError, type PhaseVerdict } from "./orchestrator-helpers.js";
+import {
+	extractBlockingFindings,
+	extractHandoff,
+	isTransientError,
+	type PhaseVerdict,
+	parsePhaseVerdict,
+} from "./orchestrator-helpers.js";
 
 export interface PhaseEndAnalysis {
 	userAborted: boolean;
@@ -177,16 +183,65 @@ export interface PhaseDecisionInput {
 	analysis: PhaseEndAnalysis;
 	/** Currently executing phase, or null when the queue raced. */
 	phase: { key: string; retried?: boolean } | null;
-	/** Verdict parsed from the phase's report file (null = absent/unparseable). */
+	/** Resolved verdict (structured phase_result or parsed report; null = none). */
 	verdict: PhaseVerdict | null;
-	/** Whether a report file existed at all for this phase. */
-	hasReport: boolean;
 	/** Completed review-fix cycles so far (bounded to one). */
 	reviewFixRounds: number;
 	maxToolCallsPerPhase: number;
 }
 
-/** Phases whose contract REQUIRES a leading "VERDICT:" line in their report. */
+/**
+ * Structured phase result: what a phase agent emits by CALLING the
+ * `phase_result` tool (robust primary path), instead of only writing markdown
+ * that has to be regex-scraped (fragile fallback). All fields optional — a
+ * partial structured emission is merged field-by-field with the parsed report.
+ */
+export interface StructuredPhaseResult {
+	verdict?: PhaseVerdict;
+	blocking?: string;
+	handoff?: string;
+}
+
+export interface EffectivePhaseOutcome {
+	verdict: PhaseVerdict | null;
+	blocking: string;
+	handoff: string;
+	/** Where each resolved field came from — for diagnostics and tests. */
+	source: "structured" | "text" | "mixed" | "none";
+}
+
+/**
+ * Resolve a phase's effective outcome, preferring the structured tool emission
+ * and falling back to the regex-scraped markdown report per field. This is the
+ * heart of the "structured primary, text fallback" contract: when the model
+ * calls phase_result the outcome is exact; when it doesn't, behavior is
+ * identical to the pure-text path that shipped before.
+ */
+export function resolvePhaseOutcome(
+	structured: StructuredPhaseResult | null,
+	reportText: string | null,
+): EffectivePhaseOutcome {
+	const textVerdict = reportText ? parsePhaseVerdict(reportText) : null;
+	const textBlocking = reportText ? extractBlockingFindings(reportText) : "";
+	const textHandoff = reportText ? extractHandoff(reportText) : "";
+
+	const verdict = structured?.verdict ?? textVerdict;
+	const blocking = structured?.blocking?.trim() || textBlocking;
+	const handoff = structured?.handoff?.trim() || textHandoff;
+
+	const usedStructured = Boolean(
+		structured && (structured.verdict || structured.blocking?.trim() || structured.handoff?.trim()),
+	);
+	const usedText = Boolean(textVerdict || textBlocking || textHandoff);
+	let source: EffectivePhaseOutcome["source"] = "none";
+	if (usedStructured && usedText) source = "mixed";
+	else if (usedStructured) source = "structured";
+	else if (usedText) source = "text";
+
+	return { verdict, blocking, handoff, source };
+}
+
+/** Phases whose contract REQUIRES a verdict (structured or a leading VERDICT: line). */
 const VERDICT_PHASES = new Set(["test", "review"]);
 
 /**
@@ -194,7 +249,7 @@ const VERDICT_PHASES = new Set(["test", "review"]);
  * caller interprets the decision (notifications, queue edits, checkpoints).
  */
 export function decidePhaseTransition(input: PhaseDecisionInput): PhaseDecision {
-	const { analysis, phase, verdict, hasReport, reviewFixRounds, maxToolCallsPerPhase } = input;
+	const { analysis, phase, verdict, reviewFixRounds, maxToolCallsPerPhase } = input;
 
 	if (analysis.userAborted) return { action: "stop", reason: "user-abort" };
 	if (analysis.hasAuthError) return { action: "stop", reason: "auth-error" };
@@ -212,9 +267,17 @@ export function decidePhaseTransition(input: PhaseDecisionInput): PhaseDecision 
 		return { action: "review-fix-cycle" };
 	}
 
+	// A TEST/REVIEW phase must produce a verdict (structured phase_result is
+	// mandatory for them, with the report's VERDICT line as fallback). If it
+	// completed with tool work but no verdict either way, that is a contract
+	// deviation worth surfacing — not silently passing. The zero-tool-call case
+	// has its own warning, so exclude it here to avoid a double warning.
+	const missingVerdict =
+		phase !== null && VERDICT_PHASES.has(phase.key) && verdict === null && analysis.toolCallCount > 0;
+
 	return {
 		action: "continue",
 		zeroToolCalls: analysis.toolCallCount === 0,
-		missingVerdict: phase !== null && VERDICT_PHASES.has(phase.key) && hasReport && verdict === null,
+		missingVerdict,
 	};
 }
