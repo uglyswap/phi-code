@@ -705,6 +705,7 @@ After implementation, use \`memory_write\` to save a summary of what was built, 
 **Ontology update:** Use \`ontology_add\` to update the project status (e.g., entity "implementation" type "Phase" with properties {status: "complete", files: "N"}) and add a relation to the project entity.
 
 **CRITICAL RULES:**
+- **Minimal diff, root cause.** Prefer the SMALLEST change that fixes the underlying cause. Every extra condition, guard, or early-return you add is a liability — it can silently make the fix a no-op in the real scenario (a guard that skips the fix on the exact input the bug is about). When in doubt, do LESS and match the existing code's pattern rather than adding cleverness. A fix more elaborate than the problem is a red flag, not thoroughness.
 - Write ONE file per tool call — NEVER combine multiple files in a single response
 - Keep each file under 500 lines. If longer, split into modules
 - After writing ALL files, verify they exist with a single \`find . -name '*.ts' -o -name '*.js' -o -name '*.html' | sort\`` +
@@ -729,13 +730,11 @@ After implementation, use \`memory_write\` to save a summary of what was built, 
 
 **Step 1:** Read \`.phi/plans/todo-*.md\` to know what was planned
 **Step 2:** Read \`.phi/plans/progress-*.md\` to see what was done
-**Step 3:** ACTUALLY RUN the code and observe it (proof, not a declarative checkbox). Verification = runtime evidence, by surface type:
-   - **CLI:** run the real command, capture stdout AND the exit code, paste them.
-   - **HTTP/API:** start the server in the background with a readiness wait, then \`curl\` the route that changed; paste the response + status.
-   - **Library/package:** import the public entry and call it; paste the output.
-   - At least one adversarial probe per feature (empty input, wrong type, missing arg).
-   - Running \`npm test\` alone is NOT sufficient proof for a feature.
-**Step 4:** Fix any real errors you find (root cause, not a workaround).
+**Step 3 (GROUND TRUTH — the single most important step):** Derive the expected behaviour from the **Project Request above**, NEVER from the code that was written. Write a reproduction of the EXACT scenario the request describes — same conditions, same inputs. If the request is about a streaming response with no charset, stream a chunked response with no charset; if it is about an empty list, pass an empty list. Assert the behaviour the **request** says is correct, and make each assertion trace to a specific phrase in the request.
+   - **CRITICAL ANTI-PATTERN:** do NOT write a test that merely re-states what the CODE now does — that only confirms the code's own assumptions, which is exactly how a wrong fix passes its own tests. The test must be written as if you had NOT seen the fix.
+   - **FALSIFY FIRST:** your reproduction MUST FAIL against the ORIGINAL (pre-fix) code — \`git stash\` the fix, run it, confirm it fails, then \`git stash pop\` and confirm it now passes. If it passes on the original code, it does not reproduce the bug: rewrite it. Paste both runs.
+**Step 3b:** ACTUALLY RUN it and paste runtime evidence (stdout + exit code). Add at least one adversarial probe per feature (empty input, wrong type, missing arg). Running \`npm test\`/the existing suite alone is NOT sufficient — it does not cover the new scenario.
+**Step 4:** Fix any real errors you find (root cause, not a workaround). If the fix is a no-op in the request's own scenario, that is a FAIL, not a pass.
 **Step 5:** Write test results to \`.phi/plans/test-${ts}.md\`, starting the file with a VERDICT line.
 **Step 6 (MANDATORY):** Call the \`phase_result\` tool with your \`verdict\` (PASS/FAIL/BLOCKED) and a concise \`handoff\`. This is how the orchestrator reads your outcome exactly; the report file above is the human-readable copy.
 
@@ -805,6 +804,7 @@ After testing, use \`memory_write\` to save test results, bugs found, and lesson
    - **Angle 1 - Correctness:** read the diff line by line. What behaviour did it change or remove? Off-by-one, null/undefined, wrong condition, broken invariant.
    - **Angle 2 - Cross-file:** grep the callers and callees of changed symbols. Did a signature/return/contract change break a caller elsewhere?
    - **Angle 3 - Security & language pitfalls:** input validation, injection, secrets, auth, error handling; plus language traps (async not awaited, shadowed scope, mutation of shared state).
+   - **Angle 4 - Over-engineering & dead guards (the failure mode that ships confident-wrong fixes — check this FIRST):** for EVERY new condition, guard, or early-return the diff added, name the concrete input where it takes the SKIP / else branch, and check the behaviour is still correct THERE — *especially against the exact scenario in the Project Request*. A guard that makes the fix a no-op in the request's own scenario (e.g. an \`if buffered\` guard on a bug that is about the streaming path) is a **CONFIRMED** blocking bug. Then compare the diff's size to the problem: if the fix is more elaborate than the request requires, or does not match the surrounding code's existing pattern, that itself is a finding — the minimal change is usually the correct one.
 **Step 3 - VERIFY (3-state, cite the line):** for EACH candidate, quote the exact line and classify:
    - **CONFIRMED** - you can name the input/state that triggers it and the wrong output. Quote the line.
    - **PLAUSIBLE** - the mechanism is real but the trigger is uncertain. Say what would confirm it.
