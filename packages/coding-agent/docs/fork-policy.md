@@ -61,3 +61,21 @@ use these constants, never a hardcoded "pi" or "phi".**
 `agents/`, `skills/`, `config/`, the `sigma-*` packages, and the browser and
 camoufox packages are phi-code territory: normal engineering rules apply,
 no merge constraints.
+
+## Reproducible releases: the generated model catalog
+
+`packages/ai/src/models.generated.ts` (and `image-models.generated.ts`) are
+**committed source files and the source of truth for every build**. `npm run
+build` compiles them with `tsgo`; it does NOT fetch models.dev, so a build/
+publish always ships exactly what is in git — releases are reproducible.
+
+Refreshing the catalog is a separate, explicit action:
+
+- `npm run generate --workspace=packages/ai` regenerates from models.dev.
+- The maintainer reviews the diff, commits it, and bumps `packages/ai`.
+- `.github/workflows/refresh-models.yml` does this weekly and opens a PR, so the
+  catalog never rots without a human in the loop.
+
+CI enforces the invariant: the `check` job fails if the committed catalog
+differs from a clean checkout (`git diff --exit-code`), catching both a stray
+hand-edit and any build that regenerated it.

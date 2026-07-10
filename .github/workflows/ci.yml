@@ -7,6 +7,34 @@ on:
     branches: [main]
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Lint + format + types gate every PR, including fork PRs that bypass the
+      # local pre-commit hook. `biome ci` fails on any diff instead of writing.
+      - name: Lint & format
+        run: npx biome ci .
+
+      - name: Typecheck
+        run: npx tsgo --noEmit
+
+      # The published model catalog is a committed source file (see
+      # docs/fork-policy.md). Fail if someone hand-edited it out of sync or a
+      # build regenerated it — releases must match what is in git.
+      - name: Model catalog is committed & clean
+        run: git diff --exit-code packages/ai/src/models.generated.ts packages/ai/src/image-models.generated.ts
+
   build:
     runs-on: ubuntu-latest
     strategy:
