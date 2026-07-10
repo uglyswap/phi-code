@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.87.0] - 2026-07-10
+
+### Added
+
+- **The /plan orchestrator's phase state machine is now unit-tested.** Its
+  decision core — what to do after each phase given the messages and the report
+  (user abort > auth error > transient retry > BLOCKED pause > review-FAIL fix
+  cycle > continue) — is extracted into a pure module
+  (`extensions/phi/providers/phase-machine.ts`) and covered by 32 tests,
+  including the cases where a model deviates from the text contract: a missing
+  or unparseable `VERDICT:` line is now surfaced to the user instead of being
+  silently treated as a pass, and zero-tool-call / queue-race paths are pinned.
+  The `agent_end` hook keeps the exact same behavior but now only interprets
+  the decision (I/O), it no longer decides.
+- **Section parsing tolerates the header shapes models actually emit.**
+  `extractSection` (HANDOFF / BLOCKING) now handles a markdown heading, a
+  standalone bold label (`**HANDOFF**`) or a plain `LABEL:` line, and splits a
+  report written entirely with bold labels — previously a bold-only `**HANDOFF**`
+  returned nothing. Added regression tests for these deviations.
+
+### Changed
+
+- **extensions/ and the sigma-\* packages are now linted.** Biome previously
+  skipped them entirely (typecheck covered them, lint did not); they are in the
+  linted set and the whole repo is clean (`biome ci .` passes on 752 files,
+  zero warnings). Idiomatic-but-flagged regex-exec loops in web-search were
+  rewritten through an `execAll` generator rather than silenced with rule
+  overrides.
+- **Releases are reproducible.** `npm run build` no longer regenerates the
+  model catalog from models.dev — the committed `packages/ai/src/*.generated.ts`
+  is the source of truth and `build` just compiles it, so a publish ships
+  exactly what is in git. Regeneration is an explicit `npm run generate
+  --workspace=packages/ai` step; a scheduled `refresh-models.yml` workflow
+  opens a PR weekly so the catalog still stays fresh with a human in the loop.
+
+### CI / process
+
+- **CI now gates lint, format, types and catalog-cleanliness on every PR**
+  (`biome ci`, `tsgo --noEmit`, and `git diff --exit-code` on the generated
+  catalog), not just build + test — fork PRs that bypass the local pre-commit
+  hook are covered. A pull-request template makes the discipline checklist
+  explicit, and `docs/fork-policy.md` documents the reproducible-catalog flow.
+
 ## [0.86.0] - 2026-07-10
 
 ### Changed
