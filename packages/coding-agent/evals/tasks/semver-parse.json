@@ -1,0 +1,7 @@
+{
+	"id": "semver-parse",
+	"description": "Parse a semver string with strict validation (edge cases single-shot often misses)",
+	"prompt": "Create semver.js (CommonJS) exporting a function `parse(str)` that parses a semantic version string 'MAJOR.MINOR.PATCH' into an object {major, minor, patch} of numbers. It MUST return null for any invalid input: missing parts ('1.2'), extra parts ('1.2.3.4'), non-numeric parts ('a.b.c'), leading zeros ('01.2.3'), empty string, or negative numbers. Only three dot-separated non-negative integers with no leading zeros are valid. Nothing else.",
+	"verify": "node -e \"const m=require('./semver.js'); const p=typeof m==='function'?m:m.parse; const a=require('assert'); a.deepStrictEqual(p('1.2.3'),{major:1,minor:2,patch:3}); a.deepStrictEqual(p('0.0.0'),{major:0,minor:0,patch:0}); a.strictEqual(p('1.2'),null); a.strictEqual(p('1.2.3.4'),null); a.strictEqual(p('a.b.c'),null); a.strictEqual(p('01.2.3'),null); a.strictEqual(p(''),null); a.strictEqual(p('-1.2.3'),null); a.strictEqual(p('1.2.-3'),null); console.log('VERIFY-OK');\"",
+	"timeoutSec": 240
+}
