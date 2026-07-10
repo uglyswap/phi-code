@@ -1,6 +1,6 @@
 import { randomBytes } from "crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "fs";
-import { dirname, join } from "path";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from "fs";
+import { dirname } from "path";
 import type {
 	MemoryConfig,
 	OntologyDeleteEntry,
@@ -12,7 +12,6 @@ import type {
 } from "./types.js";
 
 export class OntologyManager {
-	private config: MemoryConfig;
 	private graphPath: string;
 	private entities: Map<string, OntologyEntity> = new Map();
 	private relations: Map<string, OntologyRelation> = new Map();
@@ -22,7 +21,6 @@ export class OntologyManager {
 	private lastMtimeMs = 0;
 
 	constructor(config: MemoryConfig) {
-		this.config = config;
 		this.graphPath = config.ontologyPath;
 		this.ensureDirectories();
 	}
@@ -114,7 +112,7 @@ export class OntologyManager {
 						}
 						break;
 				}
-			} catch (error) {
+			} catch (_error) {
 				// Skip malformed JSONL line
 			}
 		}
@@ -124,7 +122,7 @@ export class OntologyManager {
 
 	private appendToFile(entry: OntologyJSONLEntry): void {
 		this.ensureDirectories();
-		const line = JSON.stringify(entry) + "\n";
+		const line = `${JSON.stringify(entry)}\n`;
 		appendFileSync(this.graphPath, line, "utf8");
 		// Record the new mtime so our own write does not look like an external
 		// change and force a needless reload on the next read.

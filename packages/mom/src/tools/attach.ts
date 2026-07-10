@@ -24,7 +24,7 @@ export function setWorkspaceRoot(root: string | null): void {
  * Returns true when `target` is contained within `root` (or equal to it).
  */
 function isWithinRoot(target: string, root: string): boolean {
-	return target === root || target.startsWith(root + pathSep) || target.startsWith(root + "/");
+	return target === root || target.startsWith(root + pathSep) || target.startsWith(`${root}/`);
 }
 
 /**

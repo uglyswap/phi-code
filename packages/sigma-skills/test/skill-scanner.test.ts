@@ -14,7 +14,7 @@ describe("SkillScanner", () => {
 
 	beforeEach(() => {
 		// Create temporary test directories
-		tempDir = join(process.cwd(), "test-skills-" + Date.now());
+		tempDir = join(process.cwd(), `test-skills-${Date.now()}`);
 		globalDir = join(tempDir, "global");
 		projectDir = join(tempDir, "project");
 		bundledDir = join(tempDir, "bundled");

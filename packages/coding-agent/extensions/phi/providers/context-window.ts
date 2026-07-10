@@ -44,7 +44,10 @@ export function inferContextWindow(modelId: string, apiValue?: number, providerI
 
 /** Parse a context-window value like "256k", "1M", "1.5m", or "200000". */
 export function parseContextWindow(input: string): number | undefined {
-	const m = input.trim().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*([km])?$/);
+	const m = input
+		.trim()
+		.toLowerCase()
+		.match(/^(\d+(?:\.\d+)?)\s*([km])?$/);
 	if (!m) return undefined;
 	const n = Number.parseFloat(m[1]);
 	if (!Number.isFinite(n) || n <= 0) return undefined;

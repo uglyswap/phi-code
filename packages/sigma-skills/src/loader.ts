@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { SkillScanner } from "./scanner.js";
-import { type Skill, type SkillMatch, SkillsConfig } from "./types.js";
+import type { Skill, SkillMatch } from "./types.js";
 
 export class SkillLoader {
 	private scanner: SkillScanner;
@@ -112,7 +112,7 @@ export class SkillLoader {
 
 			console.log(`Skill '${skillName}' installed successfully to ${targetPath}`);
 			return true;
-		} catch (error) {
+		} catch (_error) {
 			// Skill installation failed
 			return false;
 		}

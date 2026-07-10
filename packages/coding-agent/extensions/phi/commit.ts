@@ -162,21 +162,22 @@ function deriveSubject(stagedFiles: string[], assistantHint: string): string {
 
 export default function commitExtension(pi: ExtensionAPI) {
 	pi.registerCommand("commit", {
-		description: "Deterministically commit staged changes ([phi] prefix, no LLM). Use --all to stage everything first.",
+		description:
+			"Deterministically commit staged changes ([phi] prefix, no LLM). Use --all to stage everything first.",
 		handler: async (args: string, ctx: ExtensionCommandContext) => {
 			try {
 				// 1. Parse args: extract the --all flag, keep the rest as the message.
 				const tokens = args.trim().split(/\s+/).filter(Boolean);
 				const stageAll = tokens.includes("--all");
-				const userMessage = tokens.filter((t) => t !== "--all").join(" ").trim();
+				const userMessage = tokens
+					.filter((t) => t !== "--all")
+					.join(" ")
+					.trim();
 
 				// 2. Confirm we are inside a git repo with changes.
 				const status = await pi.exec("git", ["status", "--porcelain"], { cwd: ctx.cwd });
 				if (status.code !== 0) {
-					ctx.ui.notify(
-						"Not a git repository (or git unavailable). Nothing to commit.",
-						"warning",
-					);
+					ctx.ui.notify("Not a git repository (or git unavailable). Nothing to commit.", "warning");
 					return;
 				}
 				if (status.stdout.trim().length === 0) {
@@ -197,10 +198,7 @@ export default function commitExtension(pi: ExtensionAPI) {
 				const afterStatus = await pi.exec("git", ["status", "--porcelain"], { cwd: ctx.cwd });
 				const stagedFiles = parseStagedFiles(afterStatus.stdout);
 				if (stagedFiles.length === 0) {
-					ctx.ui.notify(
-						"No staged changes to commit. Stage files first, or run `/commit --all`.",
-						"warning",
-					);
+					ctx.ui.notify("No staged changes to commit. Stage files first, or run `/commit --all`.", "warning");
 					return;
 				}
 
@@ -243,10 +241,7 @@ export default function commitExtension(pi: ExtensionAPI) {
 					"info",
 				);
 			} catch (err) {
-				ctx.ui.notify(
-					`/commit error: ${err instanceof Error ? err.message : String(err)}`,
-					"error",
-				);
+				ctx.ui.notify(`/commit error: ${err instanceof Error ? err.message : String(err)}`, "error");
 			}
 		},
 	});

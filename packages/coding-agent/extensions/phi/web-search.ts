@@ -48,8 +48,12 @@ function randomUA(): string {
 
 function decodeEntities(text: string): string {
 	return text
-		.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-		.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#x27;/g, "'")
+		.replace(/&amp;/g, "&")
+		.replace(/&lt;/g, "<")
+		.replace(/&gt;/g, ">")
+		.replace(/&quot;/g, '"')
+		.replace(/&#39;/g, "'")
+		.replace(/&#x27;/g, "'")
 		.replace(/&#(\d+);/g, (m, n) => {
 			try {
 				return String.fromCodePoint(parseInt(n, 10));
@@ -68,6 +72,15 @@ function decodeEntities(text: string): string {
 
 function stripTags(html: string): string {
 	return decodeEntities(html.replace(/<[^>]*>/g, "")).trim();
+}
+
+/** Iterate every match of a global regex without assign-in-while. */
+function* execAll(regex: RegExp, input: string): Generator<RegExpExecArray> {
+	let match = regex.exec(input);
+	while (match !== null) {
+		yield match;
+		match = regex.exec(input);
+	}
 }
 
 // ─── Trust boundary ───
@@ -268,9 +281,9 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 		const response = await fetch(`https://www.google.com/search?${params}`, {
 			headers: {
 				"User-Agent": randomUA(),
-				"Accept": "text/html,application/xhtml+xml",
+				Accept: "text/html,application/xhtml+xml",
 				"Accept-Language": "en-US,en;q=0.9",
-				"Cookie": "CONSENT=PENDING+987",
+				Cookie: "CONSENT=PENDING+987",
 			},
 			signal: AbortSignal.timeout(HTTP_TIMEOUT),
 		});
@@ -287,13 +300,14 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 
 		// Strategy 1: <div class="g"> blocks with <h3> and <a href>
 		const gBlockRegex = /<div class="g"[^>]*>(.*?)<\/div>\s*<\/div>\s*<\/div>/gs;
-		let gMatch;
-		while ((gMatch = gBlockRegex.exec(html)) !== null && results.length < count) {
+		for (const gMatch of execAll(gBlockRegex, html)) {
+			if (results.length >= count) break;
 			const block = gMatch[1];
 			const linkMatch = block.match(/<a[^>]*href="(https?:\/\/[^"]+)"[^>]*>/);
 			const titleMatch = block.match(/<h3[^>]*>(.*?)<\/h3>/s);
-			const snippetMatch = block.match(/<div[^>]*class="[^"]*VwiC3b[^"]*"[^>]*>(.*?)<\/div>/s)
-				|| block.match(/<span[^>]*class="[^"]*st[^"]*"[^>]*>(.*?)<\/span>/s);
+			const snippetMatch =
+				block.match(/<div[^>]*class="[^"]*VwiC3b[^"]*"[^>]*>(.*?)<\/div>/s) ||
+				block.match(/<span[^>]*class="[^"]*st[^"]*"[^>]*>(.*?)<\/span>/s);
 
 			if (linkMatch && titleMatch) {
 				const url = linkMatch[1];
@@ -311,8 +325,8 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 		// Strategy 2: find <h3> + nearest <a href>
 		if (results.length === 0) {
 			const h3Regex = /<h3[^>]*>(.*?)<\/h3>/gs;
-			let h3Match;
-			while ((h3Match = h3Regex.exec(html)) !== null && results.length < count) {
+			for (const h3Match of execAll(h3Regex, html)) {
+				if (results.length >= count) break;
 				const pos = h3Match.index;
 				const surrounding = html.substring(Math.max(0, pos - 500), pos + h3Match[0].length + 200);
 				const linkMatch = surrounding.match(/<a[^>]*href="(https?:\/\/(?!www\.google)[^"]+)"[^>]*>/);
@@ -332,10 +346,11 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 
 		// Strategy 3: extract any external links
 		if (results.length === 0) {
-			const extRegex = /href="(https?:\/\/(?!www\.google|accounts\.google|support\.google|maps\.google|policies\.google)[^"]+)"/g;
+			const extRegex =
+				/href="(https?:\/\/(?!www\.google|accounts\.google|support\.google|maps\.google|policies\.google)[^"]+)"/g;
 			const seen = new Set<string>();
-			let extMatch;
-			while ((extMatch = extRegex.exec(html)) !== null && seen.size < count) {
+			for (const extMatch of execAll(extRegex, html)) {
+				if (seen.size >= count) break;
 				if (!seen.has(extMatch[1])) {
 					seen.add(extMatch[1]);
 					results.push({
@@ -365,7 +380,7 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 		const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
 			headers: {
 				"User-Agent": randomUA(),
-				"Accept": "text/html",
+				Accept: "text/html",
 				"Accept-Language": "en-US,en;q=0.5",
 			},
 			signal: AbortSignal.timeout(HTTP_TIMEOUT),
@@ -386,14 +401,18 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 		const snippetRegex = /<a[^>]*class="result__snippet"[^>]*>(.*?)<\/a>/gs;
 
 		const links: Array<{ url: string; title: string }> = [];
-		let m;
-		while ((m = linkRegex.exec(html)) !== null && links.length < count) {
+		for (const m of execAll(linkRegex, html)) {
+			if (links.length >= count) break;
 			let url = m[1];
 			const title = stripTags(m[2]);
 
 			// DDG wraps URLs through redirect
 			if (url.includes("uddg=")) {
-				try { url = decodeURIComponent(url.split("uddg=")[1].split("&")[0]); } catch { continue; }
+				try {
+					url = decodeURIComponent(url.split("uddg=")[1].split("&")[0]);
+				} catch {
+					continue;
+				}
 			}
 
 			if (url.startsWith("http") && title) {
@@ -402,8 +421,8 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 		}
 
 		const snippets: string[] = [];
-		while ((m = snippetRegex.exec(html)) !== null) {
-			snippets.push(stripTags(m[1]));
+		for (const sm of execAll(snippetRegex, html)) {
+			snippets.push(stripTags(sm[1]));
 		}
 
 		for (let i = 0; i < links.length; i++) {
@@ -440,7 +459,7 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 
 		const response = await fetch(`${BRAVE_API_URL}?${params}`, {
 			headers: {
-				"Accept": "application/json",
+				Accept: "application/json",
 				"Accept-Encoding": "gzip",
 				"X-Subscription-Token": BRAVE_API_KEY,
 			},
@@ -449,15 +468,17 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 
 		if (!response.ok) throw new Error(`Brave API HTTP ${response.status}`);
 
-		const data = await response.json() as any;
+		const data = (await response.json()) as any;
 		if (!data.web?.results) return [];
 
-		return data.web.results.map((r: any): SearchResult => ({
-			title: r.title || "No title",
-			url: r.url || "",
-			description: r.description || "",
-			source: "brave",
-		}));
+		return data.web.results.map(
+			(r: any): SearchResult => ({
+				title: r.title || "No title",
+				url: r.url || "",
+				description: r.description || "",
+				source: "brave",
+			}),
+		);
 	}
 
 	// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -556,7 +577,12 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 			throw new Error(`Schema d'URL non autorise (${u.protocol}); seuls http et https sont permis`);
 		}
 		const host = u.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-		if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".internal") || host.endsWith(".local")) {
+		if (
+			host === "localhost" ||
+			host.endsWith(".localhost") ||
+			host.endsWith(".internal") ||
+			host.endsWith(".local")
+		) {
 			throw new Error(`Hote interne bloque (SSRF): ${host}`);
 		}
 		if (isIP(host)) {
@@ -584,7 +610,7 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 			response = await fetch(currentUrl, {
 				headers: {
 					"User-Agent": randomUA(),
-					"Accept": "text/html,application/xhtml+xml,text/plain,application/json",
+					Accept: "text/html,application/xhtml+xml,text/plain,application/json",
 				},
 				redirect: "manual",
 				signal: AbortSignal.timeout(HTTP_TIMEOUT),
@@ -621,7 +647,7 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 		}
 
 		// Basic HTML → text extraction (no dependencies)
-		let readable = text
+		const readable = text
 			.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
 			.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
 			.replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
@@ -646,14 +672,17 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "web_search",
 		label: "Web Search",
-		description: "Search the web. Uses Google (primary), DuckDuckGo (fallback), Brave (if API key set). No API keys required.",
+		description:
+			"Search the web. Uses Google (primary), DuckDuckGo (fallback), Brave (if API key set). No API keys required.",
 		parameters: Type.Object({
 			query: Type.String({ description: "Search query" }),
-			count: Type.Optional(Type.Number({
-				description: "Number of results (1-10, default: 5)",
-				minimum: 1,
-				maximum: 10,
-			})),
+			count: Type.Optional(
+				Type.Number({
+					description: "Number of results (1-10, default: 5)",
+					minimum: 1,
+					maximum: 10,
+				}),
+			),
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
@@ -664,10 +693,12 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 
 				if (response.results.length === 0) {
 					return {
-						content: [{
-							type: "text",
-							text: `No search results found for "${query}". Try rephrasing your search.\n\nProviders tried: ${response.triedProviders.join(", ")}`,
-						}],
+						content: [
+							{
+								type: "text",
+								text: `No search results found for "${query}". Try rephrasing your search.\n\nProviders tried: ${response.triedProviders.join(", ")}`,
+							},
+						],
 						details: { found: false, query, triedProviders: response.triedProviders },
 					};
 				}
@@ -681,13 +712,14 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 				});
 				resultText += `\n*Results provided by ${response.provider}*`;
 				if (response.fallbackUsed) {
-					resultText += ` *(fallback from: ${response.triedProviders.filter(p => p !== response.provider).join(", ")})*`;
+					resultText += ` *(fallback from: ${response.triedProviders.filter((p) => p !== response.provider).join(", ")})*`;
 				}
 
 				return {
 					content: [{ type: "text", text: wrapUntrusted(resultText, "web") }],
 					details: {
-						found: true, query,
+						found: true,
+						query,
 						resultCount: response.results.length,
 						provider: response.provider,
 						fallbackUsed: response.fallbackUsed,
@@ -711,14 +743,17 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "fetch_url",
 		label: "Fetch URL",
-		description: "Fetch a URL and extract readable text content. Uses @mozilla/readability + jsdom if installed, otherwise basic HTML extraction.",
+		description:
+			"Fetch a URL and extract readable text content. Uses @mozilla/readability + jsdom if installed, otherwise basic HTML extraction.",
 		parameters: Type.Object({
 			url: Type.String({ description: "URL to fetch" }),
-			max_length: Type.Optional(Type.Number({
-				description: "Max characters to return (default: 8000)",
-				minimum: 500,
-				maximum: 50000,
-			})),
+			max_length: Type.Optional(
+				Type.Number({
+					description: "Max characters to return (default: 8000)",
+					minimum: 500,
+					maximum: 50000,
+				}),
+			),
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
@@ -729,7 +764,9 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 
 				if (!content || content.length < 10) {
 					return {
-						content: [{ type: "text", text: `Could not extract content from ${url}. The page may require JavaScript.` }],
+						content: [
+							{ type: "text", text: `Could not extract content from ${url}. The page may require JavaScript.` },
+						],
 						details: { success: false, url },
 					};
 				}
@@ -770,7 +807,10 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 		description: "Quick web search (usage: /search <query>)",
 		handler: async (args, ctx) => {
 			const query = args.trim();
-			if (!query) { ctx.ui.notify("Usage: /search <query>", "warning"); return; }
+			if (!query) {
+				ctx.ui.notify("Usage: /search <query>", "warning");
+				return;
+			}
 
 			try {
 				ctx.ui.notify(`🔍 Searching: "${query}"...`, "info");

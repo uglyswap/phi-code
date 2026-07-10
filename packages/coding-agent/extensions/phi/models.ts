@@ -15,15 +15,15 @@
  * it appear everywhere without restarting Phi Code.
  */
 
-import { ApiKeyStore, type ConfigWatcher, type ExtensionAPI, getApiKeyStore, getConfigWatcher } from "phi-code";
+import { type ApiKeyStore, type ConfigWatcher, type ExtensionAPI, getApiKeyStore, getConfigWatcher } from "phi-code";
 import { getModels } from "phi-code-ai";
+import { formatWindow, inferContextWindow, parseContextWindow } from "./providers/context-window.js";
+import { fetchLiveModels, peekCache, resetLiveModelsCache, toPersistedModel } from "./providers/live-models.js";
 import {
 	buildOpenCodeGoAnthropicProviderConfig,
 	buildOpenCodeGoProviderConfig,
 	getOpenCodeGoModels,
 } from "./providers/opencode-go.js";
-import { formatWindow, inferContextWindow, parseContextWindow } from "./providers/context-window.js";
-import { fetchLiveModels, peekCache, resetLiveModelsCache, toPersistedModel } from "./providers/live-models.js";
 
 const PROVIDER_DISPLAY: Record<string, string> = {
 	opencode: "OpenCode Zen",
@@ -159,9 +159,8 @@ async function refreshOne(
 	resolvedApiKey?: string,
 ): Promise<RefreshOutcome> {
 	const stored = store.getProvider(providerId);
-	const storedKey = stored?.apiKey && !stored.apiKey.startsWith("$") && stored.apiKey !== "local"
-		? stored.apiKey
-		: undefined;
+	const storedKey =
+		stored?.apiKey && !stored.apiKey.startsWith("$") && stored.apiKey !== "local" ? stored.apiKey : undefined;
 	// Prefer the key stored in models.json, else the one resolved from
 	// auth.json/env by the model registry (providers set up via /auth only).
 	const apiKey = storedKey ?? resolvedApiKey;
@@ -241,15 +240,9 @@ export default function modelsExtension(pi: ExtensionAPI) {
 					await refreshCommand(target, ctx);
 					return;
 				}
-				ctx.ui.notify(
-					"Unknown subcommand. Use: `/models [list|refresh] [provider-id]`",
-					"warning",
-				);
+				ctx.ui.notify("Unknown subcommand. Use: `/models [list|refresh] [provider-id]`", "warning");
 			} catch (err) {
-				ctx.ui.notify(
-					`/models error: ${err instanceof Error ? err.message : String(err)}`,
-					"error",
-				);
+				ctx.ui.notify(`/models error: ${err instanceof Error ? err.message : String(err)}`, "error");
 			}
 		},
 	});
@@ -306,13 +299,17 @@ export default function modelsExtension(pi: ExtensionAPI) {
 					writeOverrides(overrides);
 
 					// Revert the active model to the persisted/inferred window.
-					const persistedModels = (store.getProvider(provider)?.models as
-						| Array<{ id?: string; contextWindow?: number }>
-						| undefined) ?? [];
+					const persistedModels =
+						(store.getProvider(provider)?.models as Array<{ id?: string; contextWindow?: number }> | undefined) ??
+						[];
 					const persisted = persistedModels.find((m) => m?.id === modelId)?.contextWindow;
-					const reverted = persisted && persisted > 0 ? persisted : inferContextWindow(modelId, undefined, provider);
+					const reverted =
+						persisted && persisted > 0 ? persisted : inferContextWindow(modelId, undefined, provider);
 					await pi.setModel({ ...model, contextWindow: reverted });
-					ctx.ui.notify(`Cleared context override for **${modelId}**. Reverted to \`${formatWindow(reverted)}\`.`, "info");
+					ctx.ui.notify(
+						`Cleared context override for **${modelId}**. Reverted to \`${formatWindow(reverted)}\`.`,
+						"info",
+					);
 					return;
 				}
 
@@ -344,13 +341,13 @@ export default function modelsExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	async function listCommand(target: string | undefined, ctx: { ui: { notify: (m: string, t?: "info" | "warning" | "error") => void } }): Promise<void> {
+	async function listCommand(
+		target: string | undefined,
+		ctx: { ui: { notify: (m: string, t?: "info" | "warning" | "error") => void } },
+	): Promise<void> {
 		const providers = target ? [target] : store.listProviders();
 		if (providers.length === 0) {
-			ctx.ui.notify(
-				"No providers configured. Run `/setup` or `/phi-init` to add one.",
-				"info",
-			);
+			ctx.ui.notify("No providers configured. Run `/setup` or `/phi-init` to add one.", "info");
 			return;
 		}
 
@@ -454,7 +451,10 @@ export default function modelsExtension(pi: ExtensionAPI) {
 	async function refreshCommand(
 		target: string | undefined,
 		ctx: {
-			ui: { notify: (m: string, t?: "info" | "warning" | "error") => void; setStatus?: (k: string, v?: string) => void };
+			ui: {
+				notify: (m: string, t?: "info" | "warning" | "error") => void;
+				setStatus?: (k: string, v?: string) => void;
+			};
 			modelRegistry: {
 				getAvailable(): Array<{ provider: string }>;
 				getApiKeyForProvider(provider: string): Promise<string | undefined>;
@@ -490,7 +490,8 @@ export default function modelsExtension(pi: ExtensionAPI) {
 
 		let out = "**Refresh report:**\n";
 		for (const o of outcomes) {
-			const icon = o.source === "live" ? "[ok]" : o.source === "fallback" ? "[fb]" : o.source === "cache" ? "[c]" : "[--]";
+			const icon =
+				o.source === "live" ? "[ok]" : o.source === "fallback" ? "[fb]" : o.source === "cache" ? "[c]" : "[--]";
 			out += `  ${icon} ${displayName(o.provider)} \`${o.provider}\` — ${o.count} new model(s) (${o.source}${o.error ? `, ${o.error}` : ""})\n`;
 		}
 		out += `\nOnly models missing from the built-in catalog are persisted to \`${store.configPath}\`;\n`;

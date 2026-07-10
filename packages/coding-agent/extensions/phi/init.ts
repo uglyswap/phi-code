@@ -17,11 +17,11 @@
  *    so a network failure on /v1/models cannot lose the user's input.
  */
 
-import type { ExtensionAPI } from "phi-code";
-import { writeFile, mkdir, copyFile, readdir, readFile, chmod } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { homedir } from "node:os";
 import { existsSync } from "node:fs";
+import { chmod, copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import type { ExtensionAPI } from "phi-code";
 import { fetchLiveModels, pingProvider, toPersistedModel } from "./providers/live-models.js";
 import { isOpenCodeGoAnthropicModel, OPENCODE_GO_ANTHROPIC_BASE_URL } from "./providers/opencode-go.js";
 
@@ -218,12 +218,30 @@ function getAllAvailableModels(providers: DetectedProvider[]): Array<{ ref: stri
 // ─── Routing Presets ─────────────────────────────────────────────────────
 
 const TASK_ROLES = [
-	{ key: "code", label: "Code Generation", desc: "Writing and modifying code", agent: "code", defaultModel: "default" },
+	{
+		key: "code",
+		label: "Code Generation",
+		desc: "Writing and modifying code",
+		agent: "code",
+		defaultModel: "default",
+	},
 	{ key: "debug", label: "Debugging", desc: "Finding and fixing bugs", agent: "code", defaultModel: "default" },
 	{ key: "plan", label: "Planning", desc: "Architecture and design", agent: "plan", defaultModel: "default" },
-	{ key: "explore", label: "Exploration", desc: "Code reading and analysis", agent: "explore", defaultModel: "default" },
+	{
+		key: "explore",
+		label: "Exploration",
+		desc: "Code reading and analysis",
+		agent: "explore",
+		defaultModel: "default",
+	},
 	{ key: "test", label: "Testing", desc: "Running and writing tests", agent: "test", defaultModel: "default" },
-	{ key: "review", label: "Code Review", desc: "Quality and security review", agent: "review", defaultModel: "default" },
+	{
+		key: "review",
+		label: "Code Review",
+		desc: "Quality and security review",
+		agent: "review",
+		defaultModel: "default",
+	},
 ] as const;
 
 const KEYWORDS: Record<string, string[]> = {
@@ -235,9 +253,7 @@ const KEYWORDS: Record<string, string[]> = {
 	review: ["review", "audit", "quality", "security", "improve", "optimize"],
 };
 
-function createRouting(
-	assignments: Record<string, { preferred: string; fallback: string }>,
-): RoutingConfig {
+function createRouting(assignments: Record<string, { preferred: string; fallback: string }>): RoutingConfig {
 	const routes: RoutingConfig["routes"] = {};
 	for (const role of TASK_ROLES) {
 		const assignment = assignments[role.key];
@@ -251,7 +267,7 @@ function createRouting(
 	}
 	return {
 		routes,
-		default: { model: assignments["default"]?.preferred || "default", agent: null },
+		default: { model: assignments.default?.preferred || "default", agent: null },
 	};
 }
 
@@ -358,10 +374,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 		}
 	}
 
-	async function persistProviderKey(
-		provider: DetectedProvider,
-		apiKey: string,
-	): Promise<void> {
+	async function persistProviderKey(provider: DetectedProvider, apiKey: string): Promise<void> {
 		const config = await readModelsConfig();
 		const existing = config.providers[provider.id] ?? {};
 		config.providers[provider.id] = {
@@ -448,7 +461,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 
 		// Orchestrator fallback (used only when a specific route has no model).
 		// This is NOT the chat default — `/model` controls that.
-		assignments["default"] = {
+		assignments.default = {
 			preferred: "default",
 			fallback: availableModels[0]?.ref || "default",
 		};
@@ -464,10 +477,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 			if (result.source === "live" && result.models.length > 0) {
 				provider.models = result.models.map((m) => m.id);
 				provider.available = true;
-				ctx.ui.notify(
-					`${provider.name} is running with ${provider.models.length} model(s).\n`,
-					"info",
-				);
+				ctx.ui.notify(`${provider.name} is running with ${provider.models.length} model(s).\n`, "info");
 			} else {
 				ctx.ui.notify(
 					`${provider.name} not reachable on port ${port}. Start it and re-run \`/phi-init\`.\n`,
@@ -483,10 +493,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 			"info",
 		);
 
-		const apiKey = await ctx.ui.input(
-			`Enter your ${provider.name} API key`,
-			"Paste your key here",
-		);
+		const apiKey = await ctx.ui.input(`Enter your ${provider.name} API key`, "Paste your key here");
 
 		if (apiKey === undefined) {
 			ctx.ui.notify("Cancelled. No key saved.", "warning");
@@ -632,10 +639,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 							return `${status} ${p.name}${tag}${modelCount}`;
 						}),
 					];
-					const addProvider = await ctx.ui.select(
-						"Configure a provider (add multiple!):",
-						providerOptions,
-					);
+					const addProvider = await ctx.ui.select("Configure a provider (add multiple!):", providerOptions);
 
 					const choiceIdx = providerOptions.indexOf(addProvider ?? "");
 					if (choiceIdx <= 0) {
@@ -657,18 +661,12 @@ _Edit this file to customize Phi Code's behavior for your project._
 
 				const available = providers.filter((p) => p.available);
 				if (available.length === 0) {
-					ctx.ui.notify(
-						"No providers available. Run `/phi-init` again after setting up a provider.",
-						"error",
-					);
+					ctx.ui.notify("No providers available. Run `/phi-init` again after setting up a provider.", "error");
 					return;
 				}
 
 				const allModels = getAllAvailableModels(providers);
-				ctx.ui.notify(
-					`\n${allModels.length} models available from ${available.length} provider(s).\n`,
-					"info",
-				);
+				ctx.ui.notify(`\n${allModels.length} models available from ${available.length} provider(s).\n`, "info");
 
 				// 2. Assign models to agents
 				ctx.ui.notify("Assign a model to each agent role:\n", "info");
@@ -680,11 +678,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 
 				ctx.ui.notify("Writing routing configuration...", "info");
 				const routing = createRouting(assignments);
-				await writeFile(
-					join(agentDir, "routing.json"),
-					JSON.stringify(routing, null, 2),
-					"utf-8",
-				);
+				await writeFile(join(agentDir, "routing.json"), JSON.stringify(routing, null, 2), "utf-8");
 
 				ctx.ui.notify("Setting up sub-agents...", "info");
 				await copyBundledAgents();
@@ -702,10 +696,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 					const a = assignments[role.key];
 					ctx.ui.notify(`  ${role.label}: \`${a.preferred}\` (fallback: \`${a.fallback}\`)`, "info");
 				}
-				ctx.ui.notify(
-					"\nChat default model: use `/model` (this wizard does NOT change the chat default).",
-					"info",
-				);
+				ctx.ui.notify("\nChat default model: use `/model` (this wizard does NOT change the chat default).", "info");
 				ctx.ui.notify("\nNext steps:", "info");
 				ctx.ui.notify("  - `/model` to pick the chat default model (sticky across prompts)", "info");
 				ctx.ui.notify("  - `/plan <description>` to run the orchestrator with the roles above", "info");
@@ -729,8 +720,7 @@ _Edit this file to customize Phi Code's behavior for your project._
 		description: "Reconfigure the per-role models used by /plan (provider-qualified, cross-provider)",
 		handler: async (_args, ctx) => {
 			try {
-				const registryModels: Array<{ provider?: string; id?: string }> =
-					ctx.modelRegistry?.getAvailable?.() || [];
+				const registryModels: Array<{ provider?: string; id?: string }> = ctx.modelRegistry?.getAvailable?.() || [];
 				const available: Array<{ ref: string; display: string }> = [];
 				const seen = new Set<string>();
 				for (const m of registryModels) {

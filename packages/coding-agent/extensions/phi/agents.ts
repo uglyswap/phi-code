@@ -23,15 +23,18 @@ export default function agentsExtension(pi: ExtensionAPI) {
 			const arg = args.trim().toLowerCase();
 
 			if (agents.length === 0) {
-				ctx.ui.notify("No agent definitions found.\n\nCreate agent files in:\n- `.phi/agents/` (project)\n- `~/.phi/agent/agents/` (global)\n\nFormat: Markdown with YAML frontmatter (name, description, tools, model).", "info");
+				ctx.ui.notify(
+					"No agent definitions found.\n\nCreate agent files in:\n- `.phi/agents/` (project)\n- `~/.phi/agent/agents/` (global)\n\nFormat: Markdown with YAML frontmatter (name, description, tools, model).",
+					"info",
+				);
 				return;
 			}
 
 			// Show specific agent details
 			if (arg && arg !== "list") {
-				const agent = agents.find(a => a.name.toLowerCase() === arg);
+				const agent = agents.find((a) => a.name.toLowerCase() === arg);
 				if (!agent) {
-					ctx.ui.notify(`Agent "${arg}" not found. Available: ${agents.map(a => a.name).join(", ")}`, "warning");
+					ctx.ui.notify(`Agent "${arg}" not found. Available: ${agents.map((a) => a.name).join(", ")}`, "warning");
 					return;
 				}
 
@@ -39,7 +42,7 @@ export default function agentsExtension(pi: ExtensionAPI) {
 
 📝 ${agent.description}
 🤖 Model: \`${agent.model}\`
-🔧 Tools: ${agent.tools.map(t => `\`${t}\``).join(", ")}
+🔧 Tools: ${agent.tools.map((t) => `\`${t}\``).join(", ")}
 📁 Source: ${agent.source} (\`${agent.filePath}\`)
 
 **System Prompt:**

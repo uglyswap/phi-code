@@ -11,7 +11,7 @@ describe("NotesManager", () => {
 
 	beforeEach(() => {
 		// Create temporary test directory
-		tempDir = join(process.cwd(), "test-notes-" + Date.now());
+		tempDir = join(process.cwd(), `test-notes-${Date.now()}`);
 		mkdirSync(tempDir, { recursive: true });
 
 		const config: MemoryConfig = {
@@ -42,7 +42,7 @@ describe("NotesManager", () => {
 
 	test("write without filename should use today's date", () => {
 		const content = "Test note for today";
-		const today = new Date().toISOString().split("T")[0] + ".md";
+		const today = `${new Date().toISOString().split("T")[0]}.md`;
 
 		notesManager.write(content);
 

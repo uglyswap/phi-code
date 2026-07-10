@@ -92,20 +92,22 @@ export class NotesManager {
 			return [];
 		}
 
-		return readdirSync(this.notesDir)
-			.filter((file) => file.endsWith(".md"))
-			.map((file) => {
-				const filePath = this.resolveNotePath(file);
-				const stats = statSync(filePath);
-				return {
-					name: file,
-					size: stats.size,
-					date: stats.mtime.toISOString(),
-				};
-			})
-			// Tie-break by name (descending) so same-mtime files keep a stable
-			// order; default note names are dates, so newer names sort first too.
-			.sort((a, b) => b.date.localeCompare(a.date) || b.name.localeCompare(a.name));
+		return (
+			readdirSync(this.notesDir)
+				.filter((file) => file.endsWith(".md"))
+				.map((file) => {
+					const filePath = this.resolveNotePath(file);
+					const stats = statSync(filePath);
+					return {
+						name: file,
+						size: stats.size,
+						date: stats.mtime.toISOString(),
+					};
+				})
+				// Tie-break by name (descending) so same-mtime files keep a stable
+				// order; default note names are dates, so newer names sort first too.
+				.sort((a, b) => b.date.localeCompare(a.date) || b.name.localeCompare(a.name))
+		);
 	}
 
 	/**

@@ -332,7 +332,8 @@ export default function productivityExtension(pi: ExtensionAPI) {
 	// /title
 	// ------------------------------------------------------------------------
 	pi.registerCommand("title", {
-		description: "Derive a session title + kebab-case branch name from the first user message (deterministic, no LLM).",
+		description:
+			"Derive a session title + kebab-case branch name from the first user message (deterministic, no LLM).",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			try {
 				const source = firstUserMessageText(ctx);
@@ -387,7 +388,8 @@ export default function productivityExtension(pi: ExtensionAPI) {
 	// /dream
 	// ------------------------------------------------------------------------
 	pi.registerCommand("dream", {
-		description: "Deterministic memory consolidation: report exact-duplicate notes that could be merged (no deletion).",
+		description:
+			"Deterministic memory consolidation: report exact-duplicate notes that could be merged (no deletion).",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			try {
 				const files = memory.notes.list();

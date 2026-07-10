@@ -22,9 +22,7 @@
 
 import { ApiKeyStore, type ExtensionAPI, getApiKeyStore, getConfigWatcher } from "phi-code";
 
-interface ProviderPingFn {
-	(key: string, timeoutMs?: number): Promise<{ ok: boolean; error?: string }>;
-}
+type ProviderPingFn = (key: string, timeoutMs?: number) => Promise<{ ok: boolean; error?: string }>;
 
 const PROVIDER_PING_REGISTRY: Record<string, ProviderPingFn> = {};
 
@@ -152,10 +150,7 @@ export default function keysExtension(pi: ExtensionAPI) {
 					return;
 				}
 
-				ctx.ui.notify(
-					"Unknown subcommand. Use: `/keys [list|set|remove|test|reload]`",
-					"warning",
-				);
+				ctx.ui.notify("Unknown subcommand. Use: `/keys [list|set|remove|test|reload]`", "warning");
 			} catch (err) {
 				ctx.ui.notify(`/keys error: ${err instanceof Error ? err.message : String(err)}`, "error");
 			}

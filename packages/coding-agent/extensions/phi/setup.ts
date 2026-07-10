@@ -19,10 +19,10 @@
  *  - Storage chmod 0600 garantit la sécurité au repos
  */
 
-import { ApiKeyStore, type ExtensionAPI, type ExtensionUIContext, getApiKeyStore, getConfigWatcher } from "phi-code";
-import { writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
+import { join } from "node:path";
+import { ApiKeyStore, type ExtensionAPI, type ExtensionUIContext, getApiKeyStore, getConfigWatcher } from "phi-code";
 import {
 	ALIBABA_ENV_VAR,
 	ALIBABA_MODELS,
@@ -32,16 +32,16 @@ import {
 	pingAlibaba,
 	validateAlibabaApiKey,
 } from "./providers/alibaba.js";
+import { fetchLiveModels, pingProvider, toPersistedModel } from "./providers/live-models.js";
 import {
-	OPENCODE_GO_AUTH_URL,
-	OPENCODE_GO_ENV_VAR,
 	buildOpenCodeGoAnthropicProviderConfig,
 	buildOpenCodeGoProviderConfig,
 	getOpenCodeGoModels,
+	OPENCODE_GO_AUTH_URL,
+	OPENCODE_GO_ENV_VAR,
 	pingOpenCodeGo,
 	validateOpenCodeGoApiKey,
 } from "./providers/opencode-go.js";
-import { fetchLiveModels, pingProvider, toPersistedModel } from "./providers/live-models.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -78,11 +78,41 @@ interface RoutingConfigOut {
 }
 
 const ORCHESTRATION_ROLES = [
-	{ key: "explore", label: "Explore", desc: "Read-only analysis", agent: "explore", keywords: ["read", "analyze", "explain", "understand", "find", "search", "look", "show", "what", "how"] },
-	{ key: "plan", label: "Plan", desc: "Architecture and design", agent: "plan", keywords: ["plan", "design", "architect", "spec", "structure", "organize", "strategy", "approach"] },
-	{ key: "code", label: "Code", desc: "Implementation", agent: "code", keywords: ["implement", "create", "build", "refactor", "write", "add", "modify", "update", "generate"] },
-	{ key: "test", label: "Test", desc: "Validation and tests", agent: "test", keywords: ["test", "verify", "validate", "check", "assert", "coverage"] },
-	{ key: "review", label: "Review", desc: "Quality and security review", agent: "review", keywords: ["review", "audit", "quality", "security", "improve", "optimize"] },
+	{
+		key: "explore",
+		label: "Explore",
+		desc: "Read-only analysis",
+		agent: "explore",
+		keywords: ["read", "analyze", "explain", "understand", "find", "search", "look", "show", "what", "how"],
+	},
+	{
+		key: "plan",
+		label: "Plan",
+		desc: "Architecture and design",
+		agent: "plan",
+		keywords: ["plan", "design", "architect", "spec", "structure", "organize", "strategy", "approach"],
+	},
+	{
+		key: "code",
+		label: "Code",
+		desc: "Implementation",
+		agent: "code",
+		keywords: ["implement", "create", "build", "refactor", "write", "add", "modify", "update", "generate"],
+	},
+	{
+		key: "test",
+		label: "Test",
+		desc: "Validation and tests",
+		agent: "test",
+		keywords: ["test", "verify", "validate", "check", "assert", "coverage"],
+	},
+	{
+		key: "review",
+		label: "Review",
+		desc: "Quality and security review",
+		agent: "review",
+		keywords: ["review", "audit", "quality", "security", "improve", "optimize"],
+	},
 ] as const;
 
 const DEBUG_KEYWORDS = ["fix", "bug", "error", "debug", "crash", "broken", "failing", "issue", "troubleshoot"];
@@ -226,10 +256,7 @@ function maskKeyForDisplay(key: string | undefined): string {
 	return ApiKeyStore.maskKey(key);
 }
 
-function buildRoutingConfig(
-	defaultModel: string,
-	orchestration: Record<string, RouteAssignment>,
-): RoutingConfigOut {
+function buildRoutingConfig(defaultModel: string, orchestration: Record<string, RouteAssignment>): RoutingConfigOut {
 	const routes: RoutingConfigOut["routes"] = {};
 	for (const role of ORCHESTRATION_ROLES) {
 		const a = orchestration[role.key] ?? { preferred: defaultModel, fallback: defaultModel };
@@ -258,7 +285,11 @@ async function writeRoutingConfig(routing: RoutingConfigOut): Promise<string> {
 	const dir = join(homedir(), ".phi", "agent");
 	await mkdir(dir, { recursive: true });
 	const path = join(dir, "routing.json");
-	await writeFile(path, `${JSON.stringify({ ...routing, $schema: "./routing.schema.json", version: 1 }, null, 2)}\n`, "utf-8");
+	await writeFile(
+		path,
+		`${JSON.stringify({ ...routing, $schema: "./routing.schema.json", version: 1 }, null, 2)}\n`,
+		"utf-8",
+	);
 	return path;
 }
 
@@ -427,10 +458,7 @@ async function configureGenericCloud(
 		]);
 		if (!authChoice || authChoice === "Cancel") return undefined;
 		if (authChoice.startsWith("OAuth")) {
-			ui.notify(
-				`Run \`/login ${provider.id}\` after setup to authenticate via OAuth.`,
-				"info",
-			);
+			ui.notify(`Run \`/login ${provider.id}\` after setup to authenticate via OAuth.`, "info");
 			store.setKey(provider.id, "$OAUTH", {
 				baseUrl: provider.baseUrl,
 				api: provider.api,
@@ -489,9 +517,8 @@ async function configureGenericCloud(
 	});
 	ui.setStatus("setup-fetch", undefined);
 
-	const models = (live.models.length > 0
-		? live.models
-		: provider.staticModels.map((id) => ({ id, name: id, reasoning: true }))
+	const models = (
+		live.models.length > 0 ? live.models : provider.staticModels.map((id) => ({ id, name: id, reasoning: true }))
 	).map(toPersistedModel);
 
 	watcher.muteForWrite("models_json_changed");
@@ -582,12 +609,12 @@ async function configureAssignments(
 	const orchestration: Record<string, RouteAssignment> = {};
 	for (const role of ORCHESTRATION_ROLES) {
 		const preferred =
-			(await pickModelFromCatalog(ui, `${role.label} - preferred model (${role.desc})`, models)) ??
-			models[0].ref;
+			(await pickModelFromCatalog(ui, `${role.label} - preferred model (${role.desc})`, models)) ?? models[0].ref;
 		const fallbackModels = models.filter((m) => m.ref !== preferred);
-		const fallback = fallbackModels.length > 0
-			? (await pickModelFromCatalog(ui, `${role.label} - fallback model`, fallbackModels)) ?? preferred
-			: preferred;
+		const fallback =
+			fallbackModels.length > 0
+				? ((await pickModelFromCatalog(ui, `${role.label} - fallback model`, fallbackModels)) ?? preferred)
+				: preferred;
 		orchestration[role.key] = { preferred, fallback };
 		ui.notify(`  ${role.label}: ${preferred} / ${fallback}`, "info");
 	}
@@ -626,165 +653,165 @@ export default function setupExtension(pi: ExtensionAPI) {
 			}
 
 			try {
-			ui.notify(
-				"**φ Phi Code Setup Wizard**\n\n" +
-					"This wizard configures providers and assigns models to **orchestration roles** " +
-					"(used by `/plan`).\n" +
-					"The **chat default model is controlled via `/model`** and stays sticky across " +
-					"prompts — this wizard will never change it.\n\n" +
-					"Keys are stored in `~/.phi/agent/models.json` (chmod 0600 on Unix). " +
-					"Edit that file directly later to hot-reload (no restart needed).",
-				"info",
-			);
+				ui.notify(
+					"**φ Phi Code Setup Wizard**\n\n" +
+						"This wizard configures providers and assigns models to **orchestration roles** " +
+						"(used by `/plan`).\n" +
+						"The **chat default model is controlled via `/model`** and stays sticky across " +
+						"prompts — this wizard will never change it.\n\n" +
+						"Keys are stored in `~/.phi/agent/models.json` (chmod 0600 on Unix). " +
+						"Edit that file directly later to hot-reload (no restart needed).",
+					"info",
+				);
 
-			const available = new Map<string, { source: "key" | "env" | "local"; modelCount: number }>();
-			const assignments: { default?: string; orchestration: Record<string, RouteAssignment> } = {
-				orchestration: {},
-			};
+				const available = new Map<string, { source: "key" | "env" | "local"; modelCount: number }>();
+				const assignments: { default?: string; orchestration: Record<string, RouteAssignment> } = {
+					orchestration: {},
+				};
 
-			const refreshAvailable = (): void => {
-				const catalog = getProviderCatalog();
-				available.clear();
-				for (const p of catalog) {
-					const stored = store.getProvider(p.id);
-					if (stored?.apiKey) {
-						const source = stored.apiKey === "$OAUTH" ? "key" : stored.apiKey === "local" ? "local" : "key";
-						const modelCount = Array.isArray(stored.models) ? stored.models.length : p.staticModels.length;
-						available.set(p.id, { source, modelCount });
-						continue;
-					}
-					if (!p.local && process.env[p.envVar]) {
-						available.set(p.id, { source: "env", modelCount: p.staticModels.length });
-					}
-				}
-				ui.setWidget("setup-status", buildStatusWidget(store, available, assignments));
-			};
-
-			refreshAvailable();
-
-			let done = false;
-			while (!done) {
-				const catalog = getProviderCatalog();
-				const choices: string[] = [];
-				for (const p of catalog) {
-					const state = available.get(p.id);
-					const tag = state ? "[ok]" : "[--]";
-					const modelTag = state ? ` (${state.modelCount} models)` : "";
-					choices.push(`${tag} ${p.displayName}${modelTag}`);
-				}
-				choices.push("---");
-				choices.push("Assign models to agent roles");
-				choices.push("Finish and save");
-				choices.push("Quit without saving");
-
-				const action = await ui.select("Phi Code Setup - choose an action", choices);
-				if (!action) {
-					done = true;
-					break;
-				}
-
-				if (action === "Quit without saving") {
-					const confirm = await ui.confirm("Quit", "Discard all in-memory assignments? (provider keys already saved are kept)");
-					if (confirm) {
-						ui.setWidget("setup-status", undefined);
-						ui.notify("Setup cancelled (saved provider keys are unchanged).", "warning");
-						return;
-					}
-					continue;
-				}
-
-				if (action === "Finish and save") {
-					if (!assignments.default || Object.keys(assignments.orchestration).length === 0) {
-						const proceed = await ui.confirm(
-							"Assignments incomplete",
-							"You have not assigned all roles. Save current state anyway?",
-						);
-						if (!proceed) continue;
-					}
-					done = true;
-					break;
-				}
-
-				if (action === "Assign models to agent roles") {
-					const allModels: Array<{ ref: string; display: string }> = [];
-					const seenRefs = new Set<string>();
+				const refreshAvailable = (): void => {
+					const catalog = getProviderCatalog();
+					available.clear();
 					for (const p of catalog) {
 						const stored = store.getProvider(p.id);
-						if (!stored) continue;
-						const models = Array.isArray(stored.models) ? stored.models : [];
-						for (const m of models) {
-							const id = (m as { id?: string }).id;
-							if (typeof id !== "string") continue;
-							// Provider-qualified ref so the same id from different providers stays distinct.
-							const ref = `${p.id}/${id}`;
-							if (seenRefs.has(ref)) continue;
-							seenRefs.add(ref);
-							allModels.push({ ref, display: `${id} [${p.id}]` });
+						if (stored?.apiKey) {
+							const source = stored.apiKey === "$OAUTH" ? "key" : stored.apiKey === "local" ? "local" : "key";
+							const modelCount = Array.isArray(stored.models) ? stored.models.length : p.staticModels.length;
+							available.set(p.id, { source, modelCount });
+							continue;
+						}
+						if (!p.local && process.env[p.envVar]) {
+							available.set(p.id, { source: "env", modelCount: p.staticModels.length });
 						}
 					}
-					const { defaultModel, orchestration } = await configureAssignments(ui, allModels);
-					assignments.default = defaultModel;
-					assignments.orchestration = orchestration;
-					refreshAvailable();
-					continue;
-				}
+					ui.setWidget("setup-status", buildStatusWidget(store, available, assignments));
+				};
 
-				if (action === "---") continue;
+				refreshAvailable();
 
-				const providerIndex = choices.indexOf(action);
-				if (providerIndex < 0 || providerIndex >= catalog.length) continue;
-				const provider = catalog[providerIndex];
-
-				let result: { providerId: string; modelCount: number } | undefined;
-				try {
-					if (provider.id === "alibaba-codingplan") {
-						result = await configureAlibaba(ui, store);
-					} else if (provider.id === "opencode-go") {
-						result = await configureOpenCodeGo(ui, store);
-					} else if (provider.local) {
-						result = await configureLocal(ui, store, provider);
-					} else {
-						result = await configureGenericCloud(ui, store, provider);
+				let done = false;
+				while (!done) {
+					const catalog = getProviderCatalog();
+					const choices: string[] = [];
+					for (const p of catalog) {
+						const state = available.get(p.id);
+						const tag = state ? "[ok]" : "[--]";
+						const modelTag = state ? ` (${state.modelCount} models)` : "";
+						choices.push(`${tag} ${p.displayName}${modelTag}`);
 					}
-				} catch (err) {
-					ui.notify(
-						`Provider configuration failed: ${err instanceof Error ? err.message : String(err)}`,
-						"error",
-					);
+					choices.push("---");
+					choices.push("Assign models to agent roles");
+					choices.push("Finish and save");
+					choices.push("Quit without saving");
+
+					const action = await ui.select("Phi Code Setup - choose an action", choices);
+					if (!action) {
+						done = true;
+						break;
+					}
+
+					if (action === "Quit without saving") {
+						const confirm = await ui.confirm(
+							"Quit",
+							"Discard all in-memory assignments? (provider keys already saved are kept)",
+						);
+						if (confirm) {
+							ui.setWidget("setup-status", undefined);
+							ui.notify("Setup cancelled (saved provider keys are unchanged).", "warning");
+							return;
+						}
+						continue;
+					}
+
+					if (action === "Finish and save") {
+						if (!assignments.default || Object.keys(assignments.orchestration).length === 0) {
+							const proceed = await ui.confirm(
+								"Assignments incomplete",
+								"You have not assigned all roles. Save current state anyway?",
+							);
+							if (!proceed) continue;
+						}
+						done = true;
+						break;
+					}
+
+					if (action === "Assign models to agent roles") {
+						const allModels: Array<{ ref: string; display: string }> = [];
+						const seenRefs = new Set<string>();
+						for (const p of catalog) {
+							const stored = store.getProvider(p.id);
+							if (!stored) continue;
+							const models = Array.isArray(stored.models) ? stored.models : [];
+							for (const m of models) {
+								const id = (m as { id?: string }).id;
+								if (typeof id !== "string") continue;
+								// Provider-qualified ref so the same id from different providers stays distinct.
+								const ref = `${p.id}/${id}`;
+								if (seenRefs.has(ref)) continue;
+								seenRefs.add(ref);
+								allModels.push({ ref, display: `${id} [${p.id}]` });
+							}
+						}
+						const { defaultModel, orchestration } = await configureAssignments(ui, allModels);
+						assignments.default = defaultModel;
+						assignments.orchestration = orchestration;
+						refreshAvailable();
+						continue;
+					}
+
+					if (action === "---") continue;
+
+					const providerIndex = choices.indexOf(action);
+					if (providerIndex < 0 || providerIndex >= catalog.length) continue;
+					const provider = catalog[providerIndex];
+
+					let result: { providerId: string; modelCount: number } | undefined;
+					try {
+						if (provider.id === "alibaba-codingplan") {
+							result = await configureAlibaba(ui, store);
+						} else if (provider.id === "opencode-go") {
+							result = await configureOpenCodeGo(ui, store);
+						} else if (provider.local) {
+							result = await configureLocal(ui, store, provider);
+						} else {
+							result = await configureGenericCloud(ui, store, provider);
+						}
+					} catch (err) {
+						ui.notify(
+							`Provider configuration failed: ${err instanceof Error ? err.message : String(err)}`,
+							"error",
+						);
+					}
+
+					if (result) refreshAvailable();
 				}
 
-				if (result) refreshAvailable();
-			}
-
-			// Save routing if assignments were made
-			if (assignments.default) {
-				try {
-					const routing = buildRoutingConfig(assignments.default, assignments.orchestration);
-					const routingPath = await writeRoutingConfig(routing);
-					ui.notify(`Routing config written to \`${routingPath}\`.`, "info");
-				} catch (err) {
-					ui.notify(`Failed to write routing.json: ${err}`, "error");
+				// Save routing if assignments were made
+				if (assignments.default) {
+					try {
+						const routing = buildRoutingConfig(assignments.default, assignments.orchestration);
+						const routingPath = await writeRoutingConfig(routing);
+						ui.notify(`Routing config written to \`${routingPath}\`.`, "info");
+					} catch (err) {
+						ui.notify(`Failed to write routing.json: ${err}`, "error");
+					}
 				}
-			}
 
-			ui.setWidget("setup-status", undefined);
-			ui.notify(
-				"**Setup complete.**\n\n" +
-					"Next steps:\n" +
-					"  - `/keys` to list/manage saved keys\n" +
-					"  - `/models refresh` to re-fetch the catalog from each provider's API\n" +
-					"  - `/routing` to inspect routing\n" +
-					"  - `/agents` to list sub-agents\n" +
-					"  - `/skills` to list skills\n" +
-					"  - Edit `~/.phi/agent/models.json` or `routing.json` directly: hot-reload kicks in",
-				"info",
-			);
-			} catch (err) {
 				ui.setWidget("setup-status", undefined);
 				ui.notify(
-					`Setup wizard error: ${err instanceof Error ? err.message : String(err)}`,
-					"error",
+					"**Setup complete.**\n\n" +
+						"Next steps:\n" +
+						"  - `/keys` to list/manage saved keys\n" +
+						"  - `/models refresh` to re-fetch the catalog from each provider's API\n" +
+						"  - `/routing` to inspect routing\n" +
+						"  - `/agents` to list sub-agents\n" +
+						"  - `/skills` to list skills\n" +
+						"  - Edit `~/.phi/agent/models.json` or `routing.json` directly: hot-reload kicks in",
+					"info",
 				);
+			} catch (err) {
+				ui.setWidget("setup-status", undefined);
+				ui.notify(`Setup wizard error: ${err instanceof Error ? err.message : String(err)}`, "error");
 			}
 		},
 	});

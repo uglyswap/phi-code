@@ -22,8 +22,8 @@
  *     user keeps the legacy `web_search` / `fetch_url` only).
  */
 
-import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Type } from "@sinclair/typebox";
@@ -129,11 +129,7 @@ export default function browserExtension(pi: ExtensionAPI) {
 			url: Type.String({ description: "Full URL (https://...)" }),
 			tabId: Type.Optional(Type.String()),
 			waitUntil: Type.Optional(
-				Type.Union([
-					Type.Literal("load"),
-					Type.Literal("domcontentloaded"),
-					Type.Literal("networkidle"),
-				]),
+				Type.Union([Type.Literal("load"), Type.Literal("domcontentloaded"), Type.Literal("networkidle")]),
 			),
 			timeoutMs: Type.Optional(Type.Number()),
 		}),
@@ -161,13 +157,7 @@ export default function browserExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({
 			tabId: Type.Optional(Type.String()),
 			url: Type.Optional(Type.String()),
-			mode: Type.Optional(
-				Type.Union([
-					Type.Literal("readability"),
-					Type.Literal("html"),
-					Type.Literal("text"),
-				]),
-			),
+			mode: Type.Optional(Type.Union([Type.Literal("readability"), Type.Literal("html"), Type.Literal("text")])),
 		}),
 		execute: async (_toolCallId, params) => {
 			const api = await getBrowserApi();
@@ -181,9 +171,9 @@ export default function browserExtension(pi: ExtensionAPI) {
 		name: "browser_screenshot",
 		description:
 			"Capture a PNG screenshot of an open tab. Use this whenever the user asks " +
-			"to *see* a page, when a visual proof is requested (e.g. \"show me what " +
-			"this looks like\", \"is the layout broken\", \"did the bot detection page " +
-			"trigger?\"), or to confirm a UI state after `browser_click` / " +
+			'to *see* a page, when a visual proof is requested (e.g. "show me what ' +
+			'this looks like", "is the layout broken", "did the bot detection page ' +
+			'trigger?"), or to confirm a UI state after `browser_click` / ' +
 			"`browser_type`. Requires a `tabId` from a prior `browser_navigate`. " +
 			"Returns the image as base64 under `bytesBase64` with `mimeType: image/png`.",
 		parameters: Type.Object({
@@ -208,16 +198,10 @@ export default function browserExtension(pi: ExtensionAPI) {
 			"the rendered search engine UI (e.g. featured snippets, knowledge cards, " +
 			"AI Overview boxes). Slower than `web_search` and requires the Camoufox " +
 			"browser to boot. Defaults to DuckDuckGo (least restrictive); pass " +
-			"`engine: \"google\"` only when you need Google-specific results.",
+			'`engine: "google"` only when you need Google-specific results.',
 		parameters: Type.Object({
 			query: Type.String(),
-			engine: Type.Optional(
-				Type.Union([
-					Type.Literal("google"),
-					Type.Literal("duckduckgo"),
-					Type.Literal("bing"),
-				]),
-			),
+			engine: Type.Optional(Type.Union([Type.Literal("google"), Type.Literal("duckduckgo"), Type.Literal("bing")])),
 		}),
 		execute: async (_toolCallId, params) => {
 			const api = await getBrowserApi();
@@ -243,13 +227,7 @@ export default function browserExtension(pi: ExtensionAPI) {
 			tabId: Type.String(),
 			ref: Type.Optional(Type.String()),
 			selector: Type.Optional(Type.String()),
-			button: Type.Optional(
-				Type.Union([
-					Type.Literal("left"),
-					Type.Literal("right"),
-					Type.Literal("middle"),
-				]),
-			),
+			button: Type.Optional(Type.Union([Type.Literal("left"), Type.Literal("right"), Type.Literal("middle")])),
 		}),
 		execute: async (_toolCallId, params) => {
 			const api = await getBrowserApi();
@@ -296,12 +274,7 @@ export default function browserExtension(pi: ExtensionAPI) {
 			"content.",
 		parameters: Type.Object({
 			tabId: Type.String(),
-			direction: Type.Union([
-				Type.Literal("up"),
-				Type.Literal("down"),
-				Type.Literal("left"),
-				Type.Literal("right"),
-			]),
+			direction: Type.Union([Type.Literal("up"), Type.Literal("down"), Type.Literal("left"), Type.Literal("right")]),
 			ref: Type.Optional(Type.String()),
 			pixels: Type.Optional(Type.Number()),
 		}),
