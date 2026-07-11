@@ -25,6 +25,7 @@ import type { ExtensionAPI } from "phi-code";
 import { type AgentDef, loadAgentDef } from "./providers/agent-def.js";
 import { buildVerifyInstruction, debugPhaseInstructions } from "./providers/debug-build-commands.js";
 import { type FailingState, parseFailingState } from "./providers/debug-contract.js";
+import { passed, tail } from "./providers/execution.js";
 import { defaultExplorerSpecs, READONLY_EXPLORER_TOOLS, runExploreFanout } from "./providers/explore-fanout.js";
 import {
 	analyzePhaseMessages,
@@ -33,6 +34,7 @@ import {
 	resolvePhaseOutcome,
 	type StructuredPhaseResult,
 } from "./providers/phase-machine.js";
+import { resolveSandbox, type Sandbox } from "./providers/sandbox.js";
 import { triage } from "./providers/triage.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -386,6 +388,66 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 			return {
 				content: [{ type: "text", text: `Phase result recorded${parts.length ? ` (${parts.join(", ")})` : ""}.` }],
 				details: undefined,
+			};
+		},
+	});
+
+	// ─── Execution sandbox — the guaranteed oracle ──────────────────
+	// Resolved once per cwd and cached (resolveSandbox probes the Docker daemon).
+	// This is what turns "the agent says it ran the test" into "a real container
+	// ran the test and here is its exit code".
+	let sessionSandbox: { cwd: string; sandbox: Sandbox } | null = null;
+	function getSessionSandbox(cwd: string): Sandbox {
+		if (!sessionSandbox || sessionSandbox.cwd !== cwd) {
+			sessionSandbox = { cwd, sandbox: resolveSandbox({ cwd }) };
+		}
+		return sessionSandbox.sandbox;
+	}
+
+	pi.registerTool({
+		name: "sandbox_run",
+		label: "Sandbox Run",
+		description:
+			"Run a command in the project's guaranteed environment (a Docker container when available) and get its REAL exit code. Use this for the reproduction, the test suite, and acceptance checks in /debug and /build — the verdict MUST come from this tool's result, not from your own reasoning. If it reports SANDBOX UNAVAILABLE, do not fabricate a result — emit BLOCKED.",
+		promptGuidelines: [
+			"In /debug and /build, run the reproduction, the existing suite, and acceptance/red-team checks with sandbox_run — never claim a pass you did not get back from it.",
+			"A command PASSES iff sandbox_run returns exit 0. Treat any non-zero exit, TIMEOUT, or UNAVAILABLE as not-passing.",
+			"The sandbox mounts the project, so edits you make are visible to the next sandbox_run (fix, then re-run to verify).",
+		],
+		parameters: Type.Object({
+			command: Type.String({
+				description: "The shell command to run in the project sandbox (e.g. 'pytest tests/x.py::test_y').",
+			}),
+			timeoutSeconds: Type.Optional(
+				Type.Number({ description: "Max seconds before the run is killed (default 300)." }),
+			),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const p = params as { command: string; timeoutSeconds?: number };
+			const cwd = ctx?.cwd || process.cwd();
+			const sandbox = getSessionSandbox(cwd);
+			const result = sandbox.exec(p.command, {
+				timeoutMs: Math.max(1, Math.min(1800, p.timeoutSeconds ?? 300)) * 1000,
+			});
+			const verdict = !sandbox.available()
+				? "UNAVAILABLE"
+				: result.timedOut
+					? "TIMEOUT"
+					: passed(result)
+						? "PASS"
+						: "FAIL";
+			const text =
+				`[sandbox: ${sandbox.describe()}]\n$ ${p.command}\n→ exit ${result.exitCode ?? "?"} ${verdict}\n\n` +
+				`${tail(result, 60) || "(no output)"}`;
+			return {
+				content: [{ type: "text", text }],
+				details: {
+					backend: sandbox.backend,
+					exitCode: result.exitCode,
+					passed: passed(result),
+					timedOut: result.timedOut,
+					verdict,
+				},
 			};
 		},
 	});
@@ -940,6 +1002,7 @@ Tag the note with relevant keywords for vector search.
 					"ontology_add",
 					"ontology_query",
 					"phase_result",
+					"sandbox_run",
 				];
 				const agentTools = [...agentDef.tools, ...forcedTools.filter((t) => !agentDef.tools.includes(t))];
 				_activeAgentTools = agentTools;
@@ -1865,6 +1928,71 @@ It reports SUCCESS only when a real run meets the acceptance criteria — otherw
 				ctx,
 				`🏗️ **/build started** — plan + execution loop (SUCCESS requires a real run, else honest PARTIAL)\n`,
 			);
+		},
+	});
+
+	// ─── /sandbox Command — inspect / prepare the guaranteed environment ──
+
+	pi.registerCommand("sandbox", {
+		description:
+			"Inspect or prepare the project's execution sandbox (Docker when available) — status | prepare | run <cmd>",
+		handler: async (args, ctx) => {
+			const cwd = ctx.cwd || process.cwd();
+			const raw = args.trim();
+			const [sub, ...rest] = raw.split(/\s+/);
+			const sandbox = getSessionSandbox(cwd);
+
+			if (!sub || sub === "status") {
+				const r = sandbox.recipe;
+				ctx.ui.notify(
+					`🧪 **Sandbox status**\n` +
+						`  Backend: \`${sandbox.backend}\` — ${sandbox.reason}\n` +
+						`  Environment: ${sandbox.describe()}\n` +
+						`  Image: \`${r.image}\` (source: ${r.source})\n` +
+						`  Setup: ${r.setup ? `\`${r.setup}\`` : "—"}\n` +
+						`  Test: ${r.test ? `\`${r.test}\`` : "—"}\n` +
+						(sandbox.backend === "unavailable"
+							? `\n⚠️ No guaranteed environment. /debug and /build will emit BLOCKED rather than fabricate a pass. Install/start Docker, or add \`.phi/sandbox.json\`.`
+							: sandbox.backend === "local"
+								? `\n⚠️ Running on the host (not dependency-guaranteed). Start Docker for a guaranteed environment.`
+								: `\n✅ Guaranteed environment ready. Run \`/sandbox prepare\` to pull the image and install deps.`),
+					"info",
+				);
+				return;
+			}
+
+			if (sub === "prepare") {
+				ctx.ui.notify(`🧪 Preparing sandbox (${sandbox.describe()})… this can take a while on first run.`, "info");
+				const p = sandbox.prepare();
+				ctx.ui.notify(
+					`${p.ok ? "✅" : "❌"} **Sandbox prepare** — ${p.detail}` +
+						(p.result && !p.ok ? `\n\n\`\`\`\n${tail(p.result, 30)}\n\`\`\`` : ""),
+					p.ok ? "info" : "warning",
+				);
+				return;
+			}
+
+			if (sub === "run") {
+				const command = rest.join(" ").trim();
+				if (!command) {
+					ctx.ui.notify("**Usage:** `/sandbox run <command>`", "warning");
+					return;
+				}
+				if (!sandbox.available()) {
+					ctx.ui.notify(`❌ Sandbox unavailable — ${sandbox.reason}. Cannot run.`, "warning");
+					return;
+				}
+				ctx.ui.notify(`🧪 \`${command}\` in ${sandbox.describe()}…`, "info");
+				const result = sandbox.exec(command);
+				const verdict = result.timedOut ? "TIMEOUT" : passed(result) ? "PASS" : "FAIL";
+				ctx.ui.notify(
+					`${passed(result) ? "✅" : "❌"} exit ${result.exitCode ?? "?"} ${verdict}\n\n\`\`\`\n${tail(result, 40) || "(no output)"}\n\`\`\``,
+					passed(result) ? "info" : "warning",
+				);
+				return;
+			}
+
+			ctx.ui.notify("**Usage:** `/sandbox [status | prepare | run <command>]`", "info");
 		},
 	});
 }

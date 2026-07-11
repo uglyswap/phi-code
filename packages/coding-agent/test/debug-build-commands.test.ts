@@ -43,7 +43,13 @@ describe("debugPhaseInstructions", () => {
 		for (const text of [ins.reproduce, ins.localize, ins.fix, ins.verify]) {
 			expect(text).toMatch(/Execution is the only oracle/i);
 			expect(text).toMatch(/No fabricated PASS/i);
+			expect(text).toContain("sandbox_run"); // oracle runs go through the guaranteed environment
 		}
+	});
+	it("routes REPRODUCE and VERIFY oracle runs through sandbox_run", () => {
+		expect(ins.reproduce).toMatch(/sandbox_run pytest/);
+		expect(ins.verify).toMatch(/sandbox_run/);
+		expect(ins.reproduce).toContain("SANDBOX UNAVAILABLE");
 	});
 });
 
@@ -64,5 +70,9 @@ describe("buildVerifyInstruction", () => {
 		expect(ins).toContain("BUILD: SUCCESS");
 		expect(ins).toContain("BUILD: PARTIAL");
 		expect(ins).toMatch(/never a confident-wrong SUCCESS/i);
+	});
+	it("runs every check through the sandbox", () => {
+		expect(ins).toContain("sandbox_run");
+		expect(ins).toContain("SANDBOX UNAVAILABLE");
 	});
 });

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { type CommandResult, passed, runCommand, summarize, tail } from "../extensions/phi/providers/execution.js";
+import {
+	type CommandResult,
+	passed,
+	runArgv,
+	runCommand,
+	summarize,
+	tail,
+} from "../extensions/phi/providers/execution.js";
 
 const result = (over: Partial<CommandResult> = {}): CommandResult => ({
 	command: "cmd",
@@ -58,5 +65,36 @@ describe("runCommand (real spawn)", () => {
 	it("runs in the given cwd", () => {
 		const r = runCommand(process.platform === "win32" ? "cd" : "pwd", { cwd: process.cwd() });
 		expect(passed(r)).toBe(true);
+	});
+});
+
+describe("runArgv (no-shell argv spawn)", () => {
+	it("captures stdout and a passing exit without a shell", () => {
+		const r = runArgv(process.execPath, ["-e", "process.stdout.write('argv-ok')"]);
+		expect(passed(r)).toBe(true);
+		expect(r.stdout).toContain("argv-ok");
+	});
+
+	it("reports a non-zero exit without throwing", () => {
+		const r = runArgv(process.execPath, ["-e", "process.exit(4)"]);
+		expect(r.exitCode).toBe(4);
+		expect(passed(r)).toBe(false);
+	});
+
+	it("does not shell-interpret its arguments (safe with special chars)", () => {
+		// If this went through a shell, the ; && | would break it apart.
+		const r = runArgv(process.execPath, ["-e", "process.stdout.write(process.argv[1])", "a; rm -rf / && b | c"]);
+		expect(r.stdout).toBe("a; rm -rf / && b | c");
+	});
+
+	it("returns a null exit code when the program cannot be spawned", () => {
+		const r = runArgv("definitely-not-a-real-binary-xyz", ["--version"]);
+		expect(r.exitCode).toBeNull();
+		expect(passed(r)).toBe(false);
+	});
+
+	it("uses the label as the reported command when given", () => {
+		const r = runArgv(process.execPath, ["-e", ""], { label: "docker run ..." });
+		expect(r.command).toBe("docker run ...");
 	});
 });

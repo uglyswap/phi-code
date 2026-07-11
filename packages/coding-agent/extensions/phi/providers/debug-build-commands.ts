@@ -33,7 +33,8 @@ const DEBUG_RULES = `
 ---
 ## /debug operating rules (non-negotiable)
 - **Execution is the only oracle.** No verdict without a real run whose output you paste. Never write FIXED because the code "looks right".
-- **No fabricated PASS.** If you cannot run the reproduction (missing env/deps), emit \`BLOCKED: no executable environment\` — do NOT reconstruct a mock and grade your own reconstruction.
+- **Use the \`sandbox_run\` tool for every oracle run** (reproduction, suite, acceptance). It runs in the project's guaranteed environment and returns the REAL exit code — a PASS means \`sandbox_run\` returned exit 0, nothing less.
+- **No fabricated PASS.** If \`sandbox_run\` reports \`SANDBOX UNAVAILABLE\` (or you otherwise cannot run the reproduction), emit \`BLOCKED: no executable environment\` — do NOT reconstruct a mock and grade your own reconstruction.
 - **Minimal fix wins.** Prefer the smallest change; every added guard/condition is a liability that can hide the bug (an over-clever guard is exactly how these fixes go wrong).
 - **Root cause, not workaround.** No skipped tests, no \`--no-verify\`, no mock that hides the failure.
 - The user does NOT answer during these phases. Act autonomously; do not end with a question.`;
@@ -51,12 +52,12 @@ export function debugPhaseInstructions(state: FailingState): DebugInstructions {
 ${failing}
 
 **Do exactly this:**
-1. Run the reproduction on the CURRENT, unmodified code: \`${repro}\`.
+1. Run the reproduction on the CURRENT, unmodified code with the \`sandbox_run\` tool: \`sandbox_run ${repro}\`.
 2. Paste the exact command and its full output.
-3. Decide:
+3. Decide from what \`sandbox_run\` returned:
    - If it FAILS as reported → capture the precise symptom (assertion, exception, exit code) and hand off to LOCALIZE.
    - If it PASSES → STOP. Write \`BLOCKED: cannot reproduce — passes on current code\` with the run pasted. Do not invent a bug.
-   - If it cannot be run at all (missing deps/env) → STOP. Write \`BLOCKED: no executable environment\` with what failed.
+   - If \`sandbox_run\` reports \`SANDBOX UNAVAILABLE\` → STOP. Write \`BLOCKED: no executable environment\`.
 4. Do NOT edit any source yet. This phase only observes.
 5. **Last action:** call \`phase_result\` — \`verdict: PASS\` if it reproduced (proceed to LOCALIZE), or \`verdict: BLOCKED\` with the reason if you stopped.` +
 			DEBUG_RULES,
@@ -90,9 +91,9 @@ ${failing}
 ${failing}
 
 **Do exactly this, pasting every command's output:**
-1. Re-run the reproduction: \`${repro}\`. It MUST now pass.
-2. Run the existing test suite (the project's test command). It MUST NOT regress.
-3. Verdict:
+1. Re-run the reproduction with \`sandbox_run ${repro}\`. It MUST now return exit 0.
+2. Run the existing test suite with \`sandbox_run <test command>\`. It MUST NOT regress.
+3. Verdict (from what \`sandbox_run\` returned, not from inspection):
    - Both green → \`FIXED\`, and paste the before(fail)/after(pass) reproduction runs and the green suite as evidence.
    - Reproduction still fails, or the suite regresses → \`BLOCKED\` with the closest diagnostic. Do NOT ship the least-bad patch; a wrong fix is worse than an honest BLOCKED.
 4. Write the final verdict block, then call \`phase_result\` with \`verdict: PASS\` (FIXED) or \`verdict: BLOCKED\`, plus a one-line handoff:
@@ -113,10 +114,12 @@ export function buildVerifyInstruction(spec: string): string {
 
 **Original spec:** ${spec}
 
+**Every run below goes through the \`sandbox_run\` tool** (the project's guaranteed environment). If it reports \`SANDBOX UNAVAILABLE\`, do not fabricate results — mark the affected criteria ❔ and say the environment was unavailable.
+
 **Do exactly this, pasting every command's output:**
-1. **Run recipe.** From the brief's \`## Run Recipe\` (or package.json / Makefile / Dockerfile), build and start the app. Distinguish a real failure from a stale launch recipe.
-2. **Acceptance.** For each acceptance criterion derived from the SPEC (not the code), run a concrete check that exits 0 iff it holds. Mark each ✅ (ran+passed), ❌ (ran+failed), or ❔ (could not be executed — NEVER count ❔ as passing).
-3. **Executable red-team.** Attack the specific input regimes the change touched (empty, null, boundary, wrong-type, and buffered-vs-streaming / malformed / auth as relevant). Each attack must be a RUNNABLE test that goes RED if it breaks the code — an opinion is not a finding.
+1. **Run recipe.** From the brief's \`## Run Recipe\` (or package.json / Makefile / Dockerfile), build and start the app via \`sandbox_run\`. Distinguish a real failure from a stale launch recipe.
+2. **Acceptance.** For each acceptance criterion derived from the SPEC (not the code), \`sandbox_run\` a concrete check that exits 0 iff it holds. Mark each ✅ (sandbox_run returned 0), ❌ (non-zero), or ❔ (could not be executed — NEVER count ❔ as passing).
+3. **Executable red-team.** Attack the specific input regimes the change touched (empty, null, boundary, wrong-type, and buffered-vs-streaming / malformed / auth as relevant). Each attack must be a RUNNABLE test \`sandbox_run\` can execute and that goes RED if it breaks the code — an opinion is not a finding.
 4. **Route real failures.** For every ❌ criterion and every red-team break, treat it as a concrete failing state (failing test / repro command / expected) and fix it with the /debug protocol: REPRODUCE → LOCALIZE → minimal FIX → VERIFY (re-run the reproduction AND the suite).
 5. **Honest verdict.** When all checkable criteria pass and the red-team finds no break, write \`BUILD: SUCCESS\`. If rounds/budget run out with failures open, write \`BUILD: PARTIAL\` and LIST exactly which criteria still fail — never a confident-wrong SUCCESS. Then call \`phase_result\` with \`verdict: PASS\` (SUCCESS) or \`verdict: FAIL\`/\`BLOCKED\` and the handoff.
 \`\`\`

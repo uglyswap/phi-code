@@ -10,6 +10,8 @@
 
 import { spawnSync } from "node:child_process";
 
+const DEFAULT_MAX_BUFFER = 32 * 1024 * 1024;
+
 export interface CommandResult {
 	command: string;
 	exitCode: number | null;
@@ -58,7 +60,7 @@ export function runCommand(command: string, options: RunOptions = {}): CommandRe
 		env: options.env ?? process.env,
 		shell: true,
 		encoding: "utf-8",
-		maxBuffer: 32 * 1024 * 1024,
+		maxBuffer: DEFAULT_MAX_BUFFER,
 	});
 	const durationMs = Date.now() - start;
 	// spawnSync sets error with code "ETIMEDOUT" on timeout, and signal SIGTERM.
@@ -67,6 +69,36 @@ export function runCommand(command: string, options: RunOptions = {}): CommandRe
 	return {
 		command,
 		exitCode: spawnFailed ? null : (res.status ?? (timedOut ? null : null)),
+		stdout: res.stdout ?? "",
+		stderr: spawnFailed ? `${(res.error as Error).message}\n${res.stderr ?? ""}` : (res.stderr ?? ""),
+		durationMs,
+		timedOut,
+	};
+}
+
+/**
+ * Run a program by ARGV with NO shell. This is what the Docker sandbox uses:
+ * passing `docker` + its arguments directly avoids shell quoting and — on
+ * Windows Git Bash — the MSYS path mangling that corrupts `-v C:\x:/work` and
+ * `//var/run/docker.sock`. `label` is the human-readable command echoed back in
+ * the result (the argv itself is not a shell string). Never throws.
+ */
+export function runArgv(file: string, args: string[], options: RunOptions & { label?: string } = {}): CommandResult {
+	const start = Date.now();
+	const res = spawnSync(file, args, {
+		cwd: options.cwd,
+		timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+		env: options.env ?? process.env,
+		shell: false,
+		encoding: "utf-8",
+		maxBuffer: DEFAULT_MAX_BUFFER,
+	});
+	const durationMs = Date.now() - start;
+	const timedOut = res.error !== undefined && (res.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
+	const spawnFailed = res.error !== undefined && !timedOut;
+	return {
+		command: options.label ?? `${file} ${args.join(" ")}`.trim(),
+		exitCode: spawnFailed ? null : (res.status ?? null),
 		stdout: res.stdout ?? "",
 		stderr: spawnFailed ? `${(res.error as Error).message}\n${res.stderr ?? ""}` : (res.stderr ?? ""),
 		durationMs,

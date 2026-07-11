@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.90.0] - 2026-07-11
+
+### Added — the execution sandbox (the guaranteed oracle)
+
+This is the infrastructure the 0.89.0 design (`docs/design/plan-debug-build.md`)
+called its "real investment": it turns `/debug` and `/build` from prompt-enforced
+discipline into a **guaranteed oracle**. The agent can no longer merely claim it
+ran the test — a real container runs it and returns the true exit code.
+
+- **`providers/sandbox-plan.ts` (pure, 29 tests)** — detects the project toolchain
+  (node / python / go / rust / ruby / Dockerfile), builds an environment recipe
+  (base image, dependency-install, test command, env), decides the backend
+  **honestly**, and constructs the `docker run` argv. The Windows path/quoting
+  pitfalls that defeated the earlier SWE-bench harness (bind-mount mangling,
+  stdlib shadowing) are handled here and unit-tested: `-v C:/…:/work`,
+  `PYTHONSAFEPATH=1`.
+- **`providers/sandbox.ts` (IO shell, 8 tests incl. a real-Docker smoke)** — the
+  `Sandbox` interface with three backends: `docker` (guaranteed environment),
+  `local` (real runs, but not dependency-guaranteed), and `unavailable` (honest —
+  every exec reports `SANDBOX UNAVAILABLE` so the modes emit `BLOCKED`, never a
+  fabricated pass). Ephemeral container, host bind-mount, so a `/debug` fix lands
+  on disk and the next run sees it. Docker is demanded-but-absent → `unavailable`,
+  never a silent downgrade.
+- **`sandbox_run` tool** — exposed to the `/debug` and `/build` phase agents. The
+  reproduction, the suite, and acceptance/red-team checks run through it; the
+  verdict is tied to its structured result (`passed`, real `exitCode`), not to the
+  model's prose. `execution.ts` gained `runArgv` (no-shell argv spawn) for safe
+  `docker` invocation.
+- **`/sandbox` command** — `status` (detected toolchain, backend, recipe),
+  `prepare` (pull image / build Dockerfile / install deps), `run <cmd>` (one-off).
+  A `.phi/sandbox.json` overrides everything (image, setup, test, backend, memory,
+  cpus, network).
+
+50 new tests (1425 total, green). The `/debug` and `/build` phase instructions now
+route every oracle run through `sandbox_run` and downgrade to `BLOCKED` when the
+sandbox is unavailable.
+
+### Still honest
+
+The sandbox makes the thesis **measurable** — it is the missing piece that let the
+model self-grade before. It does not by itself prove `/debug` beats a single shot;
+that is now a runnable measurement (containerized SWE-bench-lite with `sandbox_run`
+as the oracle), and it is the next step, not a claim made here.
+
 ## [0.89.0] - 2026-07-11
 
 ### Added
