@@ -21,6 +21,9 @@
  */
 
 import { ApiKeyStore, type ExtensionAPI, getApiKeyStore, getConfigWatcher } from "phi-code";
+import { pingAlibaba } from "./providers/alibaba.js";
+import { pingOpenCodeGo } from "./providers/opencode-go.js";
+import { bootstrapProviderConfig, isBootstrappableProvider } from "./providers/provider-bootstrap.js";
 
 type ProviderPingFn = (key: string, timeoutMs?: number) => Promise<{ ok: boolean; error?: string }>;
 
@@ -37,6 +40,13 @@ export function registerProviderPing(providerId: string, ping: ProviderPingFn): 
 export default function keysExtension(pi: ExtensionAPI) {
 	const store = getApiKeyStore();
 	const watcher = getConfigWatcher();
+
+	// Built-in pings so `/keys test <id>` works out of the box for the providers
+	// phi ships builders for (previously nothing ever registered a ping).
+	registerProviderPing("alibaba-codingplan", pingAlibaba);
+	registerProviderPing("alibaba-codingplan-anthropic", pingAlibaba);
+	registerProviderPing("opencode-go", pingOpenCodeGo);
+	registerProviderPing("opencode-go-anthropic", pingOpenCodeGo);
 
 	pi.registerCommand("keys", {
 		description: "Manage API keys (list / set / remove / test / reload)",
@@ -75,15 +85,35 @@ export default function keysExtension(pi: ExtensionAPI) {
 						return;
 					}
 					// A bare `set` only updates the key; it cannot supply baseUrl/api/models.
-					// For a never-configured id this would persist an unusable provider
-					// (apiKey but no endpoint), so require an existing entry with a baseUrl.
+					// For a never-configured id: bootstrap the full entry when phi ships a
+					// builder for it (Alibaba Coding Plan, OpenCode Go); otherwise keep the
+					// old behaviour and point at /setup.
 					const existing = store.getProvider(id);
 					if (!existing?.baseUrl) {
+						if (!isBootstrappableProvider(id)) {
+							ctx.ui.notify(
+								`\`${id}\` is not a configured provider (no baseUrl on file). ` +
+									`Run \`/setup\` to add it with an endpoint and models first; ` +
+									`\`/keys set\` only updates the key of an already-configured provider.`,
+								"warning",
+							);
+							return;
+						}
+						const boot = bootstrapProviderConfig(id, key);
+						if (!boot.ok) {
+							ctx.ui.notify(`Cannot configure \`${id}\`: ${boot.error}`, "warning");
+							return;
+						}
+						watcher.muteForWrite("models_json_changed");
+						store.setKey(id, key, {
+							baseUrl: boot.config.baseUrl,
+							api: boot.config.api,
+							models: boot.config.models,
+						});
 						ctx.ui.notify(
-							`\`${id}\` is not a configured provider (no baseUrl on file). ` +
-								`Run \`/setup\` to add it with an endpoint and models first; ` +
-								`\`/keys set\` only updates the key of an already-configured provider.`,
-							"warning",
+							`Configured \`${id}\` (\`${ApiKeyStore.maskKey(key)}\`) — ${boot.note}\n` +
+								`Stored in ${store.configPath}. Use \`/keys test ${id}\` to validate, then pick a model with \`/model\`.`,
+							"info",
 						);
 						return;
 					}

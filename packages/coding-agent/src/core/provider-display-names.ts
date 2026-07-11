@@ -1,4 +1,6 @@
 export const BUILT_IN_PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+	"alibaba-codingplan": "Alibaba Coding Plan",
+	"alibaba-codingplan-anthropic": "Alibaba Coding Plan (Anthropic-compat)",
 	anthropic: "Anthropic",
 	"amazon-bedrock": "Amazon Bedrock",
 	"azure-openai-responses": "Azure OpenAI Responses",
@@ -19,6 +21,7 @@ export const BUILT_IN_PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 	"moonshotai-cn": "Moonshot AI (China)",
 	opencode: "OpenCode Zen",
 	"opencode-go": "OpenCode Go",
+	"opencode-go-anthropic": "OpenCode Go (Anthropic-compat)",
 	openai: "OpenAI",
 	openrouter: "OpenRouter",
 	together: "Together AI",

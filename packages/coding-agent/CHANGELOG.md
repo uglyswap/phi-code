@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.91.0] - 2026-07-11
+
+### Added — Alibaba Cloud Coding Plan, first-class and one-command
+
+The Alibaba Coding Plan support (endpoints, live catalog, ping, wizard) already
+existed but was only reachable through the interactive `/setup` wizard — a user
+could not simply add the provider. Verified against the official docs
+(https://www.alibabacloud.com/help/en/model-studio/coding-plan) and a live API
+round-trip (catalog listing + a real `qwen3.7-plus` completion).
+
+- **`/keys set` now bootstraps known providers.** `providers/provider-bootstrap.ts`
+  (pure, 11 tests) builds a complete first-time models.json entry — baseUrl, api
+  protocol, bundled model list — from a single API key, with each provider's own
+  key-format validation applied up front (`sk-sp-` prefix for Alibaba). One
+  command configures the provider end to end:
+  `/keys set alibaba-codingplan sk-sp-…` — then the session-start refresh
+  replaces the bundled list with the live catalog. Bootstrappable ids:
+  `alibaba-codingplan`, `alibaba-codingplan-anthropic`, `opencode-go`,
+  `opencode-go-anthropic`. Unknown providers keep the previous /setup guidance.
+- **`/keys test` now actually works.** `registerProviderPing` existed but nothing
+  ever called it; keys.ts now registers the built-in pings (Alibaba, OpenCode Go)
+  at load, so `/keys test alibaba-codingplan` validates the key against the real
+  `/v1/models` endpoint.
+- **Provider display names.** `alibaba-codingplan`, `alibaba-codingplan-anthropic`
+  and `opencode-go-anthropic` now render with proper names in the /model picker
+  (they fell back to raw ids).
+
 ## [0.90.0] - 2026-07-11
 
 ### Added — the execution sandbox (the guaranteed oracle)
