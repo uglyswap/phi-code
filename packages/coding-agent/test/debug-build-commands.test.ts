@@ -51,6 +51,14 @@ describe("debugPhaseInstructions", () => {
 		expect(ins.verify).toMatch(/sandbox_run/);
 		expect(ins.reproduce).toContain("SANDBOX UNAVAILABLE");
 	});
+	it("VERIFY treats a timeout as a regression (the sympy-11870 lesson)", () => {
+		expect(ins.verify).toMatch(/TIMEOUT counts as a FAILURE/i);
+		expect(ins.verify).toMatch(/slowdown|infinite loop/i);
+	});
+	it("REPRODUCE forbids a hasty BLOCKED (retry before concluding)", () => {
+		expect(ins.reproduce).toMatch(/last resort/i);
+		expect(ins.reproduce).toMatch(/retry/i);
+	});
 });
 
 describe("buildVerifyInstruction", () => {

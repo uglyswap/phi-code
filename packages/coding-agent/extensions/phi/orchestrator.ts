@@ -284,6 +284,11 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		// Set true once this phase has been retried once (transient proxy failure /
 		// timeout / 0-tool-call). Hard cap of one retry per phase.
 		retried?: boolean;
+		// Generic driver (/debug, /build) only: set true once this phase was re-run
+		// after a BLOCKED verdict. One second chance on the fallback model — a hasty
+		// BLOCKED (measured: 51s on sympy-11897) is cheaper to re-check than to
+		// trust — then the halt is honest.
+		blockedRetried?: boolean;
 		// When true, switchModelForPhase resolves the fallback model first (used on retry
 		// to swap to a different model family rather than re-hit the one that just failed).
 		useFallback?: boolean;
@@ -1323,13 +1328,63 @@ Tag the note with relevant keywords for vector search.
 			phaseTimeoutId = null;
 		}
 
-		// A BLOCKED verdict (REPRODUCE cannot reproduce / VERIFY could not confirm)
-		// halts the pipeline honestly — no fabricated success.
+		// Route through the SAME pure decision machine as /plan so the generic
+		// driver gets the protections it was measured to lack (sympy-11897, a 51s
+		// hasty halt): fatal 401 stop, one retry on a transient provider error.
 		const structuredForThisPhase = currentPhaseResultKey === (currentPhase?.key ?? null) ? currentPhaseResult : null;
 		const outcome = resolvePhaseOutcome(structuredForThisPhase, null);
-		if (outcome.verdict === "BLOCKED" && currentPhase) {
+		const decision = decidePhaseTransition({
+			analysis,
+			phase: currentPhase ? { key: currentPhase.key, retried: currentPhase.retried } : null,
+			verdict: outcome.verdict,
+			// The generic driver has no review-fix cycle; pass the cap as spent.
+			reviewFixRounds: 1,
+			maxToolCallsPerPhase: MAX_TOOL_CALLS_PER_PHASE,
+		});
+
+		if (decision.action === "stop") {
 			ctx.ui.notify(
-				`\n⏸️ **${currentPhase.label} reported BLOCKED.** ${outcome.handoff || "No reproducible/verifiable result."}`,
+				`\n❌ **/${orchestrationMode} aborted:** API authentication error (401). Check your API key.`,
+				"error",
+			);
+			finishGenericOrchestration(ctx, `❌ **/${orchestrationMode} aborted (auth error).**`);
+			return;
+		}
+
+		if (decision.action === "retry-fallback" && currentPhase) {
+			// Transient provider failure (timeout / 5xx / 429 / broken stream): retry
+			// the SAME phase once on the fallback model before treating any of its
+			// output as a real outcome.
+			currentPhase.retried = true;
+			currentPhase.useFallback = true;
+			phaseQueue.unshift(currentPhase);
+			phasePending = false;
+			ctx.ui.notify(
+				`\n🔁 **Transient provider error** in ${currentPhase.label} — retrying once on the fallback model.`,
+				"warning",
+			);
+			sendNextGenericPhase(ctx);
+			return;
+		}
+
+		// BLOCKED (REPRODUCE cannot reproduce / VERIFY could not confirm): give the
+		// phase ONE second chance on the fallback model — a hasty BLOCKED is cheaper
+		// to re-check than to trust — then halt honestly. No fabricated success.
+		if (decision.action === "pause-blocked" && currentPhase) {
+			if (!currentPhase.blockedRetried) {
+				currentPhase.blockedRetried = true;
+				currentPhase.useFallback = true;
+				phaseQueue.unshift(currentPhase);
+				phasePending = false;
+				ctx.ui.notify(
+					`\n🔁 **${currentPhase.label} reported BLOCKED on the first attempt** — retrying once on the fallback model before halting. ${outcome.handoff || ""}`,
+					"warning",
+				);
+				sendNextGenericPhase(ctx);
+				return;
+			}
+			ctx.ui.notify(
+				`\n⏸️ **${currentPhase.label} reported BLOCKED (confirmed on retry).** ${outcome.handoff || "No reproducible/verifiable result."}`,
 				"warning",
 			);
 			finishGenericOrchestration(ctx, `⏸️ **/${orchestrationMode} stopped: BLOCKED at ${currentPhase.label}.**`);
