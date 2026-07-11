@@ -200,6 +200,18 @@ too-new Python — exactly what defeated the 3362 measurement), the modes must:
 Reusing phi's `run` / `verify` skills for local projects is the first target;
 a per-project container is the general solution.
 
+**Status (2026-07-11): implemented.** `providers/sandbox-plan.ts` (pure: toolchain
+detection → recipe → backend decision → `docker run` argv) and `providers/sandbox.ts`
+(the `Sandbox` IO shell: `docker` | `local` | `unavailable`) provide the guaranteed
+environment. The `sandbox_run` tool exposes it to the /debug and /build phase agents
+— the reproduction, the suite, and acceptance/red-team checks now run in a real
+container and return its true exit code, so a PASS cannot be asserted, only earned.
+When Docker is absent and nothing is containerizable, the backend is `unavailable`
+and every `sandbox_run` returns `SANDBOX UNAVAILABLE`, which the phase instructions
+turn into `BLOCKED` — never a fabricated pass. The `/sandbox` command
+(`status` | `prepare` | `run`) inspects and provisions it. A `.phi/sandbox.json`
+overrides detection (image, setup, test, backend, resource caps).
+
 ---
 
 ## Triage / adaptive depth (cost discipline)
@@ -243,6 +255,11 @@ contract above; (2) make `acceptance[]` + `runRecipe` first-class /plan outputs;
 (3) the `/build` loop; (4) the executable red-team; (5) the execution sandbox and
 the real-run verify path. Items 1–4 are prompt/orchestration changes on existing
 machinery; item 5 is the real infrastructure investment.
+
+Status: (1)–(4) shipped in 0.89.0; (5) the execution sandbox shipped in 0.90.0
+(`providers/sandbox*.ts`, the `sandbox_run` tool, `/sandbox`). What remains is the
+*measurement*: running /debug against a containerized SWE-bench-lite with the
+sandbox as the oracle, to get the number.
 
 ## How we will know it worked (this must be measured, not shipped on faith)
 
