@@ -59,7 +59,8 @@ ${failing}
    - If it PASSES → STOP. Write \`BLOCKED: cannot reproduce — passes on current code\` with the run pasted. Do not invent a bug.
    - If \`sandbox_run\` reports \`SANDBOX UNAVAILABLE\` → STOP. Write \`BLOCKED: no executable environment\`.
 4. Do NOT edit any source yet. This phase only observes.
-5. **Last action:** call \`phase_result\` — \`verdict: PASS\` if it reproduced (proceed to LOCALIZE), or \`verdict: BLOCKED\` with the reason if you stopped.` +
+5. **BLOCKED is a last resort, not a first reaction.** If a run fails for an infrastructure-looking reason (tool error, missing file you guessed wrong, transient failure), adjust and retry at least once — e.g. locate the real test paths, try an alternative reproduction — before concluding. Only report BLOCKED after a genuine attempt showed the state is not reproducible or not runnable.
+6. **Last action:** call \`phase_result\` — \`verdict: PASS\` if it reproduced (proceed to LOCALIZE), or \`verdict: BLOCKED\` with the reason if you stopped.` +
 			DEBUG_RULES,
 
 		localize: `You are the LOCALIZE agent (phase 2 of /debug). Drive from the REAL symptom the previous phase captured.
@@ -96,6 +97,7 @@ ${failing}
 3. Verdict (from what \`sandbox_run\` returned, not from inspection):
    - Both green → \`FIXED\`, and paste the before(fail)/after(pass) reproduction runs and the green suite as evidence.
    - Reproduction still fails, or the suite regresses → \`BLOCKED\` with the closest diagnostic. Do NOT ship the least-bad patch; a wrong fix is worse than an honest BLOCKED.
+   - **A TIMEOUT counts as a FAILURE.** If the reproduction or the suite TIMES OUT with the fix applied (\`sandbox_run\` verdict TIMEOUT), the fix has introduced a massive slowdown or an infinite loop — that IS a regression (measured: a fix that passed its repro but made the real test suite hang for 900s). Verdict \`BLOCKED\`, never \`FIXED\`. Compare rough durations before/after: a check that got dramatically slower is a red flag even below the timeout.
 4. Write the final verdict block, then call \`phase_result\` with \`verdict: PASS\` (FIXED) or \`verdict: BLOCKED\`, plus a one-line handoff:
 \`\`\`
 VERDICT: FIXED | BLOCKED

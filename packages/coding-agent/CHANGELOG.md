@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.92.0] - 2026-07-11
+
+### Fixed — the two defects the n=13 SWE-bench measurement exposed
+
+The measured head-to-head (baseline 7/13 vs /debug 6/13, official harness) traced
+/debug's two lost points to concrete, reparable defects — both fixed here.
+
+- **Hasty BLOCKED (sympy-11897, halted at 51s).** The generic /debug//build
+  driver now routes phase completion through the same pure decision machine as
+  /plan (`decidePhaseTransition`), gaining what it measurably lacked: a fatal
+  401 stops the run, a transient provider error (timeout / 5xx / 429 / broken
+  stream) retries the SAME phase once on the fallback model instead of being
+  swallowed, and — new — a BLOCKED verdict gets ONE second chance on the
+  fallback model (a different family re-checks the reproduction) before the
+  halt. A confirmed second BLOCKED still halts honestly: no fabricated fix.
+  REPRODUCE's instructions now state BLOCKED is a last resort — adjust and
+  retry once before concluding.
+- **Timeout-blind VERIFY (sympy-11870, fix passed its repro but hung the real
+  suite for 900s).** VERIFY's instructions now treat a TIMEOUT of the
+  reproduction or the suite as a FAILURE of the candidate — a massive slowdown
+  or infinite loop IS a regression — with verdict BLOCKED, never FIXED. A
+  dramatic duration increase below the timeout is flagged as a red flag too.
+
+8 integration tests cover the new behaviours (BLOCKED retry → honest halt,
+BLOCKED retry → proceed on success, transient-error retry); full suite green
+(1439).
+
 ## [0.91.0] - 2026-07-11
 
 ### Added — Alibaba Cloud Coding Plan, first-class and one-command

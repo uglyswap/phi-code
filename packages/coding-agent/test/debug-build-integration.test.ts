@@ -128,17 +128,47 @@ describe("/debug + /build integration", () => {
 		expect(notes).toContain("finished");
 	});
 
-	it("/debug halts honestly when REPRODUCE reports BLOCKED (no fabricated fix)", async () => {
+	it("/debug retries a BLOCKED REPRODUCE once on the fallback, then halts honestly", async () => {
 		await cap.commands.get("debug")!("pytest tests/test_x.py::test_y", makeCtx(cap, tempDir));
 		await sleep(300);
 		const before = cap.sentMessages.length;
 
+		// First BLOCKED → one second chance: the SAME phase is re-sent (fallback model).
 		await finishPhase({ verdict: "BLOCKED", handoff: "cannot reproduce — passes on current code" });
+		expect(cap.notifications.join("\n")).toContain("retrying once on the fallback model");
+		expect(cap.sentMessages.length).toBe(before + 1);
+		expect(cap.sentMessages[before]).toContain("REPRODUCE agent");
+
+		// Second BLOCKED → honest halt, nothing further sent.
+		await finishPhase({ verdict: "BLOCKED", handoff: "still passes on current code" });
 		const notes = cap.notifications.join("\n");
-		expect(notes).toContain("BLOCKED");
+		expect(notes).toContain("confirmed on retry");
 		expect(notes).toContain("stopped: BLOCKED");
-		// No LOCALIZE/FIX/VERIFY were sent after the halt.
-		expect(cap.sentMessages.length).toBe(before);
+		expect(cap.sentMessages.length).toBe(before + 1);
+	});
+
+	it("/debug proceeds to LOCALIZE when the BLOCKED retry succeeds", async () => {
+		await cap.commands.get("debug")!("pytest tests/test_x.py::test_y", makeCtx(cap, tempDir));
+		await sleep(300);
+		await finishPhase({ verdict: "BLOCKED", handoff: "flaky env" }); // → retry REPRODUCE
+		await finishPhase({ verdict: "PASS", handoff: "reproduced on retry" }); // → LOCALIZE
+		expect(cap.sentMessages.at(-1)).toContain("LOCALIZE agent");
+	});
+
+	it("/debug retries once on a transient provider error instead of advancing", async () => {
+		await cap.commands.get("debug")!("pytest tests/test_x.py::test_y", makeCtx(cap, tempDir));
+		await sleep(300);
+		const before = cap.sentMessages.length;
+		// A phase that ends on a 502-looking failure must be retried, not treated
+		// as a completed REPRODUCE.
+		await cap.events.get("agent_end")!(
+			{ messages: [{ role: "assistant", content: "upstream error 502 bad gateway", stopReason: "stop" }] },
+			makeCtx(cap, tempDir),
+		);
+		await sleep(700);
+		expect(cap.notifications.join("\n")).toContain("Transient provider error");
+		expect(cap.sentMessages.length).toBe(before + 1);
+		expect(cap.sentMessages[before]).toContain("REPRODUCE agent");
 	});
 
 	it("/build runs EXPLORE → … → BUILD-VERIFY and reports honestly", async () => {
