@@ -23,6 +23,8 @@ import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "phi-code";
 import { type AgentDef, loadAgentDef } from "./providers/agent-def.js";
+import { buildVerifyInstruction, debugPhaseInstructions } from "./providers/debug-build-commands.js";
+import { type FailingState, parseFailingState } from "./providers/debug-contract.js";
 import { defaultExplorerSpecs, READONLY_EXPLORER_TOOLS, runExploreFanout } from "./providers/explore-fanout.js";
 import {
 	analyzePhaseMessages,
@@ -31,6 +33,7 @@ import {
 	resolvePhaseOutcome,
 	type StructuredPhaseResult,
 } from "./providers/phase-machine.js";
+import { triage } from "./providers/triage.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -289,6 +292,10 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 
 	let phaseQueue: OrchestratorPhase[] = [];
 	let orchestrationActive = false;
+	// Which pipeline is running. "plan" keeps the existing 5-phase agent_end path
+	// untouched; "debug"/"build" are driven by the separate linear generic driver
+	// so /plan's fragile review-fix + "/5" logic is never engaged for them.
+	let orchestrationMode: "plan" | "debug" | "build" = "plan";
 	let activeAgentPrompt: string | null = null;
 	let _activeAgentTools: string[] | null = null;
 	let savedTools: string[] | null = null;
@@ -1096,6 +1103,242 @@ Tag the note with relevant keywords for vector search.
 		});
 	}
 
+	// ─── Generic linear driver (/debug, /build) ─────────────────────
+	// A deliberately simpler engine than /plan's: phases run in order, a BLOCKED
+	// verdict halts, and there is no review-fix cycle or "/5" bookkeeping. It
+	// reuses the tested primitives (switchModelForPhase, activateAgent,
+	// resolvePhaseOutcome) but never the /plan-specific agent_end path.
+
+	function routeFor(routeKey: string): { preferred: string; fallback: string } {
+		const routingPath = join(homedir(), ".phi", "agent", "routing.json");
+		try {
+			const routing = JSON.parse(readFileSync(routingPath, "utf-8"));
+			const route = routing.routes?.[routeKey];
+			return {
+				preferred: route?.preferredModel || routing.default?.model || "default",
+				fallback: route?.fallback || routing.default?.model || "default",
+			};
+		} catch {
+			return { preferred: "default", fallback: "default" };
+		}
+	}
+
+	function genericPhase(
+		key: string,
+		label: string,
+		routeKey: string,
+		agentKey: string,
+		instruction: string,
+	): OrchestratorPhase {
+		const route = routeFor(routeKey);
+		return {
+			key,
+			label,
+			model: route.preferred,
+			fallback: route.fallback,
+			agent: loadAgentDef(agentKey),
+			instruction: instruction + COMMON_PHASE_RULES,
+		};
+	}
+
+	// /debug: REPRODUCE → LOCALIZE → FIX → VERIFY. Each phase routes to a model
+	// that does NOT share the coder's blind spot (verify on the test family).
+	function buildDebugPhases(state: FailingState): OrchestratorPhase[] {
+		const ins = debugPhaseInstructions(state);
+		return [
+			genericPhase("reproduce", "🔴 Phase 1 — REPRODUCE", "test", "test", ins.reproduce),
+			genericPhase("localize", "🔎 Phase 2 — LOCALIZE", "explore", "explore", ins.localize),
+			genericPhase("fix", "🔧 Phase 3 — FIX", "code", "code", ins.fix),
+			genericPhase("verify", "✅ Phase 4 — VERIFY", "test", "test", ins.verify),
+		];
+	}
+
+	// /build: reuse /plan's EXPLORE→PLAN→CODE, then an execution-grounded
+	// BUILD-VERIFY that runs the recipe, checks acceptance, red-teams the
+	// boundary, and routes real failures to the /debug protocol.
+	function buildBuildPhases(spec: string, ts: string): OrchestratorPhase[] {
+		const planLike = buildPhases(spec, ts).slice(0, 3); // explore, plan, code
+		const verify = genericPhase(
+			"verify",
+			"🧪 Phase 4 — BUILD-VERIFY",
+			"review",
+			"review",
+			buildVerifyInstruction(spec),
+		);
+		return [...planLike, verify];
+	}
+
+	function finishGenericOrchestration(ctx: any, headline: string) {
+		const elapsed = phaseStartTime ? Math.round((Date.now() - phaseStartTime) / 1000) : 0;
+		const minutes = Math.floor(elapsed / 60);
+		const seconds = elapsed % 60;
+		const mode = orchestrationMode;
+		setOrchestrationActive(false);
+		phasePending = false;
+		orchestrationMode = "plan";
+		deactivateAgent();
+		if (phaseTimeoutId) {
+			clearTimeout(phaseTimeoutId);
+			phaseTimeoutId = null;
+		}
+		if (originalModel) {
+			const toRestore = originalModel;
+			originalModel = null;
+			Promise.resolve(pi.setModel(toRestore)).catch(() => {
+				/* best effort */
+			});
+		}
+		ctx.ui.notify(
+			`\n📊 **/${mode} summary** — ${completedPhases} phase(s) in ${minutes}m ${seconds}s${
+				skippedPhases ? ` (${skippedPhases} skipped on timeout)` : ""
+			}\n${headline}`,
+			"info",
+		);
+	}
+
+	function sendNextGenericPhase(ctx: any) {
+		if (phaseQueue.length === 0) {
+			finishGenericOrchestration(ctx, `✅ **/${orchestrationMode} finished.**`);
+			return;
+		}
+		const phase = phaseQueue.shift()!;
+		phasePending = true;
+		currentPhase = phase;
+		currentPhaseResult = null;
+		currentPhaseResultKey = null;
+
+		switchModelForPhase(phase, ctx).then(({ modelId, warning }) => {
+			activateAgent(phase, ctx);
+			const agentName = phase.agent?.name || phase.key;
+			ctx.ui.notify(`\n${phase.label} → \`${modelId}\` (agent: ${agentName})`, "info");
+			if (warning) ctx.ui.notify(`\n⚠️ ${warning}`, "warning");
+			setTimeout(() => pi.sendUserMessage(phase.instruction, { deliverAs: "followUp" }), 500);
+			if (phaseTimeoutId) clearTimeout(phaseTimeoutId);
+			phaseTimeoutId = setTimeout(() => {
+				if (orchestrationActive && phasePending) {
+					phasePending = false;
+					internalAbort = true;
+					try {
+						ctx.abort();
+					} catch {
+						/* best effort */
+					}
+					if (!phase.retried) {
+						phase.retried = true;
+						phase.useFallback = true;
+						phaseQueue.unshift(phase);
+						ctx.ui.notify(
+							`\n⏰ **Phase timed out** (${MAX_PHASE_DURATION_MS / 60000} min) — retrying once on the fallback model.`,
+							"warning",
+						);
+					} else {
+						skippedPhases++;
+						ctx.ui.notify(`\n⏰ **Phase timed out again** — skipping to next phase.`, "warning");
+					}
+					sendNextGenericPhase(ctx);
+				}
+			}, MAX_PHASE_DURATION_MS);
+		});
+	}
+
+	async function handleGenericPhaseEnd(event: any, ctx: any) {
+		const messages = event.messages || [];
+		const analysis = analyzePhaseMessages(messages);
+
+		if (analysis.userAborted) {
+			ctx.ui.notify(`\n🛑 **/${orchestrationMode} cancelled** by user. Remaining phases skipped.`, "warning");
+			finishGenericOrchestration(ctx, "🛑 Cancelled.");
+			return;
+		}
+
+		if (!phasePending) {
+			if (phaseQueue.length === 0) finishGenericOrchestration(ctx, `✅ **/${orchestrationMode} finished.**`);
+			return;
+		}
+		if (phaseTimeoutId) {
+			clearTimeout(phaseTimeoutId);
+			phaseTimeoutId = null;
+		}
+
+		// A BLOCKED verdict (REPRODUCE cannot reproduce / VERIFY could not confirm)
+		// halts the pipeline honestly — no fabricated success.
+		const structuredForThisPhase = currentPhaseResultKey === (currentPhase?.key ?? null) ? currentPhaseResult : null;
+		const outcome = resolvePhaseOutcome(structuredForThisPhase, null);
+		if (outcome.verdict === "BLOCKED" && currentPhase) {
+			ctx.ui.notify(
+				`\n⏸️ **${currentPhase.label} reported BLOCKED.** ${outcome.handoff || "No reproducible/verifiable result."}`,
+				"warning",
+			);
+			finishGenericOrchestration(ctx, `⏸️ **/${orchestrationMode} stopped: BLOCKED at ${currentPhase.label}.**`);
+			return;
+		}
+
+		// Propagate a concise handoff to the next phase, like /plan does.
+		const nextBrief = buildNextBrief(
+			analysis,
+			outcome.handoff,
+			currentPhase?.label || "previous phase",
+			MAX_TOOL_CALLS_PER_PHASE,
+		);
+		if (nextBrief && phaseQueue.length > 0) {
+			phaseQueue[0].instruction += `\n\n**Previous phase summary:**\n${nextBrief}`;
+		}
+
+		completedPhases++;
+		phasePending = false;
+		sendNextGenericPhase(ctx);
+	}
+
+	function startGenericOrchestration(
+		mode: "debug" | "build",
+		phases: OrchestratorPhase[],
+		ctx: any,
+		headline: string,
+	) {
+		phaseQueue = phases.slice(1);
+		orchestrationMode = mode;
+		setOrchestrationActive(true);
+		phasePending = true;
+		originalModel = ctx.model || null;
+		savedTools = pi.getActiveTools();
+		completedPhases = 0;
+		skippedPhases = 0;
+		internalAbort = false;
+		currentPhaseResult = null;
+		currentPhaseResultKey = null;
+		phaseStartTime = Date.now();
+		const first = phases[0];
+		currentPhase = first;
+
+		ctx.ui.notify(headline, "info");
+		for (const p of phases) {
+			const agentName = p.agent?.name || p.key;
+			ctx.ui.notify(`  ${p.label} → \`${p.model}\` (agent: ${agentName})`, "info");
+		}
+
+		switchModelForPhase(first, ctx).then(({ modelId, warning }) => {
+			activateAgent(first, ctx);
+			ctx.ui.notify(`\n${first.label} → \`${modelId}\``, "info");
+			if (warning) ctx.ui.notify(`\n⚠️ ${warning}`, "warning");
+			if (phaseTimeoutId) clearTimeout(phaseTimeoutId);
+			phaseTimeoutId = setTimeout(() => {
+				if (orchestrationActive && phasePending) {
+					phasePending = false;
+					internalAbort = true;
+					try {
+						ctx.abort();
+					} catch {
+						/* best effort */
+					}
+					skippedPhases++;
+					ctx.ui.notify(`\n⏰ **First phase timed out** — skipping.`, "warning");
+					sendNextGenericPhase(ctx);
+				}
+			}, MAX_PHASE_DURATION_MS);
+			setTimeout(() => pi.sendUserMessage(first.instruction, { deliverAs: "followUp" }), 200);
+		});
+	}
+
 	// ─── System Prompt Injection — Agent personas ────────────────────
 
 	pi.on("before_agent_start", async (_event, _ctx) => {
@@ -1122,6 +1365,13 @@ Tag the note with relevant keywords for vector search.
 		// it is not mistaken for a user cancellation below.
 		if (internalAbort) {
 			internalAbort = false;
+			return;
+		}
+
+		// /debug and /build run on the separate linear driver — never through the
+		// /plan-specific review-fix + "/5" transition logic below.
+		if (orchestrationMode !== "plan") {
+			await handleGenericPhaseEnd(event, ctx);
 			return;
 		}
 
@@ -1514,6 +1764,107 @@ Tag the note with relevant keywords for vector search.
 
 			output += `_Commands: \`/plan\` (create+execute), \`/run\` (re-execute), \`read .phi/plans/<file>\` (view)_`;
 			ctx.ui.notify(output, "info");
+		},
+	});
+
+	// ─── /debug Command — turn a real failure green (execution-grounded) ──
+
+	pi.registerCommand("debug", {
+		description: "Fix a REAL failing state — REPRODUCE → LOCALIZE → FIX → VERIFY, verdict backed by a real run",
+		handler: async (args, ctx) => {
+			if (orchestrationActive) {
+				ctx.ui.notify("An orchestration is already running. Let it finish, or restart the session.", "warning");
+				return;
+			}
+			const raw = args.trim();
+			if (!raw) {
+				ctx.ui.notify(
+					`**Usage:** \`/debug <failing test | repro command | description>\`
+
+/debug never guesses — it needs something reproducible.
+**Examples:**
+  /debug pytest tests/test_auth.py::test_login_returns_jwt
+  /debug node repro.js  (segfaults on empty input, should return [])
+  /debug the /login route 500s when the body is missing
+
+It runs REPRODUCE → LOCALIZE → FIX → VERIFY and only reports FIXED with a real before/after run — otherwise BLOCKED.`,
+					"info",
+				);
+				return;
+			}
+
+			const state: FailingState = parseFailingState(raw, { cwd: ctx.cwd || process.cwd() });
+			// Honest gate at the boundary: /debug needs a reproducible failure. A bare
+			// prose description with no test/command still runs (REPRODUCE will try to
+			// derive one), but we tell the user the oracle depends on a real run.
+			if (!state.failingTest && !state.reproCommand) {
+				ctx.ui.notify(
+					`⚠️ No failing test or repro command detected — /debug works best with one (e.g. \`pytest …\` or \`node repro.js\`). Proceeding: REPRODUCE will try to construct a reproduction from your description, and will emit **BLOCKED** if it cannot run one (no fabricated PASS).`,
+					"warning",
+				);
+			}
+
+			await ensurePlansDir();
+			const phases = buildDebugPhases(state);
+			startGenericOrchestration(
+				"debug",
+				phases,
+				ctx,
+				`🐛 **/debug started** — 4 execution-grounded phases (verdict requires a real run)\n`,
+			);
+		},
+	});
+
+	// ─── /build Command — build until it runs (plan + execution loop) ────
+
+	pi.registerCommand("build", {
+		description:
+			"Build from a spec AND prove it runs — EXPLORE → PLAN → CODE → BUILD-VERIFY (run + red-team + debug)",
+		handler: async (args, ctx) => {
+			if (orchestrationActive) {
+				ctx.ui.notify("An orchestration is already running. Let it finish, or restart the session.", "warning");
+				return;
+			}
+			const spec = args.trim();
+			if (!spec) {
+				ctx.ui.notify(
+					`**Usage:** \`/build <what to build>\`
+
+/build = /plan then an execution-grounded verify loop (run the recipe, check acceptance, executable red-team, fix real failures via /debug).
+**Examples:**
+  /build a REST API for user auth with JWT and refresh tokens
+  /build a CLI that converts CSV to JSON with a --pretty flag
+
+It reports SUCCESS only when a real run meets the acceptance criteria — otherwise an honest PARTIAL listing what still fails. For a pure decomposition use \`/plan\`; to fix a known failure use \`/debug\`.`,
+					"info",
+				);
+				return;
+			}
+
+			// Cheap triage note (transparency): confirm /build is the right depth.
+			const decision = triage({ text: spec });
+			if (decision.route === "single-shot") {
+				ctx.ui.notify(
+					`ℹ️ This looks small and self-contained (${decision.reason}). /build will still run, but a single request may be cheaper.`,
+					"info",
+				);
+			}
+
+			await ensurePlansDir();
+			const ts = timestamp();
+			await writeFile(
+				join(plansDir, `spec-${ts}.md`),
+				`# ${spec}\n\n**Created:** ${new Date().toLocaleString()}\n`,
+				"utf-8",
+			);
+			currentDescription = spec;
+			const phases = buildBuildPhases(spec, ts);
+			startGenericOrchestration(
+				"build",
+				phases,
+				ctx,
+				`🏗️ **/build started** — plan + execution loop (SUCCESS requires a real run, else honest PARTIAL)\n`,
+			);
 		},
 	});
 }

@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.89.0] - 2026-07-11
+
+### Added
+
+- **Two new execution-grounded commands, `/debug` and `/build`**, implementing
+  the design in `docs/design/plan-debug-build.md`. They exist because the
+  SWE-bench-lite head-to-head measured that `/plan`'s TEST/REVIEW phases approve
+  wrong code — they grade the model's own reconstruction, not a real run. These
+  modes move the burden of proof from opinion to **execution**.
+  - **`/debug <failing state>`** — turn a REAL failure green through
+    `REPRODUCE → LOCALIZE → FIX → VERIFY`. It refuses to guess: if the failure
+    does not reproduce on the current code, or cannot be run at all, it stops
+    with `BLOCKED` instead of fabricating a fix. `VERIFY` requires two real runs
+    (the reproduction now passes AND the suite does not regress) before it will
+    ever say `FIXED`. Each phase routes to a model that does not share the
+    coder's blind spot (`routing.json`).
+  - **`/build <spec>`** — `/plan`'s decomposition (`EXPLORE → PLAN → CODE`) plus
+    an execution-grounded `BUILD-VERIFY`: run the recipe, check acceptance
+    criteria derived from the spec, run an **executable** red-team against the
+    input regime the change touched (a runnable test that goes red, never a
+    critique), and route every real failure to the `/debug` protocol. It reports
+    `SUCCESS` only when a real run meets the acceptance criteria, otherwise an
+    honest `PARTIAL` that lists what still fails.
+- **Six pure, unit-tested decision cores** backing the above (no live model, no
+  fs at the boundary): `execution.ts` (the run oracle: `runCommand`/`passed`),
+  `acceptance.ts` (executable acceptance criteria; manual criteria are never
+  counted as passing), `debug-contract.ts` (`decideReproduce`/`decideVerify` —
+  BLOCKED rather than least-bad), `triage.ts` (adaptive depth — pay the pipeline
+  cost only when earned), `redteam.ts` (a break is recorded only when a test
+  actually ran red), and `build-loop.ts` (`decideBuildRound` — SUCCESS /
+  CONTINUE-to-/debug / honest PARTIAL). 73 new tests, including an end-to-end
+  integration test of the `/debug` and `/build` chain against a simulated Pi
+  runtime.
+
+### Changed
+
+- The orchestrator now carries an `orchestrationMode`. `/debug` and `/build` run
+  on a **separate linear driver** and never engage `/plan`'s review-fix cycle or
+  its five-phase bookkeeping, so the existing `/plan` path is byte-for-byte
+  unchanged (its integration suite still passes).
+
+### Honest caveat
+
+- These modes are the protocol + scaffolding. Their value depends on a real
+  executable environment; on a host that cannot run the target they downgrade to
+  `BLOCKED` rather than a fabricated pass. They are **not yet benchmarked** to
+  beat a single shot — per the design doc, that measurement (which needs a
+  per-project execution sandbox) is the next step, and no claim is made here that
+  they do.
+
 ## [0.88.0] - 2026-07-10
 
 ### Changed
