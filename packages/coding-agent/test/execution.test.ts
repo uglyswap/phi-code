@@ -3,7 +3,9 @@ import {
 	type CommandResult,
 	passed,
 	runArgv,
+	runArgvAsync,
 	runCommand,
+	runCommandAsync,
 	summarize,
 	tail,
 } from "../extensions/phi/providers/execution.js";
@@ -65,6 +67,53 @@ describe("runCommand (real spawn)", () => {
 	it("runs in the given cwd", () => {
 		const r = runCommand(process.platform === "win32" ? "cd" : "pwd", { cwd: process.cwd() });
 		expect(passed(r)).toBe(true);
+	});
+});
+
+describe("runCommandAsync / runArgvAsync (the drift fix)", () => {
+	it("captures a passing run without blocking", async () => {
+		const r = await runCommandAsync(`node -e "process.stdout.write('async-ok')"`);
+		expect(passed(r)).toBe(true);
+		expect(r.stdout).toContain("async-ok");
+	});
+
+	it("reports a non-zero exit as data", async () => {
+		const r = await runCommandAsync(`node -e "process.exit(7)"`);
+		expect(r.exitCode).toBe(7);
+		expect(passed(r)).toBe(false);
+	});
+
+	it("kills the tree on timeout and reports timedOut", async () => {
+		const r = await runCommandAsync(`node -e "setTimeout(()=>{},60000)"`, { timeoutMs: 800 });
+		expect(r.timedOut).toBe(true);
+		expect(passed(r)).toBe(false);
+		expect(r.durationMs).toBeLessThan(15_000);
+	});
+
+	it("KEEPS THE EVENT LOOP ALIVE during a run (the 6h-drift regression test)", async () => {
+		// With spawnSync, this timer could never fire mid-run; with spawn it must.
+		let timerFired = false;
+		const t = setTimeout(() => {
+			timerFired = true;
+		}, 300);
+		const r = await runCommandAsync(`node -e "setTimeout(()=>{},1200)"`, { timeoutMs: 10_000 });
+		clearTimeout(t);
+		expect(r.durationMs).toBeGreaterThan(1000);
+		expect(timerFired).toBe(true); // fired DURING the child run
+	});
+
+	it("runArgvAsync spawns without a shell and honours the label", async () => {
+		const r = await runArgvAsync(process.execPath, ["-e", "process.stdout.write(process.argv[1])", "a;b|c"], {
+			label: "docker run …",
+		});
+		expect(r.stdout).toBe("a;b|c");
+		expect(r.command).toBe("docker run …");
+	});
+
+	it("reports an unspawnable program as data, never throws", async () => {
+		const r = await runArgvAsync("definitely-not-a-binary-zzz", ["--v"]);
+		expect(r.exitCode).toBeNull();
+		expect(passed(r)).toBe(false);
 	});
 });
 

@@ -18,7 +18,9 @@ import {
 	passed,
 	type RunOptions,
 	runArgv as realRunArgv,
+	runArgvAsync as realRunArgvAsync,
 	runCommand as realRunCommand,
+	runCommandAsync as realRunCommandAsync,
 } from "./execution.js";
 import {
 	applyConfig,
@@ -45,19 +47,34 @@ export interface Sandbox {
 	readonly reason: string;
 	describe(): string;
 	available(): boolean;
-	/** Run a command in the environment. Never throws (see execution.ts). */
+	/** Run a command in the environment. Never throws (see execution.js). */
 	exec(command: string, options?: RunOptions): CommandResult;
+	/**
+	 * ASYNC twin of exec — non-blocking (the drift fix): the event loop stays
+	 * alive during the run, so session/phase timers fire on time and the run's
+	 * own timeout kills the process tree. Agent-facing paths (sandbox_run) MUST
+	 * use this; sync exec remains for bounded driver-internal steps.
+	 */
+	execAsync(command: string, options?: RunOptions): Promise<CommandResult>;
 	/** Build the image / install deps. Idempotent, best-effort. */
 	prepare(): PrepareResult;
 }
 
 type RunCommandFn = (command: string, options?: RunOptions) => CommandResult;
 type RunArgvFn = (file: string, args: string[], options?: RunOptions & { label?: string }) => CommandResult;
+type RunCommandAsyncFn = (command: string, options?: RunOptions) => Promise<CommandResult>;
+type RunArgvAsyncFn = (
+	file: string,
+	args: string[],
+	options?: RunOptions & { label?: string },
+) => Promise<CommandResult>;
 
 /** Injectable seams — real fs/spawn by default, fakes in tests. */
 export interface SandboxDeps {
 	runCommand?: RunCommandFn;
 	runArgv?: RunArgvFn;
+	runCommandAsync?: RunCommandAsyncFn;
+	runArgvAsync?: RunArgvAsyncFn;
 	listFiles?: (cwd: string) => string[];
 	readConfig?: (cwd: string) => SandboxConfig | undefined;
 	/** Force docker availability in tests; otherwise probed via `docker version`. */
@@ -112,6 +129,8 @@ export function resolveSandbox(opts: ResolveOptions): Sandbox {
 	const deps = opts.deps ?? {};
 	const rc = deps.runCommand ?? realRunCommand;
 	const ra = deps.runArgv ?? realRunArgv;
+	const rcAsync = deps.runCommandAsync ?? realRunCommandAsync;
+	const raAsync = deps.runArgvAsync ?? realRunArgvAsync;
 	const files = (deps.listFiles ?? listProjectFiles)(opts.cwd);
 	const config = (deps.readConfig ?? readSandboxConfig)(opts.cwd);
 	const tc = detectToolchain(files);
@@ -128,8 +147,8 @@ export function resolveSandbox(opts: ResolveOptions): Sandbox {
 	// Effective image can change after prepare() builds a project Dockerfile.
 	const state = { image: recipe.image };
 
-	const dockerExec = (command: string, options?: RunOptions): CommandResult => {
-		const args = buildDockerRunArgs({
+	const dockerArgsFor = (command: string) =>
+		buildDockerRunArgs({
 			image: state.image,
 			command,
 			mountSource: opts.cwd,
@@ -139,12 +158,18 @@ export function resolveSandbox(opts: ResolveOptions): Sandbox {
 			memory: recipe.memory,
 			cpus: recipe.cpus,
 		});
-		return ra("docker", args, {
+	const dockerExec = (command: string, options?: RunOptions): CommandResult =>
+		ra("docker", dockerArgsFor(command), {
 			cwd: opts.cwd,
 			timeoutMs: options?.timeoutMs,
 			label: `docker[${state.image}] ${command}`,
 		});
-	};
+	const dockerExecAsync = (command: string, options?: RunOptions): Promise<CommandResult> =>
+		raAsync("docker", dockerArgsFor(command), {
+			cwd: opts.cwd,
+			timeoutMs: options?.timeoutMs,
+			label: `docker[${state.image}] ${command}`,
+		});
 
 	const base = { backend: decision.backend, recipe, reason: decision.reason };
 
@@ -154,6 +179,7 @@ export function resolveSandbox(opts: ResolveOptions): Sandbox {
 			describe: () => `unavailable — ${decision.reason}`,
 			available: () => false,
 			exec: (command) => unavailableResult(command),
+			execAsync: async (command) => unavailableResult(command),
 			prepare: () => ({ ok: false, backend: "unavailable", detail: decision.reason }),
 		};
 	}
@@ -164,6 +190,7 @@ export function resolveSandbox(opts: ResolveOptions): Sandbox {
 			describe: () => `local host (${opts.cwd})`,
 			available: () => true,
 			exec: (command, options) => rc(command, { cwd: opts.cwd, ...options }),
+			execAsync: (command, options) => rcAsync(command, { cwd: opts.cwd, ...options }),
 			// Deliberately no host-side dependency install — running `npm install`
 			// etc. on the user's host is intrusive; local is best-effort as-is.
 			prepare: () => ({ ok: true, backend: "local", detail: "local host — no preparation performed" }),
@@ -176,6 +203,7 @@ export function resolveSandbox(opts: ResolveOptions): Sandbox {
 		describe: () => `docker (${state.image})`,
 		available: () => true,
 		exec: dockerExec,
+		execAsync: dockerExecAsync,
 		prepare: () => {
 			if (recipe.source === "dockerfile") {
 				const tag = imageTagFor(recipe);

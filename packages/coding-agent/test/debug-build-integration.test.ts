@@ -348,6 +348,39 @@ describe("/debug + /build integration", () => {
 		expect(rec.outcome).toContain("finished");
 	});
 
+	it("sandbox_run refuses beyond the cumulative execution budget (drift guard)", async () => {
+		process.env.PHI_SANDBOX_BUDGET_MS = "1000";
+		try {
+			const cap2: Captured = {
+				commands: new Map(),
+				tools: new Map(),
+				events: new Map(),
+				sentMessages: [],
+				setModelCalls: [],
+				notifications: [],
+			};
+			orchestratorExtension(makeFakePi(cap2));
+			await cap2.commands.get("debug")!("pytest tests/x.py::t", makeCtx(cap2, tempDir));
+			await sleep(300); // orchestration active
+			const tool = cap2.tools.get("sandbox_run")!;
+			// First call: runs for >1s, consuming the whole budget.
+			const r1 = await tool.execute(
+				"c1",
+				{ command: `node -e "setTimeout(()=>{},1300)"` },
+				undefined,
+				undefined,
+				makeCtx(cap2, tempDir),
+			);
+			expect(r1.details.verdict).not.toBe("BUDGET_EXHAUSTED");
+			// Second call: refused — budget spent.
+			const r2 = await tool.execute("c2", { command: "echo hi" }, undefined, undefined, makeCtx(cap2, tempDir));
+			expect(r2.details.verdict).toBe("BUDGET_EXHAUSTED");
+			expect(JSON.stringify(r2.content)).toContain("BUDGET EXHAUSTED");
+		} finally {
+			delete process.env.PHI_SANDBOX_BUDGET_MS;
+		}
+	}, 30000);
+
 	it("/debug never opens /plan's review-fix cycle", async () => {
 		await cap.commands.get("debug")!("node repro.js", makeCtx(cap, tempDir));
 		await sleep(300);
