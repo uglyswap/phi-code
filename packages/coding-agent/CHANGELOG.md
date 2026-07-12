@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.93.0] - 2026-07-12
+
+### Added — the escalation architecture the n=13 measurement demanded
+
+- **`/fix` — single-shot first, oracle next, escalate only on red.** One direct
+  attempt at baseline cost, then the DRIVER runs the reproduction and the
+  project suite in the real sandbox (deterministic, zero model tokens): green →
+  done; red → the full /debug pipeline takes over, seeded with the exact red
+  run (command + trace, never a paraphrase). Nothing runnable → honestly
+  labelled UNVERIFIED. By construction never worse than the single shot
+  (measured: baseline 7/13 vs pipeline 6/13 at ~2.5×).
+- **`/debug --candidates N` — diversity proposes, the oracle disposes.** N
+  independent FIX attempts on DIVERSE model families (routing-derived), each
+  patch captured and the tree reset between attempts; then deterministic
+  arbitration applies each candidate and runs the reproduction (from the input
+  or the REPRODUCE handoff's machine-readable REPRO-CMD line) + suite in the
+  sandbox; the minimal passing candidate wins (candidate-select). This is the
+  adversarial review that works — the one we measured (opinion panels rubber-
+  stamp shared misconceptions; a red run does not). Refuses to run over a dirty
+  tree (non-deletion policy) and falls back to single-candidate.
+- **Never a blank page (lesson sympy-11870).** When no candidate passes
+  arbitration, the smallest non-empty candidate stays applied, clearly labelled
+  UNVERIFIED; a confirmed-BLOCKED halt now reports any draft left in the tree
+  (git diff --stat) instead of silently discarding work.
+- **Literal reproductions (lesson requests-2148).** REPRODUCE must build the
+  repro from the EXACT snippets/values quoted in the issue (a reproduction of
+  your interpretation validates your interpretation, not the bug) and must
+  emit a REPRO-CMD: line for deterministic re-runs. LOCALIZE now consults and
+  feeds project memory (memory_search/memory_write).
+- **Run telemetry.** Every /fix //debug //build run appends one JSONL line to
+  .phi/runs.jsonl (mode, phases with model+verdict+retries, sandbox exec count,
+  duration, outcome) — continuous measurement instead of campaigns.
+
+30 new tests (escalation core 13, telemetry 6, instructions 5, integration 6 —
+including a real-git multi-candidate arbitration that applies the minimal
+passing patch and a real-run /fix escalation); full suite green (1469).
+
 ## [0.92.1] - 2026-07-12
 
 ### Docs

@@ -23,9 +23,20 @@ import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "phi-code";
 import { type AgentDef, loadAgentDef } from "./providers/agent-def.js";
-import { buildVerifyInstruction, debugPhaseInstructions } from "./providers/debug-build-commands.js";
-import { type FailingState, parseFailingState } from "./providers/debug-contract.js";
-import { passed, tail } from "./providers/execution.js";
+import { diffChangedLines } from "./providers/candidate-select.js";
+import {
+	buildVerifyInstruction,
+	debugPhaseInstructions,
+	singleShotInstruction,
+} from "./providers/debug-build-commands.js";
+import {
+	decideVerify,
+	type FailingState,
+	parseFailingState,
+	type VerifiedCandidate,
+} from "./providers/debug-contract.js";
+import { decideEscalation, parseReproCmd, pickCandidateModels, type RoutingLike } from "./providers/escalation.js";
+import { passed, runCommand, tail } from "./providers/execution.js";
 import { defaultExplorerSpecs, READONLY_EXPLORER_TOOLS, runExploreFanout } from "./providers/explore-fanout.js";
 import {
 	analyzePhaseMessages,
@@ -35,6 +46,7 @@ import {
 	type StructuredPhaseResult,
 } from "./providers/phase-machine.js";
 import { resolveSandbox, type Sandbox } from "./providers/sandbox.js";
+import { appendRunRecord, buildRunRecord, type PhaseRecord } from "./providers/telemetry.js";
 import { triage } from "./providers/triage.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────
@@ -300,9 +312,32 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	let phaseQueue: OrchestratorPhase[] = [];
 	let orchestrationActive = false;
 	// Which pipeline is running. "plan" keeps the existing 5-phase agent_end path
-	// untouched; "debug"/"build" are driven by the separate linear generic driver
-	// so /plan's fragile review-fix + "/5" logic is never engaged for them.
-	let orchestrationMode: "plan" | "debug" | "build" = "plan";
+	// untouched; "debug"/"build"/"fix" are driven by the separate linear generic
+	// driver so /plan's fragile review-fix + "/5" logic is never engaged for them.
+	let orchestrationMode: "plan" | "debug" | "build" | "fix" = "plan";
+	// /fix escalation state: the failing state the command started from, and
+	// whether the driver-level oracle already ran (it must run exactly once,
+	// after the single-shot phase, before the run can finish).
+	let fixContext: { state: FailingState; oracleRan: boolean } | null = null;
+	// /debug --candidates N state: each FIX candidate's captured patch, the
+	// reproduction command used for deterministic arbitration (from the input or
+	// the REPRODUCE handoff's REPRO-CMD line), and whether arbitration ran.
+	let candidateContext: {
+		total: number;
+		reproCmd?: string;
+		list: { source: string; patch: string }[];
+		arbitrated: boolean;
+	} | null = null;
+	// Telemetry: per-phase records for the current generic run + sandbox_run
+	// invocation count (reset at orchestration start, flushed at finish).
+	let runPhaseRecords: PhaseRecord[] = [];
+	let sandboxExecCount = 0;
+
+	/** Run a git command in cwd; returns stdout ("" on any failure). */
+	function gitIn(cwd: string, args: string): string {
+		const r = runCommand(`git ${args}`, { cwd, timeoutMs: 60_000 });
+		return passed(r) ? r.stdout : "";
+	}
 	let activeAgentPrompt: string | null = null;
 	let _activeAgentTools: string[] | null = null;
 	let savedTools: string[] | null = null;
@@ -430,6 +465,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const p = params as { command: string; timeoutSeconds?: number };
 			const cwd = ctx?.cwd || process.cwd();
+			if (orchestrationActive) sandboxExecCount++;
 			const sandbox = getSessionSandbox(cwd);
 			const result = sandbox.exec(p.command, {
 				timeoutMs: Math.max(1, Math.min(1800, p.timeoutSeconds ?? 300)) * 1000,
@@ -1211,14 +1247,48 @@ Tag the note with relevant keywords for vector search.
 
 	// /debug: REPRODUCE → LOCALIZE → FIX → VERIFY. Each phase routes to a model
 	// that does NOT share the coder's blind spot (verify on the test family).
-	function buildDebugPhases(state: FailingState): OrchestratorPhase[] {
+	function buildDebugPhases(state: FailingState, candidates = 1): OrchestratorPhase[] {
 		const ins = debugPhaseInstructions(state);
+		if (candidates <= 1) {
+			return [
+				genericPhase("reproduce", "🔴 Phase 1 — REPRODUCE", "test", "test", ins.reproduce),
+				genericPhase("localize", "🔎 Phase 2 — LOCALIZE", "explore", "explore", ins.localize),
+				genericPhase("fix", "🔧 Phase 3 — FIX", "code", "code", ins.fix),
+				genericPhase("verify", "✅ Phase 4 — VERIFY", "test", "test", ins.verify),
+			];
+		}
+		// Multi-candidate: N independent FIX attempts on DIVERSE model families
+		// (diversity proposes), then the driver arbitrates each candidate with a
+		// REAL run (the oracle disposes) — no VERIFY agent phase, no vote.
+		const models = pickCandidateModels(readRoutingConfig(), candidates);
+		const codeRoute = routeFor("code");
+		const fixPhases = Array.from({ length: candidates }, (_, i) => {
+			const ref = models[i % Math.max(1, models.length)] ?? codeRoute.preferred;
+			const phase = genericPhase(
+				"fix-cand",
+				`🔧 Phase ${3 + i} — FIX candidate ${i + 1}/${candidates}`,
+				"code",
+				"code",
+				`${ins.fix}\n\n**Candidate protocol:** you are INDEPENDENT candidate ${i + 1} of ${candidates}. Other candidates attempt the same fault separately; a REAL run of the reproduction and the suite arbitrates between the resulting patches. Make your own best minimal fix — do not hedge for the others.`,
+			);
+			phase.model = ref;
+			phase.fallback = codeRoute.fallback;
+			return phase;
+		});
 		return [
 			genericPhase("reproduce", "🔴 Phase 1 — REPRODUCE", "test", "test", ins.reproduce),
 			genericPhase("localize", "🔎 Phase 2 — LOCALIZE", "explore", "explore", ins.localize),
-			genericPhase("fix", "🔧 Phase 3 — FIX", "code", "code", ins.fix),
-			genericPhase("verify", "✅ Phase 4 — VERIFY", "test", "test", ins.verify),
+			...fixPhases,
 		];
+	}
+
+	/** Read ~/.phi/agent/routing.json (shape shared with routeFor). */
+	function readRoutingConfig(): RoutingLike {
+		try {
+			return JSON.parse(readFileSync(join(homedir(), ".phi", "agent", "routing.json"), "utf-8")) as RoutingLike;
+		} catch {
+			return {};
+		}
 	}
 
 	// /build: reuse /plan's EXPLORE→PLAN→CODE, then an execution-grounded
@@ -1241,9 +1311,25 @@ Tag the note with relevant keywords for vector search.
 		const minutes = Math.floor(elapsed / 60);
 		const seconds = elapsed % 60;
 		const mode = orchestrationMode;
+		// Telemetry: one JSONL line per run — continuous measurement for free.
+		appendRunRecord(
+			ctx.cwd || process.cwd(),
+			buildRunRecord({
+				mode,
+				startedAtMs: phaseStartTime,
+				endedAtMs: Date.now(),
+				phases: runPhaseRecords,
+				completedPhases,
+				skippedPhases,
+				sandboxExecs: sandboxExecCount,
+				outcome: headline,
+			}),
+		);
 		setOrchestrationActive(false);
 		phasePending = false;
 		orchestrationMode = "plan";
+		fixContext = null;
+		candidateContext = null;
 		deactivateAgent();
 		if (phaseTimeoutId) {
 			clearTimeout(phaseTimeoutId);
@@ -1264,10 +1350,148 @@ Tag the note with relevant keywords for vector search.
 		);
 	}
 
+	// /fix driver-level oracle: after the single shot, run the reproduction and
+	// the project suite in the REAL sandbox. Green → finish at baseline cost.
+	// Red → escalate: enqueue the full /debug pipeline seeded with the red run.
+	// Deterministic — zero model tokens; the verdict comes from exit codes.
+	function runFixOracleAndMaybeEscalate(ctx: any): boolean {
+		if (orchestrationMode !== "fix" || !fixContext || fixContext.oracleRan) return false;
+		fixContext.oracleRan = true;
+		const cwd = ctx.cwd || process.cwd();
+		const sandbox = getSessionSandbox(cwd);
+		const reproCmd = fixContext.state.failingTest?.trim() || fixContext.state.reproCommand?.trim();
+		const suiteCmd = sandbox.recipe.test?.trim();
+
+		if (!sandbox.available() && (reproCmd || suiteCmd)) {
+			ctx.ui.notify(
+				`\n⚠️ **/fix oracle: sandbox unavailable** (${sandbox.reason}) — the single shot cannot be verified. Treating it as UNVERIFIED.`,
+				"warning",
+			);
+			finishGenericOrchestration(ctx, `⚠️ **/fix finished UNVERIFIED — no executable environment for the oracle.**`);
+			return true;
+		}
+
+		ctx.ui.notify(
+			`\n🧪 **/fix oracle** — running ${[reproCmd && "the reproduction", suiteCmd && "the suite"].filter(Boolean).join(" and ") || "nothing (no runnable check)"} in ${sandbox.describe()}…`,
+			"info",
+		);
+		const repro = reproCmd ? sandbox.exec(reproCmd, { timeoutMs: 10 * 60 * 1000 }) : null;
+		const suite = suiteCmd ? sandbox.exec(suiteCmd, { timeoutMs: 20 * 60 * 1000 }) : null;
+		const decision = decideEscalation(fixContext.state, { repro, suite });
+
+		if (decision.action === "done-green") {
+			finishGenericOrchestration(
+				ctx,
+				`✅ **/fix finished GREEN at single-shot cost** — oracle evidence: ${decision.evidence}.`,
+			);
+			return true;
+		}
+		if (decision.action === "done-unverified") {
+			finishGenericOrchestration(
+				ctx,
+				`⚠️ **/fix finished UNVERIFIED** — ${decision.reason}. Provide a failing test or a repro command for a guaranteed verdict.`,
+			);
+			return true;
+		}
+		// escalate: the pipeline inherits the RED run as its concrete failing state.
+		ctx.ui.notify(
+			`\n🔺 **/fix escalating to the full /debug pipeline** — ${decision.diagnostic}. The single shot was not enough; the pipeline inherits the red run as its reproduction.`,
+			"warning",
+		);
+		phaseQueue.push(...buildDebugPhases(decision.failing));
+		return false; // fall through: sendNextGenericPhase will dispatch REPRODUCE
+	}
+
+	// Multi-candidate arbitration — the oracle disposes. Apply each captured
+	// candidate in turn, run the reproduction (and the suite when known) in the
+	// REAL sandbox, select the minimal passing candidate (candidate-select), and
+	// leave the WINNER applied. If none passes: never a blank page — the smallest
+	// non-empty candidate is left applied, clearly labelled UNVERIFIED.
+	function runCandidateArbitration(ctx: any): boolean {
+		if (!candidateContext || candidateContext.arbitrated) return false;
+		candidateContext.arbitrated = true;
+		const cc = candidateContext;
+		const cwd = ctx.cwd || process.cwd();
+		const sandbox = getSessionSandbox(cwd);
+		const suiteCmd = sandbox.recipe.test?.trim();
+		const nonEmpty = cc.list.filter((c) => c.patch.trim());
+
+		if (nonEmpty.length === 0) {
+			finishGenericOrchestration(ctx, `⏸️ **/${orchestrationMode} BLOCKED — no candidate produced a patch.**`);
+			return true;
+		}
+
+		const applyPatch = (patch: string): boolean => {
+			try {
+				const f = join(cwd, ".phi", "candidate.patch");
+				writeFileSync(f, patch, "utf-8");
+				const r = runCommand(`git apply --whitespace=nowarn "${f}"`, { cwd, timeoutMs: 60_000 });
+				try {
+					unlinkSync(f);
+				} catch {
+					/* best effort */
+				}
+				return passed(r);
+			} catch {
+				return false;
+			}
+		};
+
+		ctx.ui.notify(
+			`\n⚖️ **Arbitrating ${nonEmpty.length} candidate(s)** with real runs${cc.reproCmd ? ` — repro \`${cc.reproCmd}\`` : ""}${suiteCmd ? `, suite \`${suiteCmd}\`` : ""} in ${sandbox.describe()}…`,
+			"info",
+		);
+
+		const verified: VerifiedCandidate[] = [];
+		for (const cand of nonEmpty) {
+			if (!applyPatch(cand.patch)) {
+				verified.push({ source: cand.source, patch: cand.patch, reproAfter: null, suite: null });
+				continue;
+			}
+			const reproAfter =
+				cc.reproCmd && sandbox.available() ? sandbox.exec(cc.reproCmd, { timeoutMs: 10 * 60 * 1000 }) : null;
+			const suite = suiteCmd && sandbox.available() ? sandbox.exec(suiteCmd, { timeoutMs: 20 * 60 * 1000 }) : null;
+			verified.push({ source: cand.source, patch: cand.patch, reproAfter, suite });
+			gitIn(cwd, "checkout -- .");
+			const rp = reproAfter
+				? `repro exit ${reproAfter.exitCode}${reproAfter.timedOut ? " TIMEOUT" : ""}`
+				: "repro n/a";
+			const st = suite ? `suite exit ${suite.exitCode}${suite.timedOut ? " TIMEOUT" : ""}` : "suite n/a";
+			ctx.ui.notify(`  ${cand.source}: ${rp}, ${st}`, "info");
+		}
+
+		const outcome = decideVerify(verified, Boolean(suiteCmd));
+		if (outcome.verdict === "FIXED" && outcome.patch) {
+			applyPatch(outcome.patch);
+			finishGenericOrchestration(
+				ctx,
+				`✅ **/${orchestrationMode} FIXED by candidate arbitration** — ${outcome.reason}. Evidence: repro passes${suiteCmd ? ", suite green" : ""} (real runs above). The winning patch is applied.`,
+			);
+			return true;
+		}
+
+		// Honest failure — but never a blank page: leave the smallest non-empty
+		// candidate applied, clearly labelled unverified (lesson: sympy-11870).
+		const smallest = [...nonEmpty].sort((a, b) => diffChangedLines(a.patch) - diffChangedLines(b.patch))[0];
+		const draftApplied = applyPatch(smallest.patch);
+		finishGenericOrchestration(
+			ctx,
+			`⏸️ **/${orchestrationMode} BLOCKED — no candidate passed arbitration** (${outcome.reason ?? "see runs above"}).` +
+				(draftApplied
+					? ` An **UNVERIFIED draft** (smallest candidate, ${smallest.source}) is left in the working tree — \`git diff\` to inspect, \`git checkout -- .\` to discard.`
+					: ""),
+		);
+		return true;
+	}
+
 	function sendNextGenericPhase(ctx: any) {
 		if (phaseQueue.length === 0) {
-			finishGenericOrchestration(ctx, `✅ **/${orchestrationMode} finished.**`);
-			return;
+			if (runCandidateArbitration(ctx)) return;
+			if (runFixOracleAndMaybeEscalate(ctx)) return;
+			if (phaseQueue.length === 0) {
+				finishGenericOrchestration(ctx, `✅ **/${orchestrationMode} finished.**`);
+				return;
+			}
 		}
 		const phase = phaseQueue.shift()!;
 		phasePending = true;
@@ -1320,7 +1544,9 @@ Tag the note with relevant keywords for vector search.
 		}
 
 		if (!phasePending) {
-			if (phaseQueue.length === 0) finishGenericOrchestration(ctx, `✅ **/${orchestrationMode} finished.**`);
+			// Route through sendNextGenericPhase so the /fix oracle still runs on
+			// this (duplicate-event) completion path instead of being bypassed.
+			if (phaseQueue.length === 0) sendNextGenericPhase(ctx);
 			return;
 		}
 		if (phaseTimeoutId) {
@@ -1341,6 +1567,18 @@ Tag the note with relevant keywords for vector search.
 			reviewFixRounds: 1,
 			maxToolCallsPerPhase: MAX_TOOL_CALLS_PER_PHASE,
 		});
+
+		// Telemetry: one record per phase attempt (retries appear as extra rows).
+		if (currentPhase) {
+			runPhaseRecords.push({
+				key: currentPhase.key,
+				label: currentPhase.label,
+				model: currentPhase.useFallback ? currentPhase.fallback : currentPhase.model,
+				verdict: outcome.verdict,
+				retried: Boolean(currentPhase.retried),
+				blockedRetried: Boolean(currentPhase.blockedRetried),
+			});
+		}
 
 		if (decision.action === "stop") {
 			ctx.ui.notify(
@@ -1387,8 +1625,44 @@ Tag the note with relevant keywords for vector search.
 				`\n⏸️ **${currentPhase.label} reported BLOCKED (confirmed on retry).** ${outcome.handoff || "No reproducible/verifiable result."}`,
 				"warning",
 			);
-			finishGenericOrchestration(ctx, `⏸️ **/${orchestrationMode} stopped: BLOCKED at ${currentPhase.label}.**`);
+			// Never a silent blank page: if the run left changes in the tree (an
+			// unverified FIX attempt), say so instead of pretending nothing exists.
+			const draft = gitIn(ctx.cwd || process.cwd(), "diff --stat").trim();
+			finishGenericOrchestration(
+				ctx,
+				`⏸️ **/${orchestrationMode} stopped: BLOCKED at ${currentPhase.label}.**` +
+					(draft
+						? `\n📝 An **UNVERIFIED draft** remains in the working tree (\`git diff\` to inspect, \`git checkout -- .\` to discard):\n\`\`\`\n${draft.slice(0, 600)}\n\`\`\``
+						: ""),
+			);
 			return;
+		}
+
+		// Multi-candidate bookkeeping (mode debug, --candidates N):
+		// - after REPRODUCE: learn the exact repro command from the REPRO-CMD
+		//   handoff line (used later for deterministic arbitration);
+		// - after each FIX candidate: capture its patch (git diff of tracked
+		//   files) and RESET the tree so the next candidate starts clean.
+		if (candidateContext && currentPhase) {
+			const cwd = ctx.cwd || process.cwd();
+			if (currentPhase.key === "reproduce" && !candidateContext.reproCmd) {
+				candidateContext.reproCmd = parseReproCmd(outcome.handoff);
+				if (candidateContext.reproCmd) {
+					ctx.ui.notify(`\n🧷 Arbitration reproduction registered: \`${candidateContext.reproCmd}\``, "info");
+				}
+			}
+			if (currentPhase.key === "fix-cand") {
+				const patch = gitIn(cwd, "diff").trim();
+				candidateContext.list.push({
+					source: `${currentPhase.label} (${currentPhase.useFallback ? currentPhase.fallback : currentPhase.model})`,
+					patch: patch ? `${patch}\n` : "",
+				});
+				gitIn(cwd, "checkout -- .");
+				ctx.ui.notify(
+					`\n📦 Candidate ${candidateContext.list.length}/${candidateContext.total} captured (${patch ? `${patch.length} bytes` : "EMPTY"}) — tree reset for the next candidate.`,
+					"info",
+				);
+			}
 		}
 
 		// Propagate a concise handoff to the next phase, like /plan does.
@@ -1408,13 +1682,18 @@ Tag the note with relevant keywords for vector search.
 	}
 
 	function startGenericOrchestration(
-		mode: "debug" | "build",
+		mode: "debug" | "build" | "fix",
 		phases: OrchestratorPhase[],
 		ctx: any,
 		headline: string,
 	) {
 		phaseQueue = phases.slice(1);
 		orchestrationMode = mode;
+		// Defensive: stale /fix or candidate state must never leak across runs.
+		if (mode !== "fix") fixContext = null;
+		if (mode !== "debug") candidateContext = null;
+		runPhaseRecords = [];
+		sandboxExecCount = 0;
 		setOrchestrationActive(true);
 		phasePending = true;
 		originalModel = ctx.model || null;
@@ -1911,7 +2190,15 @@ It runs REPRODUCE → LOCALIZE → FIX → VERIFY and only reports FIXED with a 
 				return;
 			}
 
-			const state: FailingState = parseFailingState(raw, { cwd: ctx.cwd || process.cwd() });
+			// Opt-in multi-candidate FIX: `--candidates N` (2..4). Diversity
+			// proposes (N model families patch independently), the oracle disposes
+			// (a real run arbitrates). Cost-disciplined: default stays 1.
+			const candMatch = raw.match(/(^|\s)--candidates[= ](\d)\b/);
+			let candidates = candMatch ? Math.max(1, Math.min(4, Number(candMatch[2]))) : 1;
+			const cleaned = raw.replace(/(^|\s)--candidates[= ]\d\b/g, " ").trim();
+			const cwd = ctx.cwd || process.cwd();
+
+			const state: FailingState = parseFailingState(cleaned, { cwd });
 			// Honest gate at the boundary: /debug needs a reproducible failure. A bare
 			// prose description with no test/command still runs (REPRODUCE will try to
 			// derive one), but we tell the user the oracle depends on a real run.
@@ -1922,13 +2209,96 @@ It runs REPRODUCE → LOCALIZE → FIX → VERIFY and only reports FIXED with a 
 				);
 			}
 
+			if (candidates > 1) {
+				// Candidate capture RESETS the tree between attempts — refuse to do
+				// that over a user's uncommitted work (non-deletion policy).
+				const porcelain = runCommand("git status --porcelain", { cwd, timeoutMs: 30_000 });
+				if (!passed(porcelain)) {
+					ctx.ui.notify(
+						"⚠️ `--candidates` needs a git repository (candidate patches are captured and arbitrated via git). Falling back to the single-candidate pipeline.",
+						"warning",
+					);
+					candidates = 1;
+				} else if (porcelain.stdout.trim()) {
+					ctx.ui.notify(
+						"⚠️ Your working tree has uncommitted changes — candidate arbitration resets the tree between attempts and will NOT run over them. Commit/stash first for multi-candidate. Falling back to the single-candidate pipeline.",
+						"warning",
+					);
+					candidates = 1;
+				}
+			}
+
 			await ensurePlansDir();
-			const phases = buildDebugPhases(state);
+			const phases = buildDebugPhases(state, candidates);
+			if (candidates > 1) {
+				candidateContext = {
+					total: candidates,
+					reproCmd: state.failingTest?.trim() || state.reproCommand?.trim() || undefined,
+					list: [],
+					arbitrated: false,
+				};
+			}
 			startGenericOrchestration(
 				"debug",
 				phases,
 				ctx,
-				`🐛 **/debug started** — 4 execution-grounded phases (verdict requires a real run)\n`,
+				candidates > 1
+					? `🐛 **/debug started (multi-candidate ×${candidates})** — REPRODUCE → LOCALIZE → ${candidates} independent FIXes → real-run arbitration\n`
+					: `🐛 **/debug started** — 4 execution-grounded phases (verdict requires a real run)\n`,
+			);
+		},
+	});
+
+	// ─── /fix Command — single-shot first, oracle next, escalate on red ──
+	// Measured (n=13, official SWE-bench harness): the single shot resolved 7/13
+	// vs the full pipeline's 6/13 at ~2.5× the time, and both arms converged on
+	// 11/13. /fix is the composition: by construction never worse than the
+	// single shot, and it inherits the pipeline exactly where a REAL red run
+	// proves the shot failed.
+
+	pi.registerCommand("fix", {
+		description:
+			"Fix at single-shot cost, verified by the sandbox oracle — escalates to the full /debug pipeline only if a real run stays red",
+		handler: async (args, ctx) => {
+			if (orchestrationActive) {
+				ctx.ui.notify("An orchestration is already running. Let it finish, or restart the session.", "warning");
+				return;
+			}
+			const raw = args.trim();
+			if (!raw) {
+				ctx.ui.notify(
+					`**Usage:** \`/fix <failing test | repro command | description>\`
+
+/fix = one direct attempt, then the ORACLE (reproduction + suite in the sandbox):
+  green → done at single-shot cost;
+  red   → the full /debug pipeline takes over, seeded with the red run.
+**Examples:**
+  /fix pytest tests/test_auth.py::test_login_returns_jwt
+  /fix node repro.js  (crashes on empty input, should return [])
+  /fix the /login route 500s when the body is missing
+
+With no runnable check at all, the result is honestly labelled UNVERIFIED.`,
+					"info",
+				);
+				return;
+			}
+
+			const state: FailingState = parseFailingState(raw, { cwd: ctx.cwd || process.cwd() });
+			if (!state.failingTest && !state.reproCommand) {
+				ctx.ui.notify(
+					`⚠️ No failing test or repro command detected — the /fix oracle will rely on the project suite alone (or report UNVERIFIED if none is known). A concrete repro gives a guaranteed verdict.`,
+					"warning",
+				);
+			}
+
+			await ensurePlansDir();
+			fixContext = { state, oracleRan: false };
+			const shot = genericPhase("shot", "🎯 Phase 1 — SINGLE SHOT", "code", "code", singleShotInstruction(state));
+			startGenericOrchestration(
+				"fix",
+				[shot],
+				ctx,
+				`🎯 **/fix started** — single shot, then the sandbox oracle decides (green = done, red = full pipeline)\n`,
 			);
 		},
 	});

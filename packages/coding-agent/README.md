@@ -124,8 +124,9 @@ code, even across model families). Full design:
 
 | Command | Job | Pipeline |
 |---|---|---|
+| `/fix <failing test \| repro \| description>` | Fix at single-shot cost, verified | SINGLE SHOT → sandbox oracle → green: done / red: escalate to /debug |
 | `/plan <spec>` | Plan AND build a project | EXPLORE → PLAN → CODE → TEST → REVIEW |
-| `/debug <failing test \| repro \| description>` | Turn a REAL failure green | REPRODUCE → LOCALIZE → FIX → VERIFY |
+| `/debug <…> [--candidates N]` | Turn a REAL failure green | REPRODUCE → LOCALIZE → FIX (×N diverse models) → real-run arbitration / VERIFY |
 | `/build <spec>` | Build until it runs | EXPLORE → PLAN → CODE → BUILD-VERIFY (run recipe + acceptance + executable red-team) |
 | `/sandbox [status\|prepare\|run <cmd>]` | Inspect the guaranteed environment | — |
 
@@ -151,9 +152,11 @@ with automatic fallback on transient provider errors.
 
 **Measured, honestly:** on a 13-instance SWE-bench-lite slice (official harness),
 a strong single-shot baseline resolved 7/13 vs `/debug` 6/13 at ~2.5× the time —
-with `/debug` producing smaller patches and zero toxic ones. These modes are
-shipped as *tools with honest failure modes*, not as a claimed benchmark win;
-the measurement lives in the repo and is re-runnable.
+with `/debug` producing smaller patches and zero toxic ones. `/fix` is the
+composition that measurement demanded: by construction never worse than the
+single shot, escalating exactly where a real red run proves the shot failed.
+Every run appends a telemetry line to `.phi/runs.jsonl` (phases, models,
+verdicts, sandbox executions, duration) so behaviour is measured continuously.
 
 ---
 
