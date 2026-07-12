@@ -210,17 +210,17 @@ describe("/debug + /build integration", () => {
 
 		await finishPhase({ verdict: "PASS", handoff: "patched (wrongly)" }); // oracle: exit 3 → red → escalate
 		const notes = cap.notifications.join("\n");
-		expect(notes).toContain("escalating to the full /debug pipeline");
+		expect(notes).toContain("/fix escalating");
 		expect(notes).toContain("exit 3");
-		// REPRODUCE was dispatched, seeded with the red run's command.
+		// REPRODUCE is SKIPPED (the oracle just ran the red reproduction):
+		// LOCALIZE is dispatched directly, seeded with the red run's command.
 		expect(cap.sentMessages.length).toBe(before + 1);
-		expect(cap.sentMessages[before]).toContain("REPRODUCE agent");
+		expect(cap.sentMessages[before]).toContain("LOCALIZE agent");
 		expect(cap.sentMessages[before]).toContain("process.exit(3)");
 
 		// The inherited pipeline then completes normally.
-		await finishPhase({ verdict: "PASS", handoff: "reproduced" }); // REPRODUCE → LOCALIZE
-		expect(cap.sentMessages.at(-1)).toContain("LOCALIZE agent");
-		await finishPhase({ handoff: "fault found" }); // → FIX
+		await finishPhase({ handoff: "fault found" }); // LOCALIZE → FIX
+		expect(cap.sentMessages.at(-1)).toContain("FIX agent");
 		await finishPhase({ handoff: "patched" }); // → VERIFY
 		await finishPhase({ verdict: "PASS", handoff: "green" }); // → done (oracle must NOT re-run)
 		expect(cap.notifications.join("\n")).toContain("/fix summary");
@@ -234,8 +234,8 @@ describe("/debug + /build integration", () => {
 		await finishPhase({ verdict: "PASS", handoff: `patched\nREPRO-CMD: node -e "process.exit(5)"` });
 		const notes = cap.notifications.join("\n");
 		expect(notes).toContain("Shot-declared reproduction registered");
-		expect(notes).toContain("escalating to the full /debug pipeline");
-		expect(cap.sentMessages[before]).toContain("REPRODUCE agent");
+		expect(notes).toContain("/fix escalating");
+		expect(cap.sentMessages[before]).toContain("LOCALIZE agent");
 	});
 
 	it("/fix escalates when the shot made NO changes in a git repo (nothing to verify)", async () => {

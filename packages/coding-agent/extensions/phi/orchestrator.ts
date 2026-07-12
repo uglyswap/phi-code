@@ -307,6 +307,11 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		// 0..4 for the five base phases (explore..review); undefined for synthetic
 		// phases (the review fix + re-review). Used to checkpoint resume position.
 		baseIndex?: number;
+		// Per-phase timeout override (generic driver only). Defaults to
+		// MAX_PHASE_DURATION_MS. Measured need: a /fix single shot legitimately
+		// runs 8–18 min — the flat 10 min cap killed it mid-work and lost its
+		// REPRO-CMD handoff (telemetry: 601s run, phases empty, UNVERIFIED).
+		timeoutMs?: number;
 	}
 
 	let phaseQueue: OrchestratorPhase[] = [];
@@ -1360,8 +1365,18 @@ Tag the note with relevant keywords for vector search.
 		fixContext.oracleRan = true;
 		const cwd = ctx.cwd || process.cwd();
 		const sandbox = getSessionSandbox(cwd);
-		const reproCmd =
+		let reproCmd =
 			fixContext.state.failingTest?.trim() || fixContext.state.reproCommand?.trim() || fixContext.reproFromShot;
+		// Conventional fallback: the shot is instructed to write `repro_issue.py`.
+		// If its handoff was lost (phase timeout/abort) but the file exists, the
+		// oracle can still run it instead of going blind (telemetry-measured gap).
+		if (!reproCmd && existsSync(join(cwd, "repro_issue.py"))) {
+			reproCmd = "python repro_issue.py";
+			ctx.ui.notify(
+				`\n🧷 Oracle fallback: found \`repro_issue.py\` — using \`${reproCmd}\` as the reproduction.`,
+				"info",
+			);
+		}
 		const suiteCmd = sandbox.recipe.test?.trim();
 
 		// A shot that changed NOTHING has nothing to verify — "UNVERIFIED" would be
@@ -1409,13 +1424,16 @@ Tag the note with relevant keywords for vector search.
 			);
 			return true;
 		}
-		// escalate: the pipeline inherits the RED run as its concrete failing state.
+		// escalate: the pipeline inherits the RED run as its concrete failing
+		// state. REPRODUCE is SKIPPED — the oracle just executed the reproduction
+		// and it is red; re-confirming it would burn ~10 min re-running what the
+		// driver already ran (measured: escalations were dying on outer budgets).
 		ctx.ui.notify(
-			`\n🔺 **/fix escalating to the full /debug pipeline** — ${decision.diagnostic}. The single shot was not enough; the pipeline inherits the red run as its reproduction.`,
+			`\n🔺 **/fix escalating** — ${decision.diagnostic}. The reproduction is already established (the oracle just ran it); going straight to LOCALIZE → FIX → VERIFY.`,
 			"warning",
 		);
-		phaseQueue.push(...buildDebugPhases(decision.failing));
-		return false; // fall through: sendNextGenericPhase will dispatch REPRODUCE
+		phaseQueue.push(...buildDebugPhases(decision.failing).slice(1));
+		return false; // fall through: sendNextGenericPhase dispatches LOCALIZE
 	}
 
 	// Multi-candidate arbitration — the oracle disposes. Apply each captured
@@ -1522,6 +1540,7 @@ Tag the note with relevant keywords for vector search.
 			if (warning) ctx.ui.notify(`\n⚠️ ${warning}`, "warning");
 			setTimeout(() => pi.sendUserMessage(phase.instruction, { deliverAs: "followUp" }), 500);
 			if (phaseTimeoutId) clearTimeout(phaseTimeoutId);
+			const phaseBudget = phase.timeoutMs ?? MAX_PHASE_DURATION_MS;
 			phaseTimeoutId = setTimeout(() => {
 				if (orchestrationActive && phasePending) {
 					phasePending = false;
@@ -1536,7 +1555,7 @@ Tag the note with relevant keywords for vector search.
 						phase.useFallback = true;
 						phaseQueue.unshift(phase);
 						ctx.ui.notify(
-							`\n⏰ **Phase timed out** (${MAX_PHASE_DURATION_MS / 60000} min) — retrying once on the fallback model.`,
+							`\n⏰ **Phase timed out** (${Math.round(phaseBudget / 60000)} min) — retrying once on the fallback model.`,
 							"warning",
 						);
 					} else {
@@ -1545,7 +1564,7 @@ Tag the note with relevant keywords for vector search.
 					}
 					sendNextGenericPhase(ctx);
 				}
-			}, MAX_PHASE_DURATION_MS);
+			}, phaseBudget);
 		});
 	}
 
@@ -1743,6 +1762,7 @@ Tag the note with relevant keywords for vector search.
 			ctx.ui.notify(`\n${first.label} → \`${modelId}\``, "info");
 			if (warning) ctx.ui.notify(`\n⚠️ ${warning}`, "warning");
 			if (phaseTimeoutId) clearTimeout(phaseTimeoutId);
+			const firstBudget = first.timeoutMs ?? MAX_PHASE_DURATION_MS;
 			phaseTimeoutId = setTimeout(() => {
 				if (orchestrationActive && phasePending) {
 					phasePending = false;
@@ -1752,11 +1772,24 @@ Tag the note with relevant keywords for vector search.
 					} catch {
 						/* best effort */
 					}
-					skippedPhases++;
-					ctx.ui.notify(`\n⏰ **First phase timed out** — skipping.`, "warning");
+					// Same policy as every other phase: one retry on the fallback
+					// model before skipping (the old skip-direct lost the whole run
+					// when the very first phase was slow).
+					if (!first.retried) {
+						first.retried = true;
+						first.useFallback = true;
+						phaseQueue.unshift(first);
+						ctx.ui.notify(
+							`\n⏰ **First phase timed out** (${Math.round(firstBudget / 60000)} min) — retrying once on the fallback model.`,
+							"warning",
+						);
+					} else {
+						skippedPhases++;
+						ctx.ui.notify(`\n⏰ **First phase timed out again** — skipping.`, "warning");
+					}
 					sendNextGenericPhase(ctx);
 				}
-			}, MAX_PHASE_DURATION_MS);
+			}, firstBudget);
 			setTimeout(() => pi.sendUserMessage(first.instruction, { deliverAs: "followUp" }), 200);
 		});
 	}
@@ -2319,6 +2352,9 @@ With no runnable check at all, the result is honestly labelled UNVERIFIED.`,
 			await ensurePlansDir();
 			fixContext = { state, oracleRan: false };
 			const shot = genericPhase("shot", "🎯 Phase 1 — SINGLE SHOT", "code", "code", singleShotInstruction(state));
+			// A real single shot legitimately runs 8–18 min (measured on the
+			// baselines); the flat 10 min phase cap was killing it mid-work.
+			shot.timeoutMs = 25 * 60 * 1000;
 			startGenericOrchestration(
 				"fix",
 				[shot],
