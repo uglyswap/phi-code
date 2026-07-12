@@ -49,7 +49,7 @@ const HARD_CONCURRENCY_CAP = 2;
 const DEFAULT_TIMEOUT_MS = 4 * 60 * 1000;
 
 /** Re-invoke the current phi binary (so the sub-explorer is the same build). */
-function getPiInvocation(args: string[]): { command: string; args: string[] } {
+export function getPiInvocation(args: string[]): { command: string; args: string[] } {
 	const currentScript = process.argv[1];
 	const isBunVirtualScript = currentScript?.startsWith("/$bunfs/root/");
 	if (currentScript && !isBunVirtualScript && existsSync(currentScript)) {

@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.96.0] - 2026-07-12
+
+### Added — the six efficiency upgrades, each tied to a measured failure
+
+1. **Targeted-test oracle** (flask-4992: the agent's repro passed while the
+   module's real tests failed): when no suite command is known, the /fix
+   oracle and the candidate arbitration auto-discover the EXISTING test files
+   of the touched modules (python/pytest, JS/vitest-jest) and run them as the
+   suite leg. New pure provider test-discovery.ts.
+2. **REPRO-AUDIT adversary phase** (requests-2148, twice-measured): when the
+   reproduction was CONSTRUCTED from prose, an adversary from the review
+   family answers one question — which case stated in the issue is NOT
+   covered? — extends the repro, re-runs it, and re-declares REPRO-CMD (which
+   overrides the earlier one for arbitration). Skipped when a failing test was
+   supplied (ground truth).
+3. **Tiered shot budgets** (sympy/sphinx: the shot burned the whole run):
+   triage decides the single-shot budget (12/8/6 min by difficulty) so a hard
+   instance fails FAST and the escalation inherits real budget.
+4. **/runs command + telemetry upgrades**: aggregates .phi/runs.jsonl —
+   green-at-shot rate, escalation rate, per-mode outcomes, slowest phases,
+   timeout counts. PhaseRecord gains durationMs; timed-out attempts are now
+   recorded (fixes the observed phases:[] gap).
+5. **Parallel candidates in git worktrees (experimental)**: /debug
+   --candidates N --parallel fans the FIX out to isolated worktrees (phi
+   sub-processes, concurrency-capped), collects the diffs, and the existing
+   deterministic arbitration picks the winner in the main tree. Worktrees are
+   always cleaned up; falls back to the sequential pipeline outside git.
+6. **/fix suggestion**: a message that reads like a bug report gets a one-line
+   tip pointing at /fix (once per session, never intercepting input).
+
+17 new tests (discovery heuristics, audit instruction, budgets, telemetry
+aggregation, real-git worktree isolation incl. cleanup, bug-shape detector,
+audit-phase integration); full suite green (1496).
+
 ## [0.95.0] - 2026-07-12
 
 ### Fixed — the 6h-drift class of failures (measured on seaborn-2848)

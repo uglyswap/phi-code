@@ -112,6 +112,33 @@ Reason: <only when BLOCKED>
 }
 
 /**
+ * The REPRO-AUDIT phase — red-team the reproduction ITSELF (the twice-measured
+ * failure: requests-2148 and flask-4992 both had a reproduction that validated
+ * the agent's interpretation while the project's real tests failed). A
+ * DIFFERENT model family answers one question — "which case stated in the
+ * issue is NOT covered by this reproduction?" — and extends it. Only used when
+ * the reproduction was CONSTRUCTED from prose; a user-supplied failing test is
+ * already ground truth.
+ */
+export function reproAuditInstruction(state: FailingState): string {
+	const failing = formatFailingState(state);
+	return `You are the REPRO-AUDIT agent (adversary). The previous phase CONSTRUCTED a reproduction from the issue text. Your single question: **which case stated in the issue is NOT covered by that reproduction?**
+
+**The issue / failing state:**
+${failing}
+
+**Do exactly this:**
+1. Read the reproduction script/command the previous phase reported (see its handoff and the repro file in the working tree).
+2. Compare it against the issue LITERALLY: every quoted snippet, input, expected value, and edge case named in the issue text. List what the reproduction does NOT exercise.
+3. If gaps exist: EXTEND the reproduction (edit the repro file — this is the one file you may edit) to cover them, then run it with \`sandbox_run\` — it must still FAIL on the current code for the same root cause.
+4. If the reproduction only passes because it mirrors an interpretation, not the issue: rewrite it from the issue's own examples and re-run.
+5. **Last action:** call \`phase_result\` with \`verdict: PASS\` (audited — gaps closed or none found) or \`verdict: BLOCKED\` (the issue cannot be reproduced as stated), and a handoff that MUST restate the final command on a machine-readable line:
+\`\`\`
+REPRO-CMD: <the exact, possibly updated, command>
+\`\`\`${DEBUG_RULES}`;
+}
+
+/**
  * The /fix single-shot phase — the measured-cheapest first attempt. One agent
  * fixes directly (baseline cost); the DRIVER then oracle-checks the result
  * deterministically (sandbox repro + suite) and escalates to the full /debug
