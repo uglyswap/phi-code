@@ -3,6 +3,7 @@ import {
 	buildVerifyInstruction,
 	debugPhaseInstructions,
 	formatFailingState,
+	singleShotInstruction,
 } from "../extensions/phi/providers/debug-build-commands.js";
 
 describe("formatFailingState", () => {
@@ -58,6 +59,32 @@ describe("debugPhaseInstructions", () => {
 	it("REPRODUCE forbids a hasty BLOCKED (retry before concluding)", () => {
 		expect(ins.reproduce).toMatch(/last resort/i);
 		expect(ins.reproduce).toMatch(/retry/i);
+	});
+	it("REPRODUCE demands a literal reproduction and the REPRO-CMD handoff line", () => {
+		expect(ins.reproduce).toMatch(/literally from the issue/i);
+		expect(ins.reproduce).toMatch(/Do NOT paraphrase/i);
+		expect(ins.reproduce).toContain("REPRO-CMD:");
+	});
+	it("LOCALIZE consults and feeds project memory", () => {
+		expect(ins.localize).toContain("memory_search");
+		expect(ins.localize).toContain("memory_write");
+	});
+});
+
+describe("singleShotInstruction (/fix phase 1)", () => {
+	const ins = singleShotInstruction({ reproCommand: "node repro.js", expected: "returns []" });
+	it("embeds the failing state and enforces minimality", () => {
+		expect(ins).toContain("node repro.js");
+		expect(ins).toContain("returns []");
+		expect(ins).toMatch(/MINIMAL change/i);
+		expect(ins).toMatch(/Do NOT edit tests/i);
+	});
+	it("announces the driver-level oracle (judged by real runs, not confidence)", () => {
+		expect(ins).toMatch(/orchestrator will run the reproduction/i);
+		expect(ins).toMatch(/judged by those REAL runs/i);
+	});
+	it("carries the shared execution-is-oracle rules", () => {
+		expect(ins).toMatch(/Execution is the only oracle/i);
 	});
 });
 

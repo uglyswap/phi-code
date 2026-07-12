@@ -53,6 +53,7 @@ ${failing}
 
 **Do exactly this:**
 1. Run the reproduction on the CURRENT, unmodified code with the \`sandbox_run\` tool: \`sandbox_run ${repro}\`.
+   - If you must CONSTRUCT the reproduction (only a description was given): build it **literally from the issue** — copy the exact code snippets, inputs and expected values QUOTED in the issue text into a runnable script/test. Do NOT paraphrase the issue into your own interpretation; a reproduction of your interpretation validates your interpretation, not the bug (measured failure mode).
 2. Paste the exact command and its full output.
 3. Decide from what \`sandbox_run\` returned:
    - If it FAILS as reported → capture the precise symptom (assertion, exception, exit code) and hand off to LOCALIZE.
@@ -60,8 +61,10 @@ ${failing}
    - If \`sandbox_run\` reports \`SANDBOX UNAVAILABLE\` → STOP. Write \`BLOCKED: no executable environment\`.
 4. Do NOT edit any source yet. This phase only observes.
 5. **BLOCKED is a last resort, not a first reaction.** If a run fails for an infrastructure-looking reason (tool error, missing file you guessed wrong, transient failure), adjust and retry at least once — e.g. locate the real test paths, try an alternative reproduction — before concluding. Only report BLOCKED after a genuine attempt showed the state is not reproducible or not runnable.
-6. **Last action:** call \`phase_result\` — \`verdict: PASS\` if it reproduced (proceed to LOCALIZE), or \`verdict: BLOCKED\` with the reason if you stopped.` +
-			DEBUG_RULES,
+6. **Last action:** call \`phase_result\` — \`verdict: PASS\` if it reproduced (proceed to LOCALIZE), or \`verdict: BLOCKED\` with the reason if you stopped. Your handoff MUST contain a line with the EXACT command that reproduces the failure, in this machine-readable form (the orchestrator re-runs it to arbitrate candidate fixes):
+\`\`\`
+REPRO-CMD: <the exact command, e.g. python /testbed/repro_issue.py>
+\`\`\`` + DEBUG_RULES,
 
 		localize: `You are the LOCALIZE agent (phase 2 of /debug). Drive from the REAL symptom the previous phase captured.
 
@@ -69,10 +72,11 @@ ${failing}
 ${failing}
 
 **Do exactly this:**
-1. Read the traceback / error from the reproduction. Follow it to the exact frame.
-2. Read the implicated source and the symbols it touches (grep the nearby/changed identifiers).
-3. Name the fault site precisely — file:line and the wrong assumption. Localization, not more review, is the lever here.
-4. Hand off a crisp fault description; do NOT fix yet.${DEBUG_RULES}`,
+1. Call \`memory_search\` with the failing symbol/module names — a previous run may have already localized this area or a related failure.
+2. Read the traceback / error from the reproduction. Follow it to the exact frame.
+3. Read the implicated source and the symbols it touches (grep the nearby/changed identifiers).
+4. Name the fault site precisely — file:line and the wrong assumption. Localization, not more review, is the lever here.
+5. Hand off a crisp fault description; do NOT fix yet. Call \`memory_write\` with the fault site so future runs on this project start ahead.${DEBUG_RULES}`,
 
 		fix:
 			`You are the FIX agent (phase 3 of /debug). Produce the MINIMAL change that addresses the located root cause.
@@ -105,6 +109,29 @@ Evidence: reproBefore=fail reproAfter=pass suite=green|skipped
 Reason: <only when BLOCKED>
 \`\`\`${DEBUG_RULES}`,
 	};
+}
+
+/**
+ * The /fix single-shot phase — the measured-cheapest first attempt. One agent
+ * fixes directly (baseline cost); the DRIVER then oracle-checks the result
+ * deterministically (sandbox repro + suite) and escalates to the full /debug
+ * pipeline only if a real run is red. Measured rationale: the single shot
+ * resolved 7/13 vs the full pipeline's 6/13 at ~2.5× the time — so pay the
+ * pipeline only when a real run proves the shot failed.
+ */
+export function singleShotInstruction(state: FailingState): string {
+	const failing = formatFailingState(state);
+	return `You are the FIX agent (single shot — /fix phase 1). Fix the problem directly, with the MINIMAL change.
+
+**The problem:**
+${failing}
+
+**Do exactly this:**
+1. Read the relevant code and locate the root cause.
+2. Make the smallest change that addresses it. Do NOT edit tests. Every added guard/branch is a liability.
+3. You MAY use \`sandbox_run\` to check your work (the project's real environment) — recommended when a command is available.
+4. After your change, the orchestrator will run the reproduction and the project suite in the sandbox itself: your work is judged by those REAL runs, not by your confidence. If they are red, a full diagnostic pipeline takes over from your change.
+5. **Last action:** call \`phase_result\` with \`verdict: PASS\` and a one-line handoff describing what you changed and why.${DEBUG_RULES}`;
 }
 
 /**

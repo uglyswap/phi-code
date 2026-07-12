@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -185,6 +186,142 @@ describe("/debug + /build integration", () => {
 
 		await finishPhase({ verdict: "PASS", handoff: "runs, acceptance met" }); // BUILD-VERIFY → done
 		expect(cap.notifications.join("\n")).toContain("build summary");
+	});
+
+	it("/fix finishes GREEN at single-shot cost when the oracle passes (real local run)", async () => {
+		// The repro command is runnable in the temp dir on the LOCAL sandbox
+		// backend — the driver-level oracle actually executes it.
+		await cap.commands.get("fix")!(`node -e "process.exit(0)"`, makeCtx(cap, tempDir));
+		await sleep(300);
+		expect(cap.sentMessages[0]).toContain("single shot");
+		const before = cap.sentMessages.length;
+
+		await finishPhase({ verdict: "PASS", handoff: "patched" }); // single shot done → oracle runs
+		const notes = cap.notifications.join("\n");
+		expect(notes).toContain("/fix oracle");
+		expect(notes).toContain("finished GREEN at single-shot cost");
+		expect(cap.sentMessages.length).toBe(before); // no escalation phases sent
+	});
+
+	it("/fix escalates to the full /debug pipeline when the oracle stays red (real local run)", async () => {
+		await cap.commands.get("fix")!(`node -e "process.exit(3)"`, makeCtx(cap, tempDir));
+		await sleep(300);
+		const before = cap.sentMessages.length;
+
+		await finishPhase({ verdict: "PASS", handoff: "patched (wrongly)" }); // oracle: exit 3 → red → escalate
+		const notes = cap.notifications.join("\n");
+		expect(notes).toContain("escalating to the full /debug pipeline");
+		expect(notes).toContain("exit 3");
+		// REPRODUCE was dispatched, seeded with the red run's command.
+		expect(cap.sentMessages.length).toBe(before + 1);
+		expect(cap.sentMessages[before]).toContain("REPRODUCE agent");
+		expect(cap.sentMessages[before]).toContain("process.exit(3)");
+
+		// The inherited pipeline then completes normally.
+		await finishPhase({ verdict: "PASS", handoff: "reproduced" }); // REPRODUCE → LOCALIZE
+		expect(cap.sentMessages.at(-1)).toContain("LOCALIZE agent");
+		await finishPhase({ handoff: "fault found" }); // → FIX
+		await finishPhase({ handoff: "patched" }); // → VERIFY
+		await finishPhase({ verdict: "PASS", handoff: "green" }); // → done (oracle must NOT re-run)
+		expect(cap.notifications.join("\n")).toContain("/fix summary");
+	});
+
+	it("/fix reports UNVERIFIED honestly when nothing is runnable", async () => {
+		await cap.commands.get("fix")!("the button label is wrong somewhere", makeCtx(cap, tempDir));
+		await sleep(300);
+		await finishPhase({ verdict: "PASS", handoff: "changed the label" });
+		const notes = cap.notifications.join("\n");
+		expect(notes).toContain("UNVERIFIED");
+		expect(notes).not.toContain("finished GREEN");
+	});
+
+	// ─── Multi-candidate: diversity proposes, a REAL run disposes ───────
+	function gitSetup(dir: string) {
+		const g = (a: string) => execSync(`git ${a}`, { cwd: dir, stdio: "pipe" });
+		g("init -q");
+		g("config user.email t@t.t");
+		g("config user.name t");
+		writeFileSync(join(dir, "app.js"), `module.exports = () => "bug";\n`);
+		writeFileSync(join(dir, "check.js"), `process.exit(require("./app.js")() === "ok" ? 0 : 1);\n`);
+		g("add -A");
+		g("commit -qm init");
+	}
+
+	it("/debug --candidates 2 arbitrates with real runs and applies the minimal passing candidate", async () => {
+		gitSetup(tempDir);
+		await cap.commands.get("debug")!("--candidates 2 node check.js", makeCtx(cap, tempDir));
+		await sleep(300);
+		expect(cap.notifications.join("\n")).toContain("multi-candidate ×2");
+
+		await finishPhase({ verdict: "PASS", handoff: "REPRO-CMD: node check.js" }); // REPRODUCE
+		await finishPhase({ handoff: "fault in app.js" }); // LOCALIZE → FIX candidate 1
+
+		// Candidate 1: WRONG and bigger (still returns non-"ok", extra noise line).
+		writeFileSync(join(tempDir, "app.js"), `// noise\n// more noise\nmodule.exports = () => "wrong";\n`);
+		await finishPhase({ handoff: "candidate 1 done" });
+		// Tree was reset for candidate 2 — the wrong edit must be gone.
+		expect(readFileSync(join(tempDir, "app.js"), "utf-8")).toContain(`"bug"`);
+
+		// Candidate 2: CORRECT and minimal.
+		writeFileSync(join(tempDir, "app.js"), `module.exports = () => "ok";\n`);
+		await finishPhase({ handoff: "candidate 2 done" }); // queue empty → arbitration runs real `node check.js`
+
+		const notes = cap.notifications.join("\n");
+		expect(notes).toContain("Arbitrating 2 candidate(s)");
+		expect(notes).toContain("FIXED by candidate arbitration");
+		// The winning (correct) patch is left applied on disk.
+		expect(readFileSync(join(tempDir, "app.js"), "utf-8")).toContain(`"ok"`);
+	}, 60000);
+
+	it("/debug --candidates 2 leaves an UNVERIFIED draft when no candidate passes (never a blank page)", async () => {
+		gitSetup(tempDir);
+		await cap.commands.get("debug")!("--candidates 2 node check.js", makeCtx(cap, tempDir));
+		await sleep(300);
+		await finishPhase({ verdict: "PASS", handoff: "REPRO-CMD: node check.js" });
+		await finishPhase({ handoff: "fault in app.js" });
+
+		writeFileSync(join(tempDir, "app.js"), `// try 1\nmodule.exports = () => "nope1";\n`);
+		await finishPhase({ handoff: "c1" });
+		writeFileSync(join(tempDir, "app.js"), `module.exports = () => "nope2";\n`);
+		await finishPhase({ handoff: "c2" }); // arbitration: both red
+
+		const notes = cap.notifications.join("\n");
+		expect(notes).toContain("no candidate passed arbitration");
+		expect(notes).toContain("UNVERIFIED draft");
+		// The smallest candidate remains on disk as an honest draft.
+		expect(readFileSync(join(tempDir, "app.js"), "utf-8")).toContain("nope2");
+	}, 60000);
+
+	it("/debug --candidates falls back to single-candidate over a dirty tree (non-deletion policy)", async () => {
+		gitSetup(tempDir);
+		writeFileSync(join(tempDir, "uncommitted.txt"), "user work in progress");
+		await cap.commands.get("debug")!("--candidates 3 node check.js", makeCtx(cap, tempDir));
+		await sleep(300);
+		const notes = cap.notifications.join("\n");
+		expect(notes).toContain("uncommitted changes");
+		expect(notes).not.toContain("multi-candidate ×3");
+		// The user's file is untouched.
+		expect(readFileSync(join(tempDir, "uncommitted.txt"), "utf-8")).toContain("user work");
+	});
+
+	it("writes one telemetry line per run to .phi/runs.jsonl", async () => {
+		await cap.commands.get("debug")!("pytest tests/test_x.py::test_y", makeCtx(cap, tempDir));
+		await sleep(300);
+		await finishPhase({ verdict: "PASS", handoff: "reproduced" });
+		await finishPhase({ handoff: "localized" });
+		await finishPhase({ handoff: "patched" });
+		await finishPhase({ verdict: "PASS", handoff: "green" }); // → finished
+
+		const lines = readFileSync(join(tempDir, ".phi", "runs.jsonl"), "utf-8")
+			.trim()
+			.split("\n");
+		expect(lines).toHaveLength(1);
+		const rec = JSON.parse(lines[0]);
+		expect(rec.mode).toBe("debug");
+		expect(rec.phases.map((p: { key: string }) => p.key)).toEqual(["reproduce", "localize", "fix", "verify"]);
+		expect(rec.completedPhases).toBe(4);
+		expect(rec.durationMs).toBeGreaterThan(0);
+		expect(rec.outcome).toContain("finished");
 	});
 
 	it("/debug never opens /plan's review-fix cycle", async () => {
