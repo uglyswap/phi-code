@@ -16,6 +16,7 @@ phi-code runs in four modes: interactive, print or JSON, RPC for process integra
 
 - [Quick Start](#quick-start)
 - [Providers & Models](#providers--models)
+- [Execution-Grounded Modes (/plan, /debug, /build, /sandbox)](#execution-grounded-modes)
 - [Interactive Mode](#interactive-mode)
   - [Editor](#editor)
   - [Commands](#commands)
@@ -103,10 +104,56 @@ For each built-in provider, phi maintains a list of tool-capable models, updated
 - Xiaomi MiMo Token Plan (China)
 - Xiaomi MiMo Token Plan (Amsterdam)
 - Xiaomi MiMo Token Plan (Singapore)
+- Alibaba Cloud Coding Plan (`qwen3.7-plus`, GLM, Kimi, MiniMax — subscription quota)
 
 See [docs/providers.md](docs/providers.md) for detailed setup instructions.
 
+**One-command setup for known providers:** `/keys set alibaba-codingplan sk-sp-…` (or `opencode-go <key>`) bootstraps the full provider entry — endpoint, protocol, model list — from just the API key, then validates it with `/keys test <id>`. The live catalog refreshes on session start.
+
 **Custom providers & models:** Add providers via `~/.phi/agent/models.json` if they speak a supported API (OpenAI, Anthropic, Google). For custom APIs or OAuth, use extensions. See [docs/models.md](docs/models.md) and [docs/custom-provider.md](docs/custom-provider.md).
+
+---
+
+## Execution-Grounded Modes
+
+Phi's multi-phase modes share one principle, learned the hard way on SWE-bench:
+**execution is the only oracle**. A verdict must come from running real code —
+never from a model reviewing its own output (which we measured approving wrong
+code, even across model families). Full design:
+[docs/design/plan-debug-build.md](docs/design/plan-debug-build.md).
+
+| Command | Job | Pipeline |
+|---|---|---|
+| `/plan <spec>` | Plan AND build a project | EXPLORE → PLAN → CODE → TEST → REVIEW |
+| `/debug <failing test \| repro \| description>` | Turn a REAL failure green | REPRODUCE → LOCALIZE → FIX → VERIFY |
+| `/build <spec>` | Build until it runs | EXPLORE → PLAN → CODE → BUILD-VERIFY (run recipe + acceptance + executable red-team) |
+| `/sandbox [status\|prepare\|run <cmd>]` | Inspect the guaranteed environment | — |
+
+**The execution sandbox.** Every oracle run goes through the `sandbox_run` tool:
+a per-project Docker container (toolchain auto-detected — node/python/go/rust/ruby
+or your `Dockerfile`; override anything in `.phi/sandbox.json`) that returns the
+REAL exit code. No Docker and nothing to containerize → runs fall back to the
+host; if an environment is demanded but unavailable, phases report `BLOCKED`
+rather than fabricate a pass.
+
+**Honesty guarantees** (each one exists because we measured its absence losing):
+- `/debug` refuses to "fix" a failure it cannot reproduce — and a BLOCKED verdict
+  gets one second chance on a different model family before the halt.
+- VERIFY requires the reproduction to pass AND the suite not to regress; a
+  TIMEOUT counts as a regression (a fix that hangs the suite is worse than none).
+- `/build` reports `SUCCESS` only when a real run meets the acceptance criteria,
+  otherwise an honest `PARTIAL` listing what still fails.
+
+**Per-phase model routing.** Each phase can run on its own model via
+`~/.phi/agent/routing.json` (e.g. code on `alibaba-codingplan/qwen3.7-plus`,
+verification on a different family so it does not share the coder's blind spot),
+with automatic fallback on transient provider errors.
+
+**Measured, honestly:** on a 13-instance SWE-bench-lite slice (official harness),
+a strong single-shot baseline resolved 7/13 vs `/debug` 6/13 at ~2.5× the time —
+with `/debug` producing smaller patches and zero toxic ones. These modes are
+shipped as *tools with honest failure modes*, not as a claimed benchmark win;
+the measurement lives in the repo and is re-runnable.
 
 ---
 
