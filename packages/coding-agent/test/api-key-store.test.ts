@@ -128,4 +128,76 @@ describe("ApiKeyStore", () => {
 		const mode = statSync(configPath).mode & 0o777;
 		expect(mode).toBe(0o600);
 	});
+
+	test("load tolerates // comments and trailing commas (same as model-registry)", () => {
+		writeFileSync(
+			configPath,
+			`{
+				// user-edited config
+				"providers": {
+					"alibaba": {
+						"apiKey": "sk-commented-key",
+						"baseUrl": "https://example.com/v1", // inline comment
+					},
+				},
+			}`,
+			"utf-8",
+		);
+		const store = new ApiKeyStore({ configPath });
+		expect(store.getKey("alibaba")).toBe("sk-commented-key");
+		expect(store.getProvider("alibaba")?.baseUrl).toBe("https://example.com/v1");
+	});
+
+	describe("getKey resolution (resolve-config-value convention)", () => {
+		test("returns literal keys as-is", () => {
+			const store = new ApiKeyStore({ configPath });
+			store.setKey("alibaba", "sk-literal-123");
+			expect(store.getKey("alibaba")).toBe("sk-literal-123");
+		});
+
+		test("resolves an env-var NAME to its value", () => {
+			process.env.PHI_TEST_KEY_NAME = "resolved-from-env";
+			try {
+				const store = new ApiKeyStore({ configPath });
+				store.setKey("alibaba", "PHI_TEST_KEY_NAME");
+				expect(store.getKey("alibaba")).toBe("resolved-from-env");
+			} finally {
+				delete process.env.PHI_TEST_KEY_NAME;
+			}
+		});
+
+		test("resolves legacy $NAME notation to the NAME env var", () => {
+			process.env.PHI_TEST_DOLLAR_KEY = "resolved-dollar";
+			try {
+				const store = new ApiKeyStore({ configPath });
+				store.setKey("alibaba", "$PHI_TEST_DOLLAR_KEY");
+				expect(store.getKey("alibaba")).toBe("resolved-dollar");
+			} finally {
+				delete process.env.PHI_TEST_DOLLAR_KEY;
+			}
+		});
+
+		test("unresolved $NAME falls back to the envVar parameter, never returned literally", () => {
+			process.env.PHI_TEST_FALLBACK_VAR = "fallback-value";
+			try {
+				const store = new ApiKeyStore({ configPath });
+				store.setKey("alibaba", "$PHI_TEST_UNSET_VAR_XYZ");
+				expect(store.getKey("alibaba", "PHI_TEST_FALLBACK_VAR")).toBe("fallback-value");
+				expect(store.getKey("alibaba")).toBeUndefined();
+			} finally {
+				delete process.env.PHI_TEST_FALLBACK_VAR;
+			}
+		});
+
+		test("empty stored key falls back to the envVar parameter", () => {
+			process.env.PHI_TEST_EMPTY_FALLBACK = "env-wins";
+			try {
+				const store = new ApiKeyStore({ configPath });
+				store.setKey("alibaba", "   ");
+				expect(store.getKey("alibaba", "PHI_TEST_EMPTY_FALLBACK")).toBe("env-wins");
+			} finally {
+				delete process.env.PHI_TEST_EMPTY_FALLBACK;
+			}
+		});
+	});
 });

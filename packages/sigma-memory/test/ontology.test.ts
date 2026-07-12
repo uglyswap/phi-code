@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { existsSync, mkdirSync, rmSync } from "fs";
+import { existsSync, mkdirSync, rmSync, utimesSync } from "fs";
 import { join } from "path";
 import { OntologyManager } from "../src/ontology.js";
 import type { MemoryConfig } from "../src/types.js";
@@ -199,5 +199,32 @@ describe("OntologyManager", () => {
 		assert.throws(() => {
 			ontologyManager.removeEntity("invalid-id");
 		}, /Entity not found/);
+	});
+
+	test("append releases its file lock (no .lock left behind)", () => {
+		ontologyManager.addEntity({ type: "Person", name: "Alice", properties: {} });
+
+		const lockPath = join(tempDir, "ontology", "graph.jsonl.lock");
+		assert.equal(existsSync(lockPath), false);
+
+		// Data was written correctly under the lock
+		assert.equal(ontologyManager.findEntity({ name: "Alice" }).length, 1);
+	});
+
+	test("append takes over a stale lock left by a crashed process", () => {
+		// Simulate a crashed writer: a lock directory whose mtime is far in the past
+		// (proper-lockfile considers it stale after 5s and steals it).
+		const graphDir = join(tempDir, "ontology");
+		const lockPath = join(graphDir, "graph.jsonl.lock");
+		mkdirSync(lockPath, { recursive: true });
+		const staleTime = new Date(Date.now() - 60_000);
+		utimesSync(lockPath, staleTime, staleTime);
+
+		const id = ontologyManager.addEntity({ type: "Person", name: "Bob", properties: {} });
+
+		assert(typeof id === "string");
+		assert.equal(ontologyManager.findEntity({ name: "Bob" }).length, 1);
+		// The stale lock was released after the append
+		assert.equal(existsSync(lockPath), false);
 	});
 });

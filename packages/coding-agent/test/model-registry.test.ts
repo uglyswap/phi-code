@@ -1468,4 +1468,63 @@ describe("ModelRegistry", () => {
 			});
 		});
 	});
+
+	describe("hasConfiguredAuth", () => {
+		function customProvider(apiKey: string) {
+			return {
+				baseUrl: "https://example.com/v1",
+				apiKey,
+				api: "anthropic-messages",
+				models: [
+					{
+						id: "auth-test-model",
+						name: "Auth Test Model",
+						reasoning: false,
+						input: ["text"],
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+						contextWindow: 100000,
+						maxTokens: 8000,
+					},
+				],
+			};
+		}
+
+		test("a non-empty models.json apiKey counts as configured", () => {
+			writeRawModelsJson({ "auth-test-provider": customProvider("sk-real-key") });
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			const model = registry.find("auth-test-provider", "auth-test-model");
+			expect(model).toBeDefined();
+			expect(registry.hasConfiguredAuth(model!)).toBe(true);
+			expect(registry.getAvailable().some((m) => m.provider === "auth-test-provider")).toBe(true);
+		});
+
+		test("an EMPTY apiKey override does not count as configured", () => {
+			// A model must not show up as available and then fail at send time.
+			const saved = process.env.ANTHROPIC_API_KEY;
+			delete process.env.ANTHROPIC_API_KEY;
+			try {
+				writeRawModelsJson({ anthropic: { apiKey: "" } });
+				const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+				const anthropicModel = registry.getAll().find((m) => m.provider === "anthropic");
+				expect(anthropicModel).toBeDefined();
+				expect(registry.hasConfiguredAuth(anthropicModel!)).toBe(false);
+			} finally {
+				if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
+			}
+		});
+
+		test("env-var auth still counts as configured (no regression)", () => {
+			const saved = process.env.ANTHROPIC_API_KEY;
+			process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+			try {
+				const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+				const anthropicModel = registry.getAll().find((m) => m.provider === "anthropic");
+				expect(anthropicModel).toBeDefined();
+				expect(registry.hasConfiguredAuth(anthropicModel!)).toBe(true);
+			} finally {
+				if (saved === undefined) delete process.env.ANTHROPIC_API_KEY;
+				else process.env.ANTHROPIC_API_KEY = saved;
+			}
+		});
+	});
 });

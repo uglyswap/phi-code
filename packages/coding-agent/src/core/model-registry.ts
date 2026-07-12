@@ -26,6 +26,7 @@ import { Compile } from "typebox/compile";
 import type { TLocalizedValidationError } from "typebox/error";
 import { getAgentDir } from "../config.js";
 import type { AuthStatus, AuthStorage } from "./auth-storage.js";
+import { stripJsonComments } from "./json-utils.js";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "./provider-display-names.js";
 import {
 	clearConfigValueCache,
@@ -212,13 +213,6 @@ function formatValidationPath(error: TLocalizedValidationError): string {
 	}
 	const path = error.instancePath.replace(/^\//, "").replace(/\//g, ".");
 	return path || "root";
-}
-
-/** Strip `//` line comments and trailing commas from JSON, leaving string literals untouched. */
-function stripJsonComments(input: string): string {
-	return input
-		.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*/g, (m) => (m[0] === '"' ? m : ""))
-		.replace(/"(?:\\.|[^"\\])*"|,(\s*[}\]])/g, (m, tail) => tail ?? (m[0] === '"' ? m : ""));
 }
 
 /** Provider override config (baseUrl, compat) without request auth/headers */
@@ -633,13 +627,16 @@ export class ModelRegistry {
 	}
 
 	/**
-	 * Get API key for a model.
+	 * Check whether any auth is available for a model's provider.
+	 *
+	 * An apiKey present in models.json but EMPTY does not count (it used to,
+	 * making the model look available in pickers and then fail at send time).
+	 * Mirrors getProviderAuthStatus, which also treats an empty value as
+	 * unconfigured.
 	 */
 	hasConfiguredAuth(model: Model<Api>): boolean {
-		return (
-			this.authStorage.hasAuth(model.provider) ||
-			this.providerRequestConfigs.get(model.provider)?.apiKey !== undefined
-		);
+		if (this.authStorage.hasAuth(model.provider)) return true;
+		return !!this.providerRequestConfigs.get(model.provider)?.apiKey;
 	}
 
 	private getModelRequestKey(provider: string, modelId: string): string {

@@ -371,4 +371,44 @@ describe("parseArgs", () => {
 			expect(result.messages).toEqual(["Do the task"]);
 		});
 	});
+
+	describe("--flag=value syntax for known flags", () => {
+		test("--model=x is equivalent to --model x", () => {
+			const result = parseArgs(["--model=claude-sonnet"]);
+			expect(result.model).toBe("claude-sonnet");
+			expect(result.unknownFlags.size).toBe(0);
+		});
+
+		test("--provider=x and --thinking=high parse like their two-token forms", () => {
+			const result = parseArgs(["--provider=anthropic", "--thinking=high"]);
+			expect(result.provider).toBe("anthropic");
+			expect(result.thinking).toBe("high");
+		});
+
+		test("--mode=json selects the mode", () => {
+			const result = parseArgs(["--mode=json"]);
+			expect(result.mode).toBe("json");
+		});
+
+		test("--models=a,b splits the same way as the two-token form", () => {
+			const result = parseArgs(["--models=alibaba/*,openai/gpt-*"]);
+			expect(result.models).toEqual(["alibaba/*", "openai/gpt-*"]);
+		});
+
+		test("value containing '=' is preserved after the first '='", () => {
+			const result = parseArgs(["--system-prompt=a=b=c"]);
+			expect(result.systemPrompt).toBe("a=b=c");
+		});
+
+		test("unknown --flag=value still lands in unknownFlags (extension flags)", () => {
+			const result = parseArgs(["--custom-ext-flag=some-value"]);
+			expect(result.unknownFlags.get("custom-ext-flag")).toBe("some-value");
+		});
+
+		test("boolean known flags are not affected (--verbose=true stays unknown)", () => {
+			const result = parseArgs(["--verbose=true"]);
+			expect(result.verbose).toBeUndefined();
+			expect(result.unknownFlags.get("verbose")).toBe("true");
+		});
+	});
 });

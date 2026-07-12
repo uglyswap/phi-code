@@ -5,10 +5,18 @@
  * Per Q6 strategy A: keys stored in plain text in ~/.phi/agent/models.json
  * with chmod 0600 on Unix and clear warnings to users.
  *
- * Storage format: models.json providers.<id>.apiKey contains the key value
- * directly (not an env var reference). Resolution priority:
- *   1. Value in models.json (if non-empty)
+ * Storage format: models.json providers.<id>.apiKey. Resolution follows the
+ * same convention as model-registry/resolve-config-value ("env var name or
+ * literal value", plus "!cmd" shell commands):
+ *   1. Value in models.json — "!cmd" runs the command (cached per process),
+ *      an env-var NAME resolves to its value, "$NAME" (legacy notation)
+ *      resolves NAME and is never returned literally, anything else is the
+ *      literal key
  *   2. process.env[envVar] (legacy fallback)
+ *
+ * The file may contain // comments and trailing commas (same tolerance as
+ * model-registry). Note that setKey()/removeKey() rewrite the file as plain
+ * JSON, so comments do not survive a programmatic write.
  *
  * Events emitted via the EventEmitter:
  *   - "key_changed" { provider }       : when setKey() or external edit detected
@@ -20,6 +28,8 @@ import { EventEmitter } from "node:events";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { getModelsPath } from "../config.js";
+import { stripJsonComments } from "./json-utils.js";
+import { resolveConfigValue } from "./resolve-config-value.js";
 
 export interface ProviderConfigPersisted {
 	baseUrl?: string;
@@ -59,7 +69,9 @@ export class ApiKeyStore extends EventEmitter {
 				return this.config;
 			}
 			const raw = readFileSync(this.configPath, "utf-8");
-			const parsed = JSON.parse(raw) as ModelsConfigPersisted;
+			// Same comment/trailing-comma tolerance as model-registry: a commented
+			// models.json must not break /keys hot-reload while the agent still runs.
+			const parsed = JSON.parse(stripJsonComments(raw)) as ModelsConfigPersisted;
 			if (!parsed.providers || typeof parsed.providers !== "object") {
 				parsed.providers = {};
 			}
@@ -81,12 +93,28 @@ export class ApiKeyStore extends EventEmitter {
 
 	/**
 	 * Get the API key for a provider, with env-var fallback.
-	 * Returns undefined if neither source has a value.
+	 *
+	 * The stored value follows the documented convention ("env var name or
+	 * literal value", plus "!cmd"): it is resolved through the same logic as
+	 * model-registry instead of being returned raw, so a config that works at
+	 * request time also works here. Legacy "$NAME" values resolve NAME and
+	 * fall through to the envVar fallback when unset (they are never returned
+	 * literally — no real API key starts with "$").
+	 *
+	 * Returns undefined if no source yields a value.
 	 */
 	getKey(providerId: string, envVar?: string): string | undefined {
 		if (!this.loaded) this.load();
 		const stored = this.config.providers[providerId]?.apiKey?.trim();
-		if (stored && stored.length > 0 && !stored.startsWith("$")) return stored;
+		if (stored && stored.length > 0) {
+			if (stored.startsWith("$")) {
+				const fromEnv = process.env[stored.slice(1)]?.trim();
+				if (fromEnv) return fromEnv;
+			} else {
+				const resolved = resolveConfigValue(stored)?.trim();
+				if (resolved) return resolved;
+			}
+		}
 		if (envVar) return process.env[envVar]?.trim() || undefined;
 		return undefined;
 	}

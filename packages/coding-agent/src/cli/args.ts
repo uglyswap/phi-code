@@ -56,7 +56,51 @@ export function isValidThinkingLevel(level: string): level is ThinkingLevel {
 	return VALID_THINKING_LEVELS.includes(level as ThinkingLevel);
 }
 
-export function parseArgs(args: string[]): Args {
+/** Long flags that consume a value; `--flag=value` is accepted for these. */
+const KNOWN_VALUE_FLAGS = new Set([
+	"mode",
+	"provider",
+	"model",
+	"api-key",
+	"system-prompt",
+	"append-system-prompt",
+	"session",
+	"fork",
+	"session-dir",
+	"models",
+	"tools",
+	"thinking",
+	"export",
+	"extension",
+	"skill",
+	"prompt-template",
+	"theme",
+	"list-models",
+	"print",
+]);
+
+/**
+ * Expand `--flag=value` into two tokens for flags the parser knows take a
+ * value, so both spellings work. Unknown flags keep the raw `--x=y` handling
+ * below (extensions rely on it, including values that start with `-`).
+ */
+function normalizeEqualsSyntax(args: string[]): string[] {
+	const normalized: string[] = [];
+	for (const arg of args) {
+		if (arg.startsWith("--")) {
+			const eqIndex = arg.indexOf("=");
+			if (eqIndex > 2 && KNOWN_VALUE_FLAGS.has(arg.slice(2, eqIndex))) {
+				normalized.push(arg.slice(0, eqIndex), arg.slice(eqIndex + 1));
+				continue;
+			}
+		}
+		normalized.push(arg);
+	}
+	return normalized;
+}
+
+export function parseArgs(rawArgs: string[]): Args {
+	const args = normalizeEqualsSyntax(rawArgs);
 	const result: Args = {
 		messages: [],
 		fileArgs: [],
