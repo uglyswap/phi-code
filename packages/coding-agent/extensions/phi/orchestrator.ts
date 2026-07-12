@@ -23,10 +23,12 @@ import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "phi-code";
 import { type AgentDef, loadAgentDef } from "./providers/agent-def.js";
+import { runCandidateFanout } from "./providers/candidate-fanout.js";
 import { diffChangedLines } from "./providers/candidate-select.js";
 import {
 	buildVerifyInstruction,
 	debugPhaseInstructions,
+	reproAuditInstruction,
 	singleShotInstruction,
 } from "./providers/debug-build-commands.js";
 import {
@@ -35,7 +37,13 @@ import {
 	parseFailingState,
 	type VerifiedCandidate,
 } from "./providers/debug-contract.js";
-import { decideEscalation, parseReproCmd, pickCandidateModels, type RoutingLike } from "./providers/escalation.js";
+import {
+	decideEscalation,
+	parseReproCmd,
+	pickCandidateModels,
+	type RoutingLike,
+	shotBudgetMs,
+} from "./providers/escalation.js";
 import { passed, runCommand, tail } from "./providers/execution.js";
 import { defaultExplorerSpecs, READONLY_EXPLORER_TOOLS, runExploreFanout } from "./providers/explore-fanout.js";
 import {
@@ -46,8 +54,15 @@ import {
 	type StructuredPhaseResult,
 } from "./providers/phase-machine.js";
 import { resolveSandbox, type Sandbox } from "./providers/sandbox.js";
-import { appendRunRecord, buildRunRecord, type PhaseRecord } from "./providers/telemetry.js";
-import { triage } from "./providers/triage.js";
+import {
+	appendRunRecord,
+	buildRunRecord,
+	type PhaseRecord,
+	parseRunsJsonl,
+	summarizeRuns,
+} from "./providers/telemetry.js";
+import { discoverTargetedTests, fsSeamsFor } from "./providers/test-discovery.js";
+import { looksLikeBugReport, triage } from "./providers/triage.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -333,6 +348,8 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		reproCmd?: string;
 		list: { source: string; patch: string }[];
 		arbitrated: boolean;
+		// Experimental --parallel: FIX specs fanned out to worktrees after LOCALIZE.
+		parallelSpecs?: { model: string; instruction: string }[];
 	} | null = null;
 	// Telemetry: per-phase records for the current generic run + sandbox_run
 	// invocation count (reset at orchestration start, flushed at finish).
@@ -341,6 +358,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	// Cumulative sandbox execution time this orchestration (drift guard #2) and
 	// its budget; per-call cap (#4) is tightenable for batch harnesses via env.
 	let sandboxExecMs = 0;
+	let currentPhaseStartedAt = 0;
 	const SANDBOX_BUDGET_MS = Math.max(
 		1_000,
 		Number(process.env.PHI_SANDBOX_BUDGET_MS ?? 20 * 60 * 1000) || 20 * 60 * 1000,
@@ -1190,6 +1208,7 @@ Tag the note with relevant keywords for vector search.
 		const phase = phaseQueue.shift()!;
 		phasePending = true;
 		currentPhase = phase;
+		currentPhaseStartedAt = Date.now();
 		// New phase starts with no structured result; it is set only if this
 		// phase's agent calls phase_result.
 		currentPhaseResult = null;
@@ -1277,13 +1296,30 @@ Tag the note with relevant keywords for vector search.
 		};
 	}
 
-	// /debug: REPRODUCE → LOCALIZE → FIX → VERIFY. Each phase routes to a model
-	// that does NOT share the coder's blind spot (verify on the test family).
-	function buildDebugPhases(state: FailingState, candidates = 1): OrchestratorPhase[] {
+	// /debug: REPRODUCE → [REPRO-AUDIT] → LOCALIZE → FIX → VERIFY. Each phase
+	// routes to a model that does NOT share the coder's blind spot. The audit
+	// phase (adversary from the review family) runs ONLY when the reproduction
+	// was CONSTRUCTED from prose — a user-supplied failing test is ground truth
+	// (twice-measured failure: a prose-derived repro validated the agent's
+	// interpretation while the real tests failed).
+	function buildDebugPhases(state: FailingState, candidates = 1, parallel = false): OrchestratorPhase[] {
 		const ins = debugPhaseInstructions(state);
+		const constructed = !state.failingTest?.trim() && !state.reproCommand?.trim();
+		const audit = constructed
+			? [
+					genericPhase(
+						"repro-audit",
+						"🕵️ Phase 1b — REPRO-AUDIT (adversary)",
+						"review",
+						"review",
+						reproAuditInstruction(state),
+					),
+				]
+			: [];
 		if (candidates <= 1) {
 			return [
 				genericPhase("reproduce", "🔴 Phase 1 — REPRODUCE", "test", "test", ins.reproduce),
+				...audit,
 				genericPhase("localize", "🔎 Phase 2 — LOCALIZE", "explore", "explore", ins.localize),
 				genericPhase("fix", "🔧 Phase 3 — FIX", "code", "code", ins.fix),
 				genericPhase("verify", "✅ Phase 4 — VERIFY", "test", "test", ins.verify),
@@ -1307,8 +1343,18 @@ Tag the note with relevant keywords for vector search.
 			phase.fallback = codeRoute.fallback;
 			return phase;
 		});
+		if (parallel) {
+			// Parallel candidates: the queue stops at LOCALIZE; the driver then
+			// fans the FIX out to worktrees and arbitration takes over.
+			return [
+				genericPhase("reproduce", "🔴 Phase 1 — REPRODUCE", "test", "test", ins.reproduce),
+				...audit,
+				genericPhase("localize", "🔎 Phase 2 — LOCALIZE", "explore", "explore", ins.localize),
+			];
+		}
 		return [
 			genericPhase("reproduce", "🔴 Phase 1 — REPRODUCE", "test", "test", ins.reproduce),
+			...audit,
 			genericPhase("localize", "🔎 Phase 2 — LOCALIZE", "explore", "explore", ins.localize),
 			...fixPhases,
 		];
@@ -1403,13 +1449,31 @@ Tag the note with relevant keywords for vector search.
 				"info",
 			);
 		}
-		const suiteCmd = sandbox.recipe.test?.trim();
+		// Oracle upgrade (measured on flask-4992: the agent's own repro passed
+		// while the module's REAL tests failed): when no suite command is known,
+		// auto-discover the EXISTING test files of the modules the change touched
+		// and use them as the suite leg of the oracle.
+		let suiteCmd = sandbox.recipe.test?.trim();
+		const inGitRepo = passed(runCommand("git rev-parse --is-inside-work-tree", { cwd, timeoutMs: 15_000 }));
+		if (!suiteCmd && inGitRepo) {
+			const changed = gitIn(cwd, "diff --name-only")
+				.split("\n")
+				.map((s) => s.trim())
+				.filter(Boolean);
+			const targeted = discoverTargetedTests(changed, fsSeamsFor(cwd));
+			if (targeted.command) {
+				suiteCmd = targeted.command;
+				ctx.ui.notify(
+					`\n🎯 Targeted tests discovered for the touched modules: ${targeted.files.join(", ")}`,
+					"info",
+				);
+			}
+		}
 
 		// A shot that changed NOTHING has nothing to verify — "UNVERIFIED" would be
 		// a lie of omission (measured: a text-only 91s shot ended UNVERIFIED with
 		// zero edits). In a git repo with a clean diff, escalate to the full
 		// pipeline instead: the work simply was not done.
-		const inGitRepo = passed(runCommand("git rev-parse --is-inside-work-tree", { cwd, timeoutMs: 15_000 }));
 		if (inGitRepo && !gitIn(cwd, "diff").trim() && !gitIn(cwd, "status --porcelain").trim()) {
 			ctx.ui.notify(
 				`\n🔺 **/fix escalating: the single shot made NO changes** — nothing to verify, the full /debug pipeline takes over.`,
@@ -1508,9 +1572,19 @@ Tag the note with relevant keywords for vector search.
 				verified.push({ source: cand.source, patch: cand.patch, reproAfter: null, suite: null });
 				continue;
 			}
+			// Per-candidate suite: the recipe's, else the targeted tests of the
+			// modules THIS candidate touched (flask-4992 oracle upgrade).
+			let candSuite = suiteCmd;
+			if (!candSuite) {
+				const changed = gitIn(cwd, "diff --name-only")
+					.split("\n")
+					.map((s) => s.trim())
+					.filter(Boolean);
+				candSuite = discoverTargetedTests(changed, fsSeamsFor(cwd)).command;
+			}
 			const reproAfter =
 				cc.reproCmd && sandbox.available() ? sandbox.exec(cc.reproCmd, { timeoutMs: 10 * 60 * 1000 }) : null;
-			const suite = suiteCmd && sandbox.available() ? sandbox.exec(suiteCmd, { timeoutMs: 20 * 60 * 1000 }) : null;
+			const suite = candSuite && sandbox.available() ? sandbox.exec(candSuite, { timeoutMs: 20 * 60 * 1000 }) : null;
 			verified.push({ source: cand.source, patch: cand.patch, reproAfter, suite });
 			gitIn(cwd, "checkout -- .");
 			const rp = reproAfter
@@ -1520,7 +1594,7 @@ Tag the note with relevant keywords for vector search.
 			ctx.ui.notify(`  ${cand.source}: ${rp}, ${st}`, "info");
 		}
 
-		const outcome = decideVerify(verified, Boolean(suiteCmd));
+		const outcome = decideVerify(verified, Boolean(suiteCmd) || verified.some((v) => v.suite !== null));
 		if (outcome.verdict === "FIXED" && outcome.patch) {
 			applyPatch(outcome.patch);
 			finishGenericOrchestration(
@@ -1556,6 +1630,7 @@ Tag the note with relevant keywords for vector search.
 		const phase = phaseQueue.shift()!;
 		phasePending = true;
 		currentPhase = phase;
+		currentPhaseStartedAt = Date.now();
 		currentPhaseResult = null;
 		currentPhaseResultKey = null;
 
@@ -1576,6 +1651,17 @@ Tag the note with relevant keywords for vector search.
 					} catch {
 						/* best effort */
 					}
+					// Telemetry: a timed-out attempt is a row too (the observed
+					// phases:[] bug — the swallowed agent_end never pushed one).
+					runPhaseRecords.push({
+						key: phase.key,
+						label: phase.label,
+						model: phase.useFallback ? phase.fallback : phase.model,
+						verdict: "TIMEOUT",
+						retried: Boolean(phase.retried),
+						blockedRetried: Boolean(phase.blockedRetried),
+						durationMs: currentPhaseStartedAt ? Date.now() - currentPhaseStartedAt : undefined,
+					});
 					if (!phase.retried) {
 						phase.retried = true;
 						phase.useFallback = true;
@@ -1638,6 +1724,7 @@ Tag the note with relevant keywords for vector search.
 				verdict: outcome.verdict,
 				retried: Boolean(currentPhase.retried),
 				blockedRetried: Boolean(currentPhase.blockedRetried),
+				durationMs: currentPhaseStartedAt ? Date.now() - currentPhaseStartedAt : undefined,
 			});
 		}
 
@@ -1715,11 +1802,41 @@ Tag the note with relevant keywords for vector search.
 
 		if (candidateContext && currentPhase) {
 			const cwd = ctx.cwd || process.cwd();
+			if (currentPhase.key === "repro-audit") {
+				// The adversary may have EXTENDED the reproduction — its REPRO-CMD
+				// overrides the one REPRODUCE registered.
+				const updated = parseReproCmd(outcome.handoff);
+				if (updated && updated !== candidateContext.reproCmd) {
+					candidateContext.reproCmd = updated;
+					ctx.ui.notify(`\n🧷 Arbitration reproduction UPDATED by the audit: \`${updated}\``, "info");
+				}
+			}
 			if (currentPhase.key === "reproduce" && !candidateContext.reproCmd) {
 				candidateContext.reproCmd = parseReproCmd(outcome.handoff);
 				if (candidateContext.reproCmd) {
 					ctx.ui.notify(`\n🧷 Arbitration reproduction registered: \`${candidateContext.reproCmd}\``, "info");
 				}
+			}
+			if (
+				currentPhase.key === "localize" &&
+				candidateContext.parallelSpecs?.length &&
+				candidateContext.list.length === 0
+			) {
+				ctx.ui.notify(
+					`
+🧵 **Fanning ${candidateContext.parallelSpecs.length} FIX candidates out to parallel worktrees** (experimental)…`,
+					"info",
+				);
+				const fan = await runCandidateFanout(
+					cwd,
+					candidateContext.parallelSpecs.map((sp) => ({ model: sp.model, instruction: sp.instruction })),
+				);
+				for (const o of fan.outcomes) candidateContext.list.push({ source: o.source, patch: o.patch });
+				if (fan.failures.length) ctx.ui.notify(`⚠️ Candidate failures: ${fan.failures.join("; ")}`, "warning");
+				ctx.ui.notify(
+					`🧵 Fan-out done — ${fan.outcomes.filter((o) => o.ok).length}/${fan.outcomes.length} candidate patch(es) collected; arbitration next.`,
+					"info",
+				);
 			}
 			if (currentPhase.key === "fix-cand") {
 				const patch = gitIn(cwd, "diff").trim();
@@ -1777,6 +1894,7 @@ Tag the note with relevant keywords for vector search.
 		phaseStartTime = Date.now();
 		const first = phases[0];
 		currentPhase = first;
+		currentPhaseStartedAt = Date.now();
 
 		ctx.ui.notify(headline, "info");
 		for (const p of phases) {
@@ -1802,6 +1920,15 @@ Tag the note with relevant keywords for vector search.
 					// Same policy as every other phase: one retry on the fallback
 					// model before skipping (the old skip-direct lost the whole run
 					// when the very first phase was slow).
+					runPhaseRecords.push({
+						key: first.key,
+						label: first.label,
+						model: first.useFallback ? first.fallback : first.model,
+						verdict: "TIMEOUT",
+						retried: Boolean(first.retried),
+						blockedRetried: Boolean(first.blockedRetried),
+						durationMs: currentPhaseStartedAt ? Date.now() - currentPhaseStartedAt : undefined,
+					});
 					if (!first.retried) {
 						first.retried = true;
 						first.useFallback = true;
@@ -2278,9 +2405,13 @@ It runs REPRODUCE → LOCALIZE → FIX → VERIFY and only reports FIXED with a 
 			// Opt-in multi-candidate FIX: `--candidates N` (2..4). Diversity
 			// proposes (N model families patch independently), the oracle disposes
 			// (a real run arbitrates). Cost-disciplined: default stays 1.
+			const wantParallel = /(^|s)--parallel/.test(raw);
 			const candMatch = raw.match(/(^|\s)--candidates[= ](\d)\b/);
 			let candidates = candMatch ? Math.max(1, Math.min(4, Number(candMatch[2]))) : 1;
-			const cleaned = raw.replace(/(^|\s)--candidates[= ]\d\b/g, " ").trim();
+			const cleaned = raw
+				.replace(/(^|\s)--candidates[= ]\d\b/g, " ")
+				.replace(/(^|s)--parallel/g, " ")
+				.trim();
 			const cwd = ctx.cwd || process.cwd();
 
 			const state: FailingState = parseFailingState(cleaned, { cwd });
@@ -2314,13 +2445,22 @@ It runs REPRODUCE → LOCALIZE → FIX → VERIFY and only reports FIXED with a 
 			}
 
 			await ensurePlansDir();
-			const phases = buildDebugPhases(state, candidates);
+			const parallel = wantParallel && candidates > 1;
+			const phases = buildDebugPhases(state, candidates, parallel);
 			if (candidates > 1) {
 				candidateContext = {
 					total: candidates,
 					reproCmd: state.failingTest?.trim() || state.reproCommand?.trim() || undefined,
 					list: [],
 					arbitrated: false,
+					parallelSpecs: parallel
+						? pickCandidateModels(readRoutingConfig(), candidates).map((model, i) => ({
+								model,
+								instruction: `${debugPhaseInstructions(state).fix}
+
+**Candidate protocol:** you are INDEPENDENT candidate ${i + 1} of ${candidates}, working in an isolated worktree. A REAL run arbitrates between candidates afterwards. Make your own best minimal fix.`,
+							}))
+						: undefined,
 				};
 			}
 			startGenericOrchestration(
@@ -2378,7 +2518,16 @@ With no runnable check at all, the result is honestly labelled UNVERIFIED.`,
 
 			await ensurePlansDir();
 			fixContext = { state, oracleRan: false };
+			// Tiered budget (measured: hard instances burned the whole run in the
+			// shot, leaving the escalation nothing): triage decides how long the
+			// single shot deserves before the pipeline takes over.
+			const t = triage({ text: raw, hasFailingState: Boolean(state.failingTest || state.reproCommand) });
 			const shot = genericPhase("shot", "🎯 Phase 1 — SINGLE SHOT", "code", "code", singleShotInstruction(state));
+			shot.timeoutMs = shotBudgetMs(t.route);
+			ctx.ui.notify(
+				`⏱️ Shot budget: ${Math.round(shotBudgetMs(t.route) / 60000)} min (triage: ${t.reason}).`,
+				"info",
+			);
 			// A real single shot legitimately runs 8–18 min (measured on the
 			// baselines); the flat 10 min phase cap was killing it mid-work.
 			shot.timeoutMs = 25 * 60 * 1000;
@@ -2445,6 +2594,43 @@ It reports SUCCESS only when a real run meets the acceptance criteria — otherw
 	});
 
 	// ─── /sandbox Command — inspect / prepare the guaranteed environment ──
+
+	// ─── /runs Command — exploit the telemetry (continuous measurement) ──
+
+	pi.registerCommand("runs", {
+		description: "Aggregate .phi/runs.jsonl — green-at-shot rate, escalations, durations, slowest phases",
+		handler: async (_args, ctx) => {
+			const cwd = ctx.cwd || process.cwd();
+			let blob = "";
+			try {
+				blob = readFileSync(join(cwd, ".phi", "runs.jsonl"), "utf-8");
+			} catch {
+				/* no file yet */
+			}
+			ctx.ui.notify(summarizeRuns(parseRunsJsonl(blob)), "info");
+		},
+	});
+
+	// ─── /fix suggestion — the measured-best default, surfaced once ─────
+	// A message that reads like a bug report gets a one-line tip pointing at
+	// /fix (never worse than a single shot, oracle-verified). Suggest once per
+	// session, never during an orchestration, and NEVER intercept the input.
+	let fixHintShown = false;
+	pi.on("input", async (event: any, ctx: any) => {
+		try {
+			const text = typeof event?.text === "string" ? event.text : "";
+			if (!fixHintShown && !orchestrationActive && looksLikeBugReport(text)) {
+				fixHintShown = true;
+				ctx.ui.notify(
+					"💡 This looks like a bug report — `/fix <the same text>` runs one attempt, verifies it in the sandbox oracle, and escalates to the full /debug pipeline only if a real run stays red.",
+					"info",
+				);
+			}
+		} catch {
+			/* a hint must never break input */
+		}
+		return undefined; // pass through untouched
+	});
 
 	pi.registerCommand("sandbox", {
 		description:

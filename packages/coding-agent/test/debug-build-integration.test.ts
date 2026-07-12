@@ -381,6 +381,24 @@ describe("/debug + /build integration", () => {
 		}
 	}, 30000);
 
+	it("/debug inserts the REPRO-AUDIT adversary only for prose-constructed reproductions", async () => {
+		// Prose input → audit phase between REPRODUCE and LOCALIZE.
+		await cap.commands.get("debug")!("the parser drops unicode chars somehow", makeCtx(cap, tempDir));
+		await sleep(300);
+		await finishPhase({ verdict: "PASS", handoff: "REPRO-CMD: python repro_issue.py" });
+		expect(cap.sentMessages.at(-1)).toContain("REPRO-AUDIT agent");
+		await finishPhase({ verdict: "PASS", handoff: "REPRO-CMD: python repro_issue.py --extended" });
+		expect(cap.sentMessages.at(-1)).toContain("LOCALIZE agent");
+	});
+
+	it("/debug skips the audit when a failing test was supplied (ground truth)", async () => {
+		await cap.commands.get("debug")!("pytest tests/test_x.py::test_y", makeCtx(cap, tempDir));
+		await sleep(300);
+		await finishPhase({ verdict: "PASS", handoff: "reproduced" });
+		expect(cap.sentMessages.at(-1)).toContain("LOCALIZE agent");
+		expect(cap.sentMessages.join("\n")).not.toContain("REPRO-AUDIT");
+	});
+
 	it("/debug never opens /plan's review-fix cycle", async () => {
 		await cap.commands.get("debug")!("node repro.js", makeCtx(cap, tempDir));
 		await sleep(300);

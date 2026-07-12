@@ -85,6 +85,22 @@ export function parseReproCmd(handoff: string | null | undefined): string | unde
 	return cmd && cmd.length > 1 ? cmd : undefined;
 }
 
+/**
+ * Tiered shot budget (drift guard, measured on sympy/sphinx): a hard instance
+ * must fail FAST at the shot so the escalation inherits real budget; an easy
+ * one deserves a longer single attempt since escalation is unlikely.
+ */
+export function shotBudgetMs(triageRoute: "single-shot" | "debug" | "build" | "plan"): number {
+	switch (triageRoute) {
+		case "single-shot":
+			return 12 * 60 * 1000; // likely to finish here — give it room
+		case "debug":
+			return 8 * 60 * 1000;
+		default:
+			return 6 * 60 * 1000; // build-scale/hard: fail fast, escalate with budget left
+	}
+}
+
 /** Minimal shape of routing.json this module needs (kept structural). */
 export interface RoutingLike {
 	routes?: Record<string, { preferredModel?: string; fallback?: string } | undefined>;

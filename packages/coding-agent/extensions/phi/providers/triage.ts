@@ -54,6 +54,21 @@ export function estimateFiles(text: string): number {
  * decision out. Order matters — a forced mode wins, then a real failing state
  * (cheapest useful oracle), then build-scale, else single shot.
  */
+const BUG_SHAPE =
+	/\b(traceback|exception|stack ?trace|segfault|error:|fails?\b|failing|broken|crash(es|ed)?|bug\b|régression|regression|ne (marche|fonctionne) (pas|plus)|plante)\b/i;
+
+/**
+ * Does a free-form user message look like a bug report? Used to suggest /fix
+ * once (the measured-best default: never worse than a single shot, oracle-
+ * verified). Deliberately conservative — suggestion, never interception.
+ */
+export function looksLikeBugReport(text: string): boolean {
+	const t = text.trim();
+	if (!t || t.startsWith("/")) return false;
+	if (t.length < 15) return false;
+	return BUG_SHAPE.test(t);
+}
+
 export function triage(signals: TriageSignals): TriageDecision {
 	if (signals.forced) {
 		return {
