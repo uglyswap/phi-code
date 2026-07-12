@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.93.2] - 2026-07-12
+
+### Fixed
+
+- /fix: a single shot that changed NOTHING (text-only reply, zero edits — a
+  measured 91s failure mode) no longer ends UNVERIFIED; in a git repo with a
+  clean tree it ESCALATES to the full pipeline (nothing to verify = the work
+  was not done). The shot instruction now states that acting with tools is
+  mandatory and a textual plan forfeits the attempt. +1 integration test.
+
 ## [0.93.1] - 2026-07-12
 
 ### Fixed

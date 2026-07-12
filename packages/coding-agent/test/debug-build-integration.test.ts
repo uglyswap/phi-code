@@ -238,6 +238,18 @@ describe("/debug + /build integration", () => {
 		expect(cap.sentMessages[before]).toContain("REPRODUCE agent");
 	});
 
+	it("/fix escalates when the shot made NO changes in a git repo (nothing to verify)", async () => {
+		gitSetup(tempDir); // clean tree, real git repo
+		await cap.commands.get("fix")!("the widget renders wrong somehow", makeCtx(cap, tempDir));
+		await sleep(300);
+		const before = cap.sentMessages.length;
+		// The shot ends without editing anything and without declaring a repro.
+		await finishPhase({ verdict: "PASS", handoff: "here is my analysis (no edits)" });
+		const notes = cap.notifications.join("\n");
+		expect(notes).toContain("the single shot made NO changes");
+		expect(cap.sentMessages[before]).toContain("REPRODUCE agent");
+	});
+
 	it("/fix reports UNVERIFIED honestly when nothing is runnable", async () => {
 		await cap.commands.get("fix")!("the button label is wrong somewhere", makeCtx(cap, tempDir));
 		await sleep(300);
