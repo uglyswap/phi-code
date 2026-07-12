@@ -129,9 +129,13 @@ ${failing}
 **Do exactly this:**
 1. Read the relevant code and locate the root cause.
 2. Make the smallest change that addresses it. Do NOT edit tests. Every added guard/branch is a liability.
-3. You MAY use \`sandbox_run\` to check your work (the project's real environment) — recommended when a command is available.
-4. After your change, the orchestrator will run the reproduction and the project suite in the sandbox itself: your work is judged by those REAL runs, not by your confidence. If they are red, a full diagnostic pipeline takes over from your change.
-5. **Last action:** call \`phase_result\` with \`verdict: PASS\` and a one-line handoff describing what you changed and why.${DEBUG_RULES}`;
+3. If NO runnable check was provided above, WRITE a minimal reproduction script derived **literally from the issue** (copy its exact snippets/expected values — not your paraphrase) into an untracked file (e.g. \`repro_issue.py\`), and confirm with \`sandbox_run\` that it fails before your change / passes after.
+4. You MAY use \`sandbox_run\` to check your work at any point (the project's real environment).
+5. After your change, the orchestrator re-runs the reproduction (and the suite when known) in the sandbox itself: your work is judged by those REAL runs, not by your confidence. If they are red, a full diagnostic pipeline takes over from your change.
+6. **Last action:** call \`phase_result\` with \`verdict: PASS\` and a handoff describing what you changed — and, when you wrote a reproduction, its exact command on a machine-readable line:
+\`\`\`
+REPRO-CMD: <the exact command, e.g. python repro_issue.py>
+\`\`\`${DEBUG_RULES}`;
 }
 
 /**

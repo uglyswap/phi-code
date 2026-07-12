@@ -80,8 +80,12 @@ describe("singleShotInstruction (/fix phase 1)", () => {
 		expect(ins).toMatch(/Do NOT edit tests/i);
 	});
 	it("announces the driver-level oracle (judged by real runs, not confidence)", () => {
-		expect(ins).toMatch(/orchestrator will run the reproduction/i);
+		expect(ins).toMatch(/orchestrator re-runs the reproduction/i);
 		expect(ins).toMatch(/judged by those REAL runs/i);
+	});
+	it("instructs writing a LITERAL reproduction + REPRO-CMD when none was provided", () => {
+		expect(ins).toMatch(/literally from the issue/i);
+		expect(ins).toContain("REPRO-CMD:");
 	});
 	it("carries the shared execution-is-oracle rules", () => {
 		expect(ins).toMatch(/Execution is the only oracle/i);

@@ -315,10 +315,11 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	// untouched; "debug"/"build"/"fix" are driven by the separate linear generic
 	// driver so /plan's fragile review-fix + "/5" logic is never engaged for them.
 	let orchestrationMode: "plan" | "debug" | "build" | "fix" = "plan";
-	// /fix escalation state: the failing state the command started from, and
-	// whether the driver-level oracle already ran (it must run exactly once,
-	// after the single-shot phase, before the run can finish).
-	let fixContext: { state: FailingState; oracleRan: boolean } | null = null;
+	// /fix escalation state: the failing state the command started from, whether
+	// the driver-level oracle already ran (it must run exactly once, after the
+	// single-shot phase), and the reproduction the shot itself declared via its
+	// REPRO-CMD handoff line (prose inputs have no runnable check otherwise).
+	let fixContext: { state: FailingState; oracleRan: boolean; reproFromShot?: string } | null = null;
 	// /debug --candidates N state: each FIX candidate's captured patch, the
 	// reproduction command used for deterministic arbitration (from the input or
 	// the REPRODUCE handoff's REPRO-CMD line), and whether arbitration ran.
@@ -1359,7 +1360,8 @@ Tag the note with relevant keywords for vector search.
 		fixContext.oracleRan = true;
 		const cwd = ctx.cwd || process.cwd();
 		const sandbox = getSessionSandbox(cwd);
-		const reproCmd = fixContext.state.failingTest?.trim() || fixContext.state.reproCommand?.trim();
+		const reproCmd =
+			fixContext.state.failingTest?.trim() || fixContext.state.reproCommand?.trim() || fixContext.reproFromShot;
 		const suiteCmd = sandbox.recipe.test?.trim();
 
 		if (!sandbox.available() && (reproCmd || suiteCmd)) {
@@ -1643,6 +1645,15 @@ Tag the note with relevant keywords for vector search.
 		//   handoff line (used later for deterministic arbitration);
 		// - after each FIX candidate: capture its patch (git diff of tracked
 		//   files) and RESET the tree so the next candidate starts clean.
+		// /fix: the single shot may have WRITTEN its own reproduction (prose
+		// inputs) and declared it via REPRO-CMD — the driver oracle re-runs it.
+		if (fixContext && currentPhase?.key === "shot" && !fixContext.reproFromShot) {
+			fixContext.reproFromShot = parseReproCmd(outcome.handoff);
+			if (fixContext.reproFromShot) {
+				ctx.ui.notify(`\n🧷 Shot-declared reproduction registered: \`${fixContext.reproFromShot}\``, "info");
+			}
+		}
+
 		if (candidateContext && currentPhase) {
 			const cwd = ctx.cwd || process.cwd();
 			if (currentPhase.key === "reproduce" && !candidateContext.reproCmd) {

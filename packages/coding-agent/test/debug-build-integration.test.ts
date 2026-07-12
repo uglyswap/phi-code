@@ -226,6 +226,18 @@ describe("/debug + /build integration", () => {
 		expect(cap.notifications.join("\n")).toContain("/fix summary");
 	});
 
+	it("/fix uses the shot-declared REPRO-CMD as its oracle on prose input (red → escalates)", async () => {
+		await cap.commands.get("fix")!("the widget renders wrong somehow", makeCtx(cap, tempDir));
+		await sleep(300);
+		const before = cap.sentMessages.length;
+		// The single shot wrote its own reproduction and declared it — still red.
+		await finishPhase({ verdict: "PASS", handoff: `patched\nREPRO-CMD: node -e "process.exit(5)"` });
+		const notes = cap.notifications.join("\n");
+		expect(notes).toContain("Shot-declared reproduction registered");
+		expect(notes).toContain("escalating to the full /debug pipeline");
+		expect(cap.sentMessages[before]).toContain("REPRODUCE agent");
+	});
+
 	it("/fix reports UNVERIFIED honestly when nothing is runnable", async () => {
 		await cap.commands.get("fix")!("the button label is wrong somewhere", makeCtx(cap, tempDir));
 		await sleep(300);
