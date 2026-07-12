@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.93.1] - 2026-07-12
+
+### Fixed
+
+- /fix on PROSE input now has a real oracle: the single shot is instructed to
+  WRITE a literal reproduction (from the issue's exact snippets) and declare
+  it on a REPRO-CMD: handoff line; the driver oracle re-runs it. Without this,
+  prose inputs (e.g. SWE-bench problem statements) finished UNVERIFIED with
+  nothing to check. +2 tests.
+
 ## [0.93.0] - 2026-07-12
 
 ### Added — the escalation architecture the n=13 measurement demanded
