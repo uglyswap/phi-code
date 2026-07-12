@@ -126,6 +126,8 @@ export function singleShotInstruction(state: FailingState): string {
 **The problem:**
 ${failing}
 
+**You must ACT in this turn — call the read/edit/write tools and actually change the code. A textual plan or analysis with no edits counts as a FAILED shot (measured failure mode) and forfeits your attempt to the full pipeline.**
+
 **Do exactly this:**
 1. Read the relevant code and locate the root cause.
 2. Make the smallest change that addresses it. Do NOT edit tests. Every added guard/branch is a liability.

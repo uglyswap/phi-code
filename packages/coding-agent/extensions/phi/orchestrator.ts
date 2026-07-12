@@ -1364,6 +1364,20 @@ Tag the note with relevant keywords for vector search.
 			fixContext.state.failingTest?.trim() || fixContext.state.reproCommand?.trim() || fixContext.reproFromShot;
 		const suiteCmd = sandbox.recipe.test?.trim();
 
+		// A shot that changed NOTHING has nothing to verify — "UNVERIFIED" would be
+		// a lie of omission (measured: a text-only 91s shot ended UNVERIFIED with
+		// zero edits). In a git repo with a clean diff, escalate to the full
+		// pipeline instead: the work simply was not done.
+		const inGitRepo = passed(runCommand("git rev-parse --is-inside-work-tree", { cwd, timeoutMs: 15_000 }));
+		if (inGitRepo && !gitIn(cwd, "diff").trim() && !gitIn(cwd, "status --porcelain").trim()) {
+			ctx.ui.notify(
+				`\n🔺 **/fix escalating: the single shot made NO changes** — nothing to verify, the full /debug pipeline takes over.`,
+				"warning",
+			);
+			phaseQueue.push(...buildDebugPhases(fixContext.state));
+			return false; // dispatch REPRODUCE
+		}
+
 		if (!sandbox.available() && (reproCmd || suiteCmd)) {
 			ctx.ui.notify(
 				`\n⚠️ **/fix oracle: sandbox unavailable** (${sandbox.reason}) — the single shot cannot be verified. Treating it as UNVERIFIED.`,
