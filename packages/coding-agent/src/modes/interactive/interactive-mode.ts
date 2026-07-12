@@ -246,6 +246,12 @@ export class InteractiveMode {
 	private version: string;
 	private isInitialized = false;
 	private onInputCallback?: (text: string) => void;
+	// Submissions typed while the main loop was busy (prompt preflight) or a
+	// session rebuild was in flight (/new). Queued and replayed instead of
+	// silently dropped — a prompt typed right after /new used to disappear
+	// with no feedback.
+	private pendingSubmissions: string[] = [];
+	private sessionTransitioning = false;
 	// Input mode: "act" sends messages to the agent directly; "plan" routes the next
 	// message through the /plan orchestrator (5 sequential phases, one model per phase).
 	// Toggled with Tab (when the editor is empty); shown by the footer Act/Plan indicator.
@@ -2687,7 +2693,13 @@ export class InteractiveMode {
 			// First, move any pending bash components to chat
 			this.flushPendingBashComponents();
 
-			if (this.onInputCallback) {
+			if (this.sessionTransitioning || !this.onInputCallback) {
+				// The main loop is busy (prompt preflight) or the session is being
+				// rebuilt (/new in flight): queue and replay once ready instead of
+				// dropping the message on the floor.
+				this.pendingSubmissions.push(text);
+				this.showStatus("Message queued — sending when the session is ready");
+			} else {
 				this.onInputCallback(text);
 			}
 			this.editor.addToHistory?.(text);
@@ -3266,12 +3278,33 @@ export class InteractiveMode {
 	}
 
 	async getUserInput(): Promise<string> {
+		// Replay submissions queued while the loop was busy — but never during a
+		// session rebuild (drainPendingSubmissions fires when it completes).
+		if (!this.sessionTransitioning) {
+			const queued = this.pendingSubmissions.shift();
+			if (queued !== undefined) {
+				return queued;
+			}
+		}
 		return new Promise((resolve) => {
 			this.onInputCallback = (text: string) => {
 				this.onInputCallback = undefined;
 				resolve(text);
 			};
 		});
+	}
+
+	/**
+	 * Hand one queued submission to the waiting main loop, if any. Called when
+	 * a session transition completes; the loop drains the rest through
+	 * getUserInput() as it comes back around.
+	 */
+	private drainPendingSubmissions(): void {
+		if (this.sessionTransitioning) return;
+		const callback = this.onInputCallback;
+		if (!callback || this.pendingSubmissions.length === 0) return;
+		const next = this.pendingSubmissions.shift() as string;
+		callback(next);
 	}
 
 	private rebuildChatFromMessages(): void {
@@ -5429,6 +5462,9 @@ export class InteractiveMode {
 			this.loadingAnimation = undefined;
 		}
 		this.statusContainer.clear();
+		// While the runtime rebuilds, submissions are queued (not sent into the
+		// half-torn-down session) and replayed by the finally below.
+		this.sessionTransitioning = true;
 		try {
 			const result = await this.runtimeHost.newSession();
 			if (result.cancelled) {
@@ -5440,6 +5476,9 @@ export class InteractiveMode {
 			this.ui.requestRender();
 		} catch (error: unknown) {
 			await this.handleFatalRuntimeError("Failed to create session", error);
+		} finally {
+			this.sessionTransitioning = false;
+			this.drainPendingSubmissions();
 		}
 	}
 
