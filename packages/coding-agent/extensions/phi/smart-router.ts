@@ -65,23 +65,6 @@ export default function smartRouterExtension(pi: ExtensionAPI) {
 		}
 	}
 
-	/**
-	 * Resolve a model name to an available model.
-	 * If the preferred model exists in the registry, use it.
-	 * Otherwise, fall back to the current model.
-	 */
-	function _resolveModel(preferredModel: string, ctx: any): string {
-		try {
-			const available = ctx.modelRegistry?.getAvailable?.() || [];
-			if (available.some((m: any) => m.id === preferredModel)) {
-				return preferredModel;
-			}
-			return ctx.model?.id || preferredModel;
-		} catch {
-			return ctx.model?.id || preferredModel;
-		}
-	}
-
 	// ─── Input Event ─────────────────────────────────────────────────
 
 	pi.on("input", async (event, ctx) => {

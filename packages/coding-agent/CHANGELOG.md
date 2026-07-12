@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.97.0] - 2026-07-12
+
+### Changed — the remaining debt from the line-by-line review
+
+1. **One provider catalog** (`extensions/phi/providers/catalog.ts`): /setup,
+   /phi-init and /benchmark each hardcoded their own provider list and they
+   had already drifted (benchmark used a phantom `anthropic-openai` id;
+   init's env vars diverged). All three now project from a single catalog;
+   bench targets are `benchModels` entries validated as a subset of the
+   provider's known models.
+2. **One wizard**: /phi-init's 600-line wizard was a drifting near-copy of
+   /setup — with its own models.json reader whose `catch → {}` silently
+   WIPED a commented config on the next write. /phi-init now scaffolds
+   ~/.phi (dirs, bundled agents, AGENTS.md template) and delegates to the
+   exact same wizard as /setup (`runSetupWizard` export). /plan-models stays,
+   rebuilt on the shared picker/routing helpers — it now writes the modern
+   routing.json shape ($schema, version, derived debug route).
+3. **sigma-agents dependency un-pinned from the past**: the declared range
+   `^0.1.7` cannot match the published 0.2.1 (caret on 0.x), so global
+   installs silently ran sigma-agents 0.1.10 while the extensions were
+   written against 0.2.1. Range is now `^0.2.1` (sigma-skills aligned to
+   `^0.1.5`).
+4. **/debug no longer shadowed in the TUI**: the interactive debug overlay
+   claimed the bare `/debug` before extension dispatch, so the debug
+   orchestrator's own `/debug` could never be reached bare. The overlay now
+   yields when an extension registers /debug (overlay stays available with
+   extensions disabled).
+5. **`/new please` no longer leaks to the model as prose**: a bare builtin
+   invoked with arguments (exact-match ladder miss) silently became a chat
+   message. The TUI now surfaces a usage warning instead — unless an
+   extension owns a command with that name. Pure helper
+   `matchBareBuiltinWithArgs` + `BARE_BUILTIN_COMMAND_NAMES` in
+   core/slash-commands.ts.
+6. **Dead code removed**: smart-router's never-called `_resolveModel`.
+7. **repository.url fixed** on tui/mom/pods package.json (still pointed at
+   upstream pi-mono forks).
+
+13 new tests (catalog invariants incl. bench-subset, bare-builtin matcher
+matrix); full suite green (1536).
+
 ## [0.96.1] - 2026-07-12
 
 ### Fixed — ten correctness bugs from the exhaustive line-by-line review

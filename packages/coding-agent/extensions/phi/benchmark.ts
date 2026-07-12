@@ -21,6 +21,7 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, getApiKeyStore } from "phi-code";
+import { getProviderCatalog } from "./providers/catalog.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -340,56 +341,9 @@ function extractCode(response: string): string {
 	return match ? match[1].trim() : response.trim();
 }
 
-interface ProviderConfig {
-	name: string;
-	envVar: string;
-	baseUrl: string;
-	models: string[];
-}
-
-function getProviderConfigs(): ProviderConfig[] {
-	return [
-		{
-			name: "alibaba-codingplan",
-			envVar: "ALIBABA_CODING_PLAN_KEY",
-			baseUrl: "https://coding-intl.dashscope.aliyuncs.com/v1",
-			models: [
-				"qwen3.5-plus",
-				"qwen3-max-2026-01-23",
-				"qwen3-coder-plus",
-				"qwen3-coder-next",
-				"kimi-k2.5",
-				"glm-5",
-				"glm-4.7",
-				"MiniMax-M2.5",
-			],
-		},
-		{
-			name: "openai",
-			envVar: "OPENAI_API_KEY",
-			baseUrl: "https://api.openai.com/v1",
-			models: ["gpt-4o", "gpt-4o-mini"],
-		},
-		{
-			name: "anthropic-openai",
-			envVar: "ANTHROPIC_API_KEY",
-			baseUrl: "https://api.anthropic.com/v1",
-			models: [],
-		},
-		{
-			name: "openrouter",
-			envVar: "OPENROUTER_API_KEY",
-			baseUrl: "https://openrouter.ai/api/v1",
-			models: [],
-		},
-		{
-			name: "groq",
-			envVar: "GROQ_API_KEY",
-			baseUrl: "https://api.groq.com/openai/v1",
-			models: [],
-		},
-	];
-}
+// Provider list comes from the shared catalog (providers/catalog.ts) — the
+// same source /setup and /phi-init use. Cloud entries expose `benchModels`
+// (the subset /benchmark exercises); local servers are discovered separately.
 
 async function getAvailableModels(): Promise<Array<{ id: string; provider: string; baseUrl: string; apiKey: string }>> {
 	const models: Array<{ id: string; provider: string; baseUrl: string; apiKey: string }> = [];
@@ -398,21 +352,23 @@ async function getAvailableModels(): Promise<Array<{ id: string; provider: strin
 	// models.json via /setup or /keys (the store resolves env-var names and
 	// "!cmd" values the same way the model registry does at request time).
 	const store = getApiKeyStore();
-	for (const provider of getProviderConfigs()) {
+	for (const provider of getProviderCatalog()) {
+		if (provider.local) continue;
+		const benchModels = provider.benchModels ?? [];
 		let apiKey = process.env[provider.envVar];
 		if (!apiKey) {
 			try {
-				apiKey = store.getKey(provider.name);
+				apiKey = store.getKey(provider.id);
 			} catch {
 				/* unreadable models.json — env-only behavior */
 			}
 		}
 		if (!apiKey) continue;
 
-		for (const modelId of provider.models) {
+		for (const modelId of benchModels) {
 			models.push({
 				id: modelId,
-				provider: provider.name,
+				provider: provider.id,
 				baseUrl: provider.baseUrl,
 				apiKey,
 			});
@@ -744,8 +700,8 @@ Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`,
 			// Get available models (validates API keys are non-empty and reasonable length)
 			const available = await getAvailableModels();
 			if (available.length === 0) {
-				const providers = getProviderConfigs();
-				const hint = providers
+				const hint = getProviderCatalog()
+					.filter((p) => !p.local)
 					.map((p) => `  ${p.envVar}: ${process.env[p.envVar] ? "set but no models configured" : "not set"}`)
 					.join("\n");
 				ctx.ui.notify(

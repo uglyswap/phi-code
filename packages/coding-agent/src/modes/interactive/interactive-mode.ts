@@ -79,7 +79,7 @@ import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "../../core/provider-display-nam
 import type { ResourceDiagnostic } from "../../core/resource-loader.js";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.js";
 import { type SessionContext, SessionManager } from "../../core/session-manager.js";
-import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.js";
+import { BUILTIN_SLASH_COMMANDS, matchBareBuiltinWithArgs } from "../../core/slash-commands.js";
 import type { SourceInfo } from "../../core/source-info.js";
 import type { TruncationResult } from "../../core/tools/truncate.js";
 import { getChangelogPath, getNewEntries, parseChangelog } from "../../utils/changelog.js";
@@ -2594,9 +2594,17 @@ export class InteractiveMode {
 				return;
 			}
 			if (text === "/debug") {
-				this.handleDebugCommand();
-				this.editor.setText("");
-				return;
+				// An extension may own /debug (the debug orchestrator does). The TUI
+				// debug overlay only claims the bare form when nothing else does —
+				// otherwise it would silently shadow the extension command.
+				const extensionOwnsDebug = this.session.extensionRunner
+					.getRegisteredCommands()
+					.some((command) => command.name === "debug" || command.invocationName === "debug");
+				if (!extensionOwnsDebug) {
+					this.handleDebugCommand();
+					this.editor.setText("");
+					return;
+				}
 			}
 			if (text === "/arminsayshi") {
 				this.handleArminSaysHi();
@@ -2616,6 +2624,21 @@ export class InteractiveMode {
 			if (text === "/quit") {
 				this.editor.setText("");
 				await this.shutdown();
+				return;
+			}
+
+			// A bare builtin invoked with arguments used to leak to the model as
+			// prose ("/new please"). Surface it instead — unless an extension
+			// registered a command with that name (it then owns the arguments).
+			const bareWithArgs = matchBareBuiltinWithArgs(text);
+			if (
+				bareWithArgs &&
+				!this.session.extensionRunner
+					.getRegisteredCommands()
+					.some((command) => command.name === bareWithArgs || command.invocationName === bareWithArgs)
+			) {
+				this.showWarning(`/${bareWithArgs} takes no arguments. Run \`/${bareWithArgs}\` alone.`);
+				this.editor.setText(text);
 				return;
 			}
 
