@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.94.0] - 2026-07-12
+
+### Fixed — three defects the run telemetry caught live
+
+The .phi/runs.jsonl telemetry (0.93.0) paid for itself on its first outing: it
+showed /fix shots being killed mid-work by the flat 10-min phase cap (601s run,
+empty phases, lost REPRO-CMD handoff), oracles going blind after those aborts,
+and escalations burning ~10 min re-confirming a reproduction the driver itself
+had just executed.
+
+- **Per-phase timeout** (OrchestratorPhase.timeoutMs): the /fix single shot now
+  gets 25 min (measured: real shots run 8-18 min). The FIRST phase of a generic
+  run also gains the standard retry-on-fallback before being skipped (it was
+  skip-direct).
+- **Oracle fallback reproduction**: when the shot's REPRO-CMD handoff was lost
+  but the conventional repro_issue.py exists, the oracle runs it instead of
+  finishing UNVERIFIED blind.
+- **Escalation skips REPRODUCE**: the oracle just executed the red reproduction;
+  /fix now goes straight to LOCALIZE -> FIX -> VERIFY with the red run seeded,
+  saving ~10 min under tight budgets.
+
+Full suite green (1472).
+
 ## [0.93.2] - 2026-07-12
 
 ### Fixed
