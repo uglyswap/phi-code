@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.97.1] - 2026-07-12
+
+### Fixed — a message typed during a session transition is queued, not lost
+
+Reported live: type a message right after `/new` (while the runtime is still
+rebuilding, e.g. combined with a quick model switch) and it vanished — the
+editor cleared, nothing happened, no feedback. Two swallow paths existed in
+the TUI: a submission while the main loop was busy in prompt preflight hit an
+unarmed input callback and went nowhere, and a submission while `/new` was
+rebuilding the runtime went into the half-torn-down session.
+
+Both now queue: `pendingSubmissions` + a `sessionTransitioning` flag around
+the `/new` rebuild. Queued messages show "Message queued — sending when the
+session is ready" and are replayed to the main loop as soon as it is (the
+rebuild's `finally` drains, and `getUserInput()` drains on every loop
+iteration — never during a transition).
+
+4 new tests on top of the 5 that locked the submit path during diagnosis
+(queue during transition, drain by the loop, no drain mid-transition, end to
+end replay after `/new`).
+
 ## [0.97.0] - 2026-07-12
 
 ### Changed — the remaining debt from the line-by-line review
