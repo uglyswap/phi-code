@@ -338,6 +338,14 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	// invocation count (reset at orchestration start, flushed at finish).
 	let runPhaseRecords: PhaseRecord[] = [];
 	let sandboxExecCount = 0;
+	// Cumulative sandbox execution time this orchestration (drift guard #2) and
+	// its budget; per-call cap (#4) is tightenable for batch harnesses via env.
+	let sandboxExecMs = 0;
+	const SANDBOX_BUDGET_MS = Math.max(
+		1_000,
+		Number(process.env.PHI_SANDBOX_BUDGET_MS ?? 20 * 60 * 1000) || 20 * 60 * 1000,
+	);
+	const SANDBOX_MAX_TIMEOUT_S = Math.max(30, Number(process.env.PHI_SANDBOX_MAX_TIMEOUT_S ?? 1800) || 1800);
 
 	/** Run a git command in cwd; returns stdout ("" on any failure). */
 	function gitIn(cwd: string, args: string): string {
@@ -471,11 +479,29 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const p = params as { command: string; timeoutSeconds?: number };
 			const cwd = ctx?.cwd || process.cwd();
+			// Guard #2 against runtime drift: a cumulative execution budget per
+			// orchestration. Even with async runs, an agent chaining long commands
+			// can eat a whole session — beyond the budget it must conclude with
+			// what it has. (Measured: back-to-back long runs drifted a 25-min cap
+			// to 6h18 before the async fix.)
+			if (orchestrationActive && sandboxExecMs >= SANDBOX_BUDGET_MS) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `SANDBOX BUDGET EXHAUSTED — ${Math.round(sandboxExecMs / 60000)} min of cumulative execution used this run (budget ${Math.round(SANDBOX_BUDGET_MS / 60000)} min). No further runs this orchestration: conclude with the evidence you already have, honestly (BLOCKED/PARTIAL if unverified).`,
+						},
+					],
+					details: { verdict: "BUDGET_EXHAUSTED", budgetMs: SANDBOX_BUDGET_MS, usedMs: sandboxExecMs },
+				};
+			}
 			if (orchestrationActive) sandboxExecCount++;
 			const sandbox = getSessionSandbox(cwd);
-			const result = sandbox.exec(p.command, {
-				timeoutMs: Math.max(1, Math.min(1800, p.timeoutSeconds ?? 300)) * 1000,
+			// Guard #4: per-call cap, tightenable for batch harnesses via env.
+			const result = await sandbox.execAsync(p.command, {
+				timeoutMs: Math.max(1, Math.min(SANDBOX_MAX_TIMEOUT_S, p.timeoutSeconds ?? 300)) * 1000,
 			});
+			if (orchestrationActive) sandboxExecMs += result.durationMs;
 			const verdict = !sandbox.available()
 				? "UNAVAILABLE"
 				: result.timedOut
@@ -1738,6 +1764,7 @@ Tag the note with relevant keywords for vector search.
 		if (mode !== "debug") candidateContext = null;
 		runPhaseRecords = [];
 		sandboxExecCount = 0;
+		sandboxExecMs = 0;
 		setOrchestrationActive(true);
 		phasePending = true;
 		originalModel = ctx.model || null;

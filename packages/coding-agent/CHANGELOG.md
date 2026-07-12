@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.95.0] - 2026-07-12
+
+### Fixed — the 6h-drift class of failures (measured on seaborn-2848)
+
+sandbox_run executed commands with spawnSync, which blocks Node's event loop:
+no JS timer (session timeouts, phase timeouts, harness watchdogs) can fire while
+a command runs. Back-to-back long executions drifted a 25-minute cap to 6h18.
+Four layered defences, per the post-mortem:
+
+- **Root fix:** execution.ts gains runCommandAsync/runArgvAsync (spawn-based,
+  event loop stays alive, the timeout kills the whole process TREE via
+  taskkill /T on Windows). Sandbox gains execAsync (all three backends);
+  sandbox_run now awaits execAsync. Regression test proves a timer fires DURING
+  a child run.
+- **Cumulative execution budget per orchestration** (default 20 min, env
+  PHI_SANDBOX_BUDGET_MS): beyond it, sandbox_run refuses with BUDGET_EXHAUSTED
+  and instructs the agent to conclude honestly with the evidence it has.
+- **Per-call cap tightenable for batch harnesses** (env PHI_SANDBOX_MAX_TIMEOUT_S,
+  default 1800s; the SWE-bench harness now sets 180s).
+- **External watchdog in the harness driver** (timeout -k 30 4500): an internal
+  guard can never protect against itself; a hard kill from another process can.
+
++8 tests (async twins incl. event-loop-liveness regression, budget refusal).
+
 ## [0.94.0] - 2026-07-12
 
 ### Fixed — three defects the run telemetry caught live

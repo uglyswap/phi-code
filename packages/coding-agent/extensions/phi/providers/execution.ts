@@ -8,9 +8,101 @@
  * itself is exercised with trivial real commands.
  */
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 const DEFAULT_MAX_BUFFER = 32 * 1024 * 1024;
+
+/**
+ * Kill a spawned process AND its children. On Windows, child.kill() only hits
+ * the direct child (a shell) — the actual workload (docker, pytest…) survives;
+ * taskkill /T fells the whole tree.
+ */
+function killTree(pid: number | undefined): void {
+	if (!pid) return;
+	try {
+		if (process.platform === "win32") {
+			spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true });
+		} else {
+			process.kill(-pid, "SIGKILL");
+		}
+	} catch {
+		/* best effort */
+	}
+}
+
+/**
+ * ASYNC command run — the drift fix. spawnSync blocks Node's event loop, so no
+ * JS timer (session timeouts, phase timeouts, a harness Promise.race) can fire
+ * while a command runs; long back-to-back runs measured a 25-minute cap
+ * drifting to 6h18. spawn keeps the loop alive: every watchdog fires on time,
+ * and the timeout here kills the whole process tree itself. Same contract as
+ * runCommand: never throws, everything comes back as data.
+ */
+export function runCommandAsync(command: string, options: RunOptions = {}): Promise<CommandResult> {
+	return spawnAsync(command, undefined, options, command);
+}
+
+/** ASYNC no-shell argv run — twin of runArgv (used for docker invocations). */
+export function runArgvAsync(
+	file: string,
+	args: string[],
+	options: RunOptions & { label?: string } = {},
+): Promise<CommandResult> {
+	return spawnAsync(file, args, options, options.label ?? `${file} ${args.join(" ")}`.trim());
+}
+
+function spawnAsync(
+	fileOrCommand: string,
+	args: string[] | undefined,
+	options: RunOptions,
+	label: string,
+): Promise<CommandResult> {
+	const start = Date.now();
+	const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+	return new Promise((resolve) => {
+		let stdout = "";
+		let stderr = "";
+		let timedOut = false;
+		let settled = false;
+		const child = args
+			? spawn(fileOrCommand, args, {
+					cwd: options.cwd,
+					env: options.env ?? process.env,
+					shell: false,
+					windowsHide: true,
+				})
+			: spawn(fileOrCommand, { cwd: options.cwd, env: options.env ?? process.env, shell: true, windowsHide: true });
+		const timer = setTimeout(() => {
+			timedOut = true;
+			killTree(child.pid);
+		}, timeoutMs);
+		const cap = (s: string, d: unknown) => {
+			const next = s + String(d);
+			return next.length > DEFAULT_MAX_BUFFER ? next.slice(-DEFAULT_MAX_BUFFER) : next;
+		};
+		child.stdout?.on("data", (d) => {
+			stdout = cap(stdout, d);
+		});
+		child.stderr?.on("data", (d) => {
+			stderr = cap(stderr, d);
+		});
+		const finish = (exitCode: number | null, extraErr?: string) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			resolve({
+				command: label,
+				exitCode: timedOut ? null : exitCode,
+				stdout,
+				stderr: extraErr ? `${extraErr}\n${stderr}` : stderr,
+				durationMs: Date.now() - start,
+				timedOut,
+			});
+		};
+		child.on("error", (err) => finish(null, err.message));
+		child.on("close", (code) => finish(code));
+	});
+}
 
 export interface CommandResult {
 	command: string;
