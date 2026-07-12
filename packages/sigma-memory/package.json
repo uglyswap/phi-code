@@ -1,20 +1,23 @@
 {
 	"name": "sigma-memory",
-	"version": "0.2.8",
+	"version": "0.2.9",
 	"description": "Persistent memory for Phi Code — embedded vector search + Ontology graph + Markdown notes",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
 	"scripts": {
 		"build": "tsc",
 		"clean": "rm -rf dist",
-		"test": "tsx --test test/*.test.ts"
+		"test": "tsx --test test/*.test.ts",
+		"prepublishOnly": "npm run build"
 	},
 	"dependencies": {
 		"@huggingface/transformers": "^3.8.1",
+		"proper-lockfile": "^4.1.2",
 		"sql.js": "^1.14.1"
 	},
 	"devDependencies": {
 		"@types/node": "^20.0.0",
+		"@types/proper-lockfile": "^4.1.4",
 		"typescript": "^5.4.0"
 	},
 	"repository": {

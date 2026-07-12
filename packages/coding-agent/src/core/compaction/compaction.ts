@@ -612,28 +612,56 @@ export async function generateSummary(
 		.map((c) => c.text)
 		.join("\n");
 
-	// Anti-drift guard: if a previous summary exists and the new one collapses
-	// (loses >40% of its size, or drops file paths it referenced), keep the union
-	// instead of silently discarding intent. Backward compatible: no previousSummary
-	// means we return the new summary unchanged.
-	if (previousSummary) {
-		const previousPaths = extractFilePaths(previousSummary);
-		const newPaths = extractFilePaths(textContent);
-		const lostPaths = [...previousPaths].filter((p) => !newPaths.has(p));
-		const shrankTooMuch = textContent.length < previousSummary.length * 0.6;
+	return resolveSummaryUnion(previousSummary, textContent);
+}
 
-		if (shrankTooMuch || lostPaths.length > 0) {
-			if (process.env.PHI_DEBUG) {
-				const reason = shrankTooMuch
-					? `summary shrank to ${textContent.length}/${previousSummary.length} chars (<60%)`
-					: `summary dropped ${lostPaths.length} file path(s): ${lostPaths.join(", ")}`;
-				console.warn(`[compaction] preserving union of previous + new summary (${reason})`);
-			}
-			return `${previousSummary}\n\n---\n\n## Updated Summary\n\n${textContent}`;
+/** Hard ceiling for the anti-drift union so repeated unions cannot snowball. */
+const SUMMARY_UNION_CAP_CHARS = 60_000;
+
+/**
+ * Anti-drift guard: if a previous summary exists and the new one collapses
+ * (loses >40% of its size, or drops file paths it referenced), keep the union
+ * instead of silently discarding intent. Backward compatible: no previousSummary
+ * means we return the new summary unchanged.
+ *
+ * The union is capped: it becomes the NEXT compaction's previousSummary, and
+ * since a union is always bigger than a fresh summary, the <60% check would
+ * re-trigger on every following compaction and the summary would grow
+ * monotonically without bound. Past SUMMARY_UNION_CAP_CHARS the newest
+ * summary wins (the update prompt already instructs the model to preserve
+ * prior content; the union is a best-effort safety net, not a guarantee).
+ *
+ * Exported for tests.
+ */
+export function resolveSummaryUnion(previousSummary: string | undefined, textContent: string): string {
+	if (!previousSummary) return textContent;
+
+	// Cap check FIRST: when the union is impossible anyway, skip the drift
+	// analysis entirely — extractFilePaths backtracks quadratically on long
+	// runs without separators, so it must never see unbounded input.
+	if (previousSummary.length + textContent.length > SUMMARY_UNION_CAP_CHARS) {
+		if (process.env.PHI_DEBUG) {
+			console.warn(
+				`[compaction] union cap reached (${previousSummary.length + textContent.length} > ${SUMMARY_UNION_CAP_CHARS} chars); keeping newest summary only`,
+			);
 		}
+		return textContent;
 	}
 
-	return textContent;
+	const previousPaths = extractFilePaths(previousSummary);
+	const newPaths = extractFilePaths(textContent);
+	const lostPaths = [...previousPaths].filter((p) => !newPaths.has(p));
+	const shrankTooMuch = textContent.length < previousSummary.length * 0.6;
+
+	if (!shrankTooMuch && lostPaths.length === 0) return textContent;
+
+	if (process.env.PHI_DEBUG) {
+		const reason = shrankTooMuch
+			? `summary shrank to ${textContent.length}/${previousSummary.length} chars (<60%)`
+			: `summary dropped ${lostPaths.length} file path(s): ${lostPaths.join(", ")}`;
+		console.warn(`[compaction] preserving union of previous + new summary (${reason})`);
+	}
+	return `${previousSummary}\n\n---\n\n## Updated Summary\n\n${textContent}`;
 }
 
 /**

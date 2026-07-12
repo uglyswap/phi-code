@@ -20,7 +20,7 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "phi-code";
+import { type ExtensionAPI, type ExtensionContext, getApiKeyStore } from "phi-code";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -394,9 +394,19 @@ function getProviderConfigs(): ProviderConfig[] {
 async function getAvailableModels(): Promise<Array<{ id: string; provider: string; baseUrl: string; apiKey: string }>> {
 	const models: Array<{ id: string; provider: string; baseUrl: string; apiKey: string }> = [];
 
-	// 1. Cloud providers via env vars
+	// 1. Cloud providers via env vars, falling back to keys stored in
+	// models.json via /setup or /keys (the store resolves env-var names and
+	// "!cmd" values the same way the model registry does at request time).
+	const store = getApiKeyStore();
 	for (const provider of getProviderConfigs()) {
-		const apiKey = process.env[provider.envVar];
+		let apiKey = process.env[provider.envVar];
+		if (!apiKey) {
+			try {
+				apiKey = store.getKey(provider.name);
+			} catch {
+				/* unreadable models.json — env-only behavior */
+			}
+		}
 		if (!apiKey) continue;
 
 		for (const modelId of provider.models) {
@@ -409,33 +419,27 @@ async function getAvailableModels(): Promise<Array<{ id: string; provider: strin
 		}
 	}
 
-	// 2. Local providers (LM Studio, Ollama) — auto-detect via models.json
-	const { join } = await import("node:path");
-	const { homedir } = await import("node:os");
-	const { readFileSync, existsSync } = await import("node:fs");
-
-	const modelsJsonPath = join(homedir(), ".phi", "agent", "models.json");
-	if (existsSync(modelsJsonPath)) {
-		try {
-			const config = JSON.parse(readFileSync(modelsJsonPath, "utf-8"));
-			if (config.providers) {
-				for (const [id, providerConfig] of Object.entries<any>(config.providers)) {
-					const baseUrl = providerConfig.baseUrl || "";
-					const apiKey = providerConfig.apiKey || "local";
-					if (providerConfig.models?.length > 0) {
-						for (const m of providerConfig.models) {
-							const modelId = typeof m === "string" ? m : m.id;
-							// Skip if already added from env vars
-							if (!models.some((existing) => existing.id === modelId && existing.baseUrl === baseUrl)) {
-								models.push({ id: modelId, provider: id, baseUrl, apiKey });
-							}
-						}
-					}
+	// 2. Local providers (LM Studio, Ollama) — auto-detect via models.json,
+	// read through ApiKeyStore so // comments and trailing commas are
+	// tolerated and PHI_AGENT_DIR overrides are honored.
+	try {
+		for (const id of store.listProviders()) {
+			const providerConfig = store.getProvider(id);
+			if (!providerConfig) continue;
+			const baseUrl = providerConfig.baseUrl || "";
+			const apiKey = store.getKey(id) || "local";
+			if (!providerConfig.models || providerConfig.models.length === 0) continue;
+			for (const m of providerConfig.models) {
+				const modelId = typeof m === "string" ? m : (m as { id?: string }).id;
+				if (!modelId) continue;
+				// Skip if already added from env vars
+				if (!models.some((existing) => existing.id === modelId && existing.baseUrl === baseUrl)) {
+					models.push({ id: modelId, provider: id, baseUrl, apiKey });
 				}
 			}
-		} catch {
-			/* ignore parse errors */
 		}
+	} catch {
+		/* ignore unreadable models.json */
 	}
 
 	// 3. Try to detect LM Studio (port 1234) and Ollama (port 11434) directly
@@ -745,7 +749,7 @@ Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`,
 					.map((p) => `  ${p.envVar}: ${process.env[p.envVar] ? "set but no models configured" : "not set"}`)
 					.join("\n");
 				ctx.ui.notify(
-					`❌ No benchmarkable models found.\n\nProvider status:\n${hint}\n\nSet at least one API key with known models.`,
+					`❌ No benchmarkable models found.\n\nProvider status (env):\n${hint}\n\nSet at least one API key with known models (env var, /setup or /keys).`,
 					"warning",
 				);
 				return;

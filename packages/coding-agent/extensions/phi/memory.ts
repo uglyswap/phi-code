@@ -689,7 +689,7 @@ violates project rules.
 			const locations = [
 				join(process.cwd(), "AGENTS.md"),
 				join(process.cwd(), ".phi", "AGENTS.md"),
-				join(sigmaMemory.config.memoryDir, "AGENTS.md"),
+				join(sigmaMemory.getConfig().memoryDir, "AGENTS.md"),
 			];
 
 			for (const agentsPath of locations) {

@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.96.1] - 2026-07-12
+
+### Fixed — ten correctness bugs from the exhaustive line-by-line review
+
+1. **ApiKeyStore parses models.json like everyone else**: the store did a raw
+   `JSON.parse` while model-registry tolerates `//` comments and trailing
+   commas — a commented models.json crashed `/keys` hot-reload while the agent
+   kept running on the registry's copy. Both readers now share one
+   `stripJsonComments` (new `core/json-utils.ts`).
+2. **ApiKeyStore.getKey resolves keys the way requests do**: stored values now
+   follow the documented convention (env-var NAME → its value, `!cmd` → shell,
+   else literal; legacy `$NAME` resolves NAME and is never returned
+   literally). Before, an env-var-name key worked at request time but came
+   back raw (or was skipped) from the store — breaking `/benchmark`,
+   web-search and live-model pings.
+3. **hasConfiguredAuth: empty apiKey is not auth**: a `""` apiKey in
+   models.json made models look available in pickers and then fail at send
+   time. Empty no longer counts (mirrors getProviderAuthStatus).
+4. **Compaction anti-drift union is capped (60k chars)**: the union becomes
+   the next compaction's previousSummary and is always bigger than a fresh
+   summary, so the <60% check re-triggered every time and the summary grew
+   monotonically without bound. Past the cap the newest summary wins. The cap
+   is checked FIRST, which also keeps the quadratic path-extraction regex away
+   from unbounded input.
+5. **getModel is honest about unknown models** (phi-code-ai 0.74.4): runtime
+   strings now type as `Model | undefined` instead of casting `undefined` to
+   `Model` and crashing somewhere downstream; statically-valid literals keep
+   the non-optional type (zero churn).
+6. **Ontology graph appends take a file lock** (sigma-memory 0.2.9):
+   concurrent phi processes could interleave partial JSONL lines in
+   graph.jsonl. Appends now hold a proper-lockfile lock; stale locks from
+   crashed processes are taken over after 5s.
+7. **`--flag=value` works for known flags**: `--model=x` was silently
+   mis-classified as an unknown extension flag (only unknown flags handled
+   `=`). Known value flags now accept both spellings.
+8. **/benchmark sees keys stored via /setup or /keys**: it only read
+   `process.env`; it now falls back to the ApiKeyStore (which also honors
+   PHI_AGENT_DIR and comment-tolerant models.json).
+9. **Memory extension AGENTS.md autoload**: read the private
+   `sigmaMemory.config` field (worked only because jiti strips types) — now
+   uses the public `getConfig()`.
+10. **Migration messages point at the fork**: the extensions-migration
+    guide/doc URLs printed by startup migrations still pointed at upstream
+    `earendil-works/pi-mono` (with a dead anchor); they now point at
+    `uglyswap/phi-code`.
+
+33 new tests (JSONC parsing, key resolution incl. `$NAME`/env/empty, empty-key
+auth, union cap + repeated unions, `--flag=value` matrix, unknown-model
+lookups, lock release + stale-lock takeover); full suite green.
+
 ## [0.96.0] - 2026-07-12
 
 ### Added — the six efficiency upgrades, each tied to a measured failure

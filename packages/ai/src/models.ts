@@ -17,12 +17,21 @@ type ModelApi<
 	TModelId extends keyof (typeof MODELS)[TProvider],
 > = (typeof MODELS)[TProvider][TModelId] extends { api: infer TApi } ? (TApi extends Api ? TApi : never) : never;
 
+/**
+ * Look up a model in the generated catalog.
+ *
+ * With statically-known provider/id literals the return type is non-optional
+ * (the catalog guarantees the entry exists). With runtime strings the result
+ * is honest: `undefined` when the provider or model id is unknown — callers
+ * must guard instead of crashing later on a phantom model object.
+ */
 export function getModel<TProvider extends KnownProvider, TModelId extends keyof (typeof MODELS)[TProvider]>(
 	provider: TProvider,
 	modelId: TModelId,
-): Model<ModelApi<TProvider, TModelId>> {
-	const providerModels = modelRegistry.get(provider);
-	return providerModels?.get(modelId as string) as Model<ModelApi<TProvider, TModelId>>;
+): Model<ModelApi<TProvider, TModelId>>;
+export function getModel(provider: string, modelId: string): Model<Api> | undefined;
+export function getModel(provider: string, modelId: string): Model<Api> | undefined {
+	return modelRegistry.get(provider)?.get(modelId);
 }
 
 export function getProviders(): KnownProvider[] {

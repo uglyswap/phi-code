@@ -159,10 +159,11 @@ async function refreshOne(
 	resolvedApiKey?: string,
 ): Promise<RefreshOutcome> {
 	const stored = store.getProvider(providerId);
-	const storedKey =
-		stored?.apiKey && !stored.apiKey.startsWith("$") && stored.apiKey !== "local" ? stored.apiKey : undefined;
-	// Prefer the key stored in models.json, else the one resolved from
+	// Prefer the key stored in models.json (resolved through the store: env-var
+	// names and "!cmd" values yield a usable key, "local" is a sentinel, an
+	// unresolved "$NAME" yields undefined), else the one resolved from
 	// auth.json/env by the model registry (providers set up via /auth only).
+	const storedKey = stored?.apiKey && stored.apiKey !== "local" ? store.getKey(providerId) : undefined;
 	const apiKey = storedKey ?? resolvedApiKey;
 
 	// OpenCode Go is a provider pair the generic fetchLiveModels path can't express
