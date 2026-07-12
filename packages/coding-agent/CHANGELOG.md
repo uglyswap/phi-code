@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.92.1] - 2026-07-12
+
+### Docs
+
+- README: document the execution-grounded modes (/plan, /debug, /build, /sandbox,
+  the sandbox_run oracle, per-phase model routing, the honest n=13 measurement)
+  and the one-command Alibaba Cloud Coding Plan setup — three releases of
+  features were undocumented.
+
 ## [0.92.0] - 2026-07-11
 
 ### Fixed — the two defects the n=13 SWE-bench measurement exposed
