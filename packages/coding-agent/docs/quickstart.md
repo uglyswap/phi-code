@@ -7,8 +7,30 @@ This page gets you from install to a useful first phi session.
 phi is distributed as an npm package:
 
 ```bash
-npm install -g @phi-code-admin/phi-code
+npm install -g --ignore-scripts @phi-code-admin/phi-code
 ```
+
+`--ignore-scripts` disables dependency lifecycle scripts during install. phi does not require install scripts for normal npm installs.
+
+### Uninstall
+
+Use the package manager that installed phi. The curl installer uses npm globally, so curl and npm installs are removed with npm:
+
+```bash
+# curl installer or npm install -g
+npm uninstall -g @phi-code-admin/phi-code
+
+# pnpm
+pnpm remove -g @phi-code-admin/phi-code
+
+# Yarn
+yarn global remove @phi-code-admin/phi-code
+
+# Bun
+bun uninstall -g @phi-code-admin/phi-code
+```
+
+Uninstalling phi leaves settings, credentials, sessions, and installed phi packages in `~/.phi/agent/`.
 
 Then start phi in the project directory you want it to work on:
 
@@ -78,6 +100,8 @@ phi loads:
 - `~/.phi/agent/AGENTS.md` for global instructions
 - `AGENTS.md` or `CLAUDE.md` from parent directories and the current directory
 
+If a directory contains `AGENTS.override.md`, phi loads it instead of `AGENTS.md` or `CLAUDE.md` from that directory.
+
 Restart phi, or run `/reload`, after changing context files.
 
 ## Common things to try
@@ -91,7 +115,7 @@ pi @README.md "Summarize this"
 pi @src/app.ts @src/app.test.ts "Review these together"
 ```
 
-Images can be pasted with Ctrl+V (Alt+V on Windows) or dragged into supported terminals.
+Images or text can be pasted with Ctrl+V (Alt+V on Windows); images can also be dragged into supported terminals.
 
 ### Run shell commands
 
@@ -114,6 +138,7 @@ Sessions are saved automatically:
 ```bash
 phi -c                  # Continue most recent session
 phi -r                  # Browse previous sessions
+phi --name "my task"    # Set session display name at startup
 phi --session <path|id> # Open a specific session
 ```
 

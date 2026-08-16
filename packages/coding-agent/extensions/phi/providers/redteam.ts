@@ -12,8 +12,8 @@
  * the attack as an executed test.
  */
 
-import type { FailingState } from "./debug-contract.js";
-import { type CommandResult, passed, tail } from "./execution.js";
+import type { FailingState } from "./debug-contract.ts";
+import { type CommandResult, passed, tail } from "./execution.ts";
 
 /** One adversarial attempt: a runnable test aimed at a specific input regime. */
 export interface RedTeamAttempt {

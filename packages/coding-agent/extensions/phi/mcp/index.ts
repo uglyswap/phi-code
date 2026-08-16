@@ -17,13 +17,13 @@ import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "phi-code";
 // OAuth imports
-import { cancelCallback, ensureCallbackServer, stopCallbackServer, waitForCallback } from "./callback-server.js";
-import { loadConfig } from "./config.js";
-import { McpError } from "./errors.js";
-import { McpOAuthProvider, setCallbackPort } from "./oauth-provider.js";
-import type { TransportAuthCallbacks } from "./server-manager.js";
-import { ServerManager } from "./server-manager.js";
-import { ToolBridge } from "./tool-bridge.js";
+import { cancelCallback, ensureCallbackServer, stopCallbackServer, waitForCallback } from "./callback-server.ts";
+import { loadConfig } from "./config.ts";
+import { McpError } from "./errors.ts";
+import { McpOAuthProvider, setCallbackPort } from "./oauth-provider.ts";
+import type { TransportAuthCallbacks } from "./server-manager.ts";
+import { ServerManager } from "./server-manager.ts";
+import { ToolBridge } from "./tool-bridge.ts";
 
 /**
  * Open a URL in the user's default browser.

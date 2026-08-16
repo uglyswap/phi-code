@@ -32,9 +32,9 @@ import {
 	buildAlibabaProviderConfig,
 	pingAlibaba,
 	validateAlibabaApiKey,
-} from "./providers/alibaba.js";
-import { getProviderCatalog, type ProviderCatalogEntry } from "./providers/catalog.js";
-import { fetchLiveModels, pingProvider, toPersistedModel } from "./providers/live-models.js";
+} from "./providers/alibaba.ts";
+import { getProviderCatalog, type ProviderCatalogEntry } from "./providers/catalog.ts";
+import { fetchLiveModels, pingProvider, toPersistedModel } from "./providers/live-models.ts";
 import {
 	buildOpenCodeGoAnthropicProviderConfig,
 	buildOpenCodeGoProviderConfig,
@@ -42,7 +42,7 @@ import {
 	OPENCODE_GO_AUTH_URL,
 	pingOpenCodeGo,
 	validateOpenCodeGoApiKey,
-} from "./providers/opencode-go.js";
+} from "./providers/opencode-go.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 

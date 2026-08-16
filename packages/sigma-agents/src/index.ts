@@ -1,2 +1,2 @@
-export { SmartRouter } from "./router.js";
-export * from "./types.js";
+export { SmartRouter } from "./router.ts";
+export * from "./types.ts";

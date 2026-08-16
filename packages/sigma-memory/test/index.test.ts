@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { existsSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
-import { SigmaMemory } from "../src/index.js";
+import { SigmaMemory } from "../src/index.ts";
 
 describe("SigmaMemory", () => {
 	let sigmaMemory: SigmaMemory;

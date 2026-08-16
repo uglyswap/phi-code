@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { ALIBABA_MODELS, ALIBABA_PROVIDERS } from "../extensions/phi/providers/alibaba.js";
+import { ALIBABA_MODELS, ALIBABA_PROVIDERS } from "../extensions/phi/providers/alibaba.ts";
 import {
 	BOOTSTRAPPABLE_PROVIDERS,
 	bootstrapProviderConfig,
 	isBootstrappableProvider,
-} from "../extensions/phi/providers/provider-bootstrap.js";
+} from "../extensions/phi/providers/provider-bootstrap.ts";
 
 describe("isBootstrappableProvider", () => {
 	it("accepts the shipped builders and rejects everything else", () => {

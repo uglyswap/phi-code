@@ -6,7 +6,7 @@ import {
 	buildAlibabaProviderConfig,
 	pingAlibaba,
 	validateAlibabaApiKey,
-} from "../extensions/phi/providers/alibaba.js";
+} from "../extensions/phi/providers/alibaba.ts";
 
 describe("providers/alibaba", () => {
 	describe("validateAlibabaApiKey", () => {

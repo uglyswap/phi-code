@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { CommandResult } from "../extensions/phi/providers/execution.js";
+import type { CommandResult } from "../extensions/phi/providers/execution.ts";
 import {
 	breakingCasesToFailingStates,
 	DEFAULT_REDTEAM_CONFIG,
@@ -8,7 +8,7 @@ import {
 	type RedTeamAttempt,
 	recordAttempt,
 	shouldContinueRedTeam,
-} from "../extensions/phi/providers/redteam.js";
+} from "../extensions/phi/providers/redteam.ts";
 
 const run = (exitCode: number | null, over: Partial<CommandResult> = {}): CommandResult => ({
 	command: "adv",

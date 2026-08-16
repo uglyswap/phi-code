@@ -8,7 +8,7 @@ import {
 	runCommandAsync,
 	summarize,
 	tail,
-} from "../extensions/phi/providers/execution.js";
+} from "../extensions/phi/providers/execution.ts";
 
 const result = (over: Partial<CommandResult> = {}): CommandResult => ({
 	command: "cmd",

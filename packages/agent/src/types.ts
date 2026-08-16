@@ -1,19 +1,23 @@
 import type {
+	Api,
 	AssistantMessage,
 	AssistantMessageEvent,
+	AssistantMessageEventStream,
+	Context,
 	ImageContent,
 	Message,
 	Model,
 	SimpleStreamOptions,
-	streamSimple,
 	TextContent,
 	Tool,
 	ToolResultMessage,
+	Usage,
 } from "phi-code-ai";
 import type { Static, TSchema } from "typebox";
 
 /**
- * Stream function used by the agent loop.
+ * Stream function used by the agent loop. `Models.streamSimple` satisfies
+ * this shape.
  *
  * Contract:
  * - Must not throw or return a rejected promise for request/model/runtime failures.
@@ -22,8 +26,10 @@ import type { Static, TSchema } from "typebox";
  *   final AssistantMessage with stopReason "error" or "aborted" and errorMessage.
  */
 export type StreamFn = (
-	...args: Parameters<typeof streamSimple>
-) => ReturnType<typeof streamSimple> | Promise<ReturnType<typeof streamSimple>>;
+	model: Model<Api>,
+	context: Context,
+	options?: SimpleStreamOptions,
+) => AssistantMessageEventStream | Promise<AssistantMessageEventStream>;
 
 /**
  * Configuration for how tool calls from a single assistant message are executed.
@@ -34,6 +40,14 @@ export type StreamFn = (
  *   while tool-result message artifacts are emitted later in assistant source order.
  */
 export type ToolExecutionMode = "sequential" | "parallel";
+
+/**
+ * Controls how many queued user messages are injected when the agent loop reaches a queue drain point.
+ *
+ * - "all": drain and inject every queued message at that point.
+ * - "one-at-a-time": drain and inject only the oldest queued message, leaving the rest queued for later drain points.
+ */
+export type QueueMode = "all" | "one-at-a-time";
 
 /** A single tool call content block emitted by an assistant message. */
 export type AgentToolCall = Extract<AssistantMessage["content"][number], { type: "toolCall" }>;
@@ -47,6 +61,11 @@ export type AgentToolCall = Extract<AssistantMessage["content"][number], { type:
 export interface BeforeToolCallResult {
 	block?: boolean;
 	reason?: string;
+	/**
+	 * Hint that the agent should stop after the current tool batch when this call is blocked.
+	 * Early termination only happens when every finalized tool result in the batch sets this to true.
+	 */
+	terminate?: boolean;
 }
 
 /**
@@ -56,15 +75,18 @@ export interface BeforeToolCallResult {
  * - `content`: if provided, replaces the tool result content array in full
  * - `details`: if provided, replaces the tool result details value in full
  * - `isError`: if provided, replaces the tool result error flag
+ * - `usage`: if provided, replaces the tool result usage
  * - `terminate`: if provided, replaces the early-termination hint
  *
  * Omitted fields keep the original executed tool result values.
- * There is no deep merge for `content` or `details`.
+ * There is no deep merge for `content`, `details`, or `usage`.
  */
 export interface AfterToolCallResult {
 	content?: (TextContent | ImageContent)[];
 	details?: unknown;
 	isError?: boolean;
+	/** Usage from the final tool execution itself, if available. Not used for main LLM context accounting. */
+	usage?: Usage;
 	/**
 	 * Hint that the agent should stop after the current tool batch.
 	 * Early termination only happens when every finalized tool result in the batch sets this to true.
@@ -249,6 +271,7 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * Called before a tool is executed, after arguments have been validated.
 	 *
 	 * Return `{ block: true }` to prevent execution. The loop emits an error tool result instead.
+	 * A blocked result can also set `terminate: true` to participate in the batch early-termination rule.
 	 * The hook receives the agent abort signal and is responsible for honoring it.
 	 */
 	beforeToolCall?: (context: BeforeToolCallContext, signal?: AbortSignal) => Promise<BeforeToolCallResult | undefined>;
@@ -260,6 +283,7 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * - `content` replaces the full content array
 	 * - `details` replaces the full details payload
 	 * - `isError` replaces the error flag
+	 * - `usage` replaces the tool result usage
 	 * - `terminate` replaces the early-termination hint
 	 *
 	 * Any omitted fields keep their original values. No deep merge is performed.
@@ -270,10 +294,10 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 
 /**
  * Thinking/reasoning level for models that support it.
- * Note: "xhigh" is only supported by selected model families. Use model thinking-level metadata
- * from phi-code-ai to detect support for a concrete model.
+ * Note: "xhigh" and "max" are only supported by selected model families. Use model
+ * thinking-level metadata from phi-code-ai to detect support for a concrete model.
  */
-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 /**
  * Extensible interface for custom app messages.
@@ -339,6 +363,10 @@ export interface AgentToolResult<T> {
 	content: (TextContent | ImageContent)[];
 	/** Arbitrary structured details for logs or UI rendering. */
 	details: T;
+	/** Usage from the final tool execution itself, if available. Not used for main LLM context accounting. */
+	usage?: Usage;
+	/** Names of tools introduced by this result and available from this transcript point onward. */
+	addedToolNames?: string[];
 	/**
 	 * Hint that the agent should stop after the current tool batch.
 	 * Early termination only happens when every finalized tool result in the batch sets this to true.
@@ -346,7 +374,12 @@ export interface AgentToolResult<T> {
 	terminate?: boolean;
 }
 
-/** Callback used by tools to stream partial execution updates. */
+/**
+ * Callback used by tools to stream partial execution updates.
+ *
+ * The callback is scoped to the current `execute()` invocation. Calls made after
+ * the tool promise settles are ignored.
+ */
 export type AgentToolUpdateCallback<T = any> = (partialResult: AgentToolResult<T>) => void;
 
 /** Tool definition used by the agent runtime. */

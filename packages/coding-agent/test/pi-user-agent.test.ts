@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { APP_NAME } from "../src/config.js";
-import { getPiUserAgent } from "../src/utils/pi-user-agent.js";
+import { APP_NAME } from "../src/config.ts";
+import { getPiUserAgent } from "../src/utils/pi-user-agent.ts";
 
 describe("getPiUserAgent", () => {
 	it("formats the user agent from the configured app name (phi for phi-code)", () => {

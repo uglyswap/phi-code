@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import type { Skill, SkillsConfig } from "./types.js";
+import type { Skill, SkillsConfig } from "./types.ts";
 
 export class SkillScanner {
 	private config: SkillsConfig;

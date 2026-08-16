@@ -4,7 +4,7 @@ import {
 	isRateLimited,
 	READONLY_EXPLORER_TOOLS,
 	stripThinking,
-} from "../extensions/phi/providers/explore-fanout.js";
+} from "../extensions/phi/providers/explore-fanout.ts";
 
 describe("stripThinking", () => {
 	test("removes <think> and <thinking> blocks, keeps the answer", () => {

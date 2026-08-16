@@ -7,11 +7,12 @@ import {
 	getSelfUpdateCommand,
 	getSelfUpdateUnavailableInstruction,
 	getUpdateInstruction,
-} from "../src/config.js";
+} from "../src/config.ts";
 
 const execPathDescriptor = Object.getOwnPropertyDescriptor(process, "execPath");
 const originalPath = process.env.PATH;
 const originalPiPackageDir = process.env.PI_PACKAGE_DIR;
+const originalArgv1 = process.argv[1];
 let tempDir: string | undefined;
 
 function setExecPath(value: string): void {
@@ -34,6 +35,11 @@ afterEach(() => {
 		delete process.env.PI_PACKAGE_DIR;
 	} else {
 		process.env.PI_PACKAGE_DIR = originalPiPackageDir;
+	}
+	if (originalArgv1 === undefined) {
+		process.argv.splice(1, 1);
+	} else {
+		process.argv[1] = originalArgv1;
 	}
 	if (tempDir) {
 		chmodSync(tempDir, 0o700);
@@ -117,7 +123,7 @@ function createBunGlobalInstall(): { packageDir: string } {
 
 function createFakePnpmScript(root: string): string {
 	if (process.platform === "win32") {
-		return `@echo off\r\nif "%1"=="root" if "%2"=="-g" echo ${root}\r\n`;
+		return `@echo off\r\nif "%~1"=="root" if "%~2"=="-g" echo ${root}\r\n`;
 	}
 	const escapedRoot = root.replaceAll("'", "'\\''");
 	return `#!/bin/sh\nif [ "$1" = "root" ] && [ "$2" = "-g" ]; then\n\tprintf '%s\\n' '${escapedRoot}'\n\texit 0\nfi\nexit 1\n`;
@@ -125,7 +131,7 @@ function createFakePnpmScript(root: string): string {
 
 function createFakeYarnScript(globalDir: string): string {
 	if (process.platform === "win32") {
-		return `@echo off\r\nif "%1"=="global" if "%2"=="dir" echo ${globalDir}\r\n`;
+		return `@echo off\r\nif "%~1"=="global" if "%~2"=="dir" echo ${globalDir}\r\n`;
 	}
 	const escapedGlobalDir = globalDir.replaceAll("'", "'\\''");
 	return `#!/bin/sh\nif [ "$1" = "global" ] && [ "$2" = "dir" ]; then\n\tprintf '%s\\n' '${escapedGlobalDir}'\n\texit 0\nfi\nexit 1\n`;
@@ -133,7 +139,7 @@ function createFakeYarnScript(globalDir: string): string {
 
 function createFakeBunScript(bunBin: string): string {
 	if (process.platform === "win32") {
-		return `@echo off\r\nif "%1"=="pm" if "%2"=="bin" if "%3"=="-g" echo ${bunBin}\r\n`;
+		return `@echo off\r\nif "%~1"=="pm" if "%~2"=="bin" if "%~3"=="-g" echo ${bunBin}\r\n`;
 	}
 	const escapedBunBin = bunBin.replaceAll("'", "'\\''");
 	return `#!/bin/sh\nif [ "$1" = "pm" ] && [ "$2" = "bin" ] && [ "$3" = "-g" ]; then\n\tprintf '%s\\n' '${escapedBunBin}'\n\texit 0\nfi\nexit 1\n`;
@@ -146,7 +152,9 @@ describe("detectInstallMethod", () => {
 		);
 
 		expect(detectInstallMethod()).toBe("pnpm");
-		expect(getUpdateInstruction("@phi-code-admin/phi-code")).toBe("Run: pnpm install -g @phi-code-admin/phi-code");
+		expect(getUpdateInstruction("@phi-code-admin/phi-code")).toBe(
+			"Run: pnpm install -g --ignore-scripts --config.minimumReleaseAge=0 @phi-code-admin/phi-code",
+		);
 	});
 
 	test("does not self-update unknown wrapper installs", () => {
@@ -167,8 +175,39 @@ describe("detectInstallMethod", () => {
 		expect(detectInstallMethod()).toBe("npm");
 		expect(command).toEqual({
 			command: "npm",
-			args: ["--prefix", prefix, "install", "-g", "@phi-code-admin/phi-code"],
-			display: `npm --prefix ${prefix} install -g @phi-code-admin/phi-code`,
+			args: [
+				"--prefix",
+				prefix,
+				"install",
+				"-g",
+				"--ignore-scripts",
+				"--min-release-age=0",
+				"@phi-code-admin/phi-code",
+			],
+			display: `npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @phi-code-admin/phi-code`,
+		});
+	});
+
+	test("self-updates exact npm versions without uninstalling the current package", () => {
+		const { prefix } = createNpmPrefixInstall();
+
+		const command = getSelfUpdateCommand("@phi-code-admin/phi-code", undefined, {
+			packageName: "@phi-code-admin/phi-code",
+			installSpec: "@phi-code-admin/phi-code@1.2.3",
+		});
+
+		expect(command).toEqual({
+			command: "npm",
+			args: [
+				"--prefix",
+				prefix,
+				"install",
+				"-g",
+				"--ignore-scripts",
+				"--min-release-age=0",
+				"@phi-code-admin/phi-code@1.2.3",
+			],
+			display: `npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @phi-code-admin/phi-code@1.2.3`,
 		});
 	});
 
@@ -179,8 +218,8 @@ describe("detectInstallMethod", () => {
 
 		expect(command).toEqual({
 			command: "npm",
-			args: ["--prefix", prefix, "install", "-g", "@new-scope/pi"],
-			display: `npm --prefix ${prefix} uninstall -g @mariozechner/pi-coding-agent && npm --prefix ${prefix} install -g @new-scope/pi`,
+			args: ["--prefix", prefix, "install", "-g", "--ignore-scripts", "--min-release-age=0", "@new-scope/pi"],
+			display: `npm --prefix ${prefix} uninstall -g @mariozechner/pi-coding-agent && npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @new-scope/pi`,
 			steps: [
 				{
 					command: "npm",
@@ -189,8 +228,8 @@ describe("detectInstallMethod", () => {
 				},
 				{
 					command: "npm",
-					args: ["--prefix", prefix, "install", "-g", "@new-scope/pi"],
-					display: `npm --prefix ${prefix} install -g @new-scope/pi`,
+					args: ["--prefix", prefix, "install", "-g", "--ignore-scripts", "--min-release-age=0", "@new-scope/pi"],
+					display: `npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @new-scope/pi`,
 				},
 			],
 		});
@@ -203,8 +242,16 @@ describe("detectInstallMethod", () => {
 
 		expect(command).toEqual({
 			command: "npm",
-			args: ["--prefix", prefix, "install", "-g", "@phi-code-admin/phi-code"],
-			display: `npm --prefix ${prefix} install -g @phi-code-admin/phi-code`,
+			args: [
+				"--prefix",
+				prefix,
+				"install",
+				"-g",
+				"--ignore-scripts",
+				"--min-release-age=0",
+				"@phi-code-admin/phi-code",
+			],
+			display: `npm --prefix ${prefix} install -g --ignore-scripts --min-release-age=0 @phi-code-admin/phi-code`,
 		});
 	});
 
@@ -213,7 +260,15 @@ describe("detectInstallMethod", () => {
 
 		const command = getSelfUpdateCommand("@phi-code-admin/phi-code", []);
 
-		expect(command?.args).toEqual(["--prefix", prefix, "install", "-g", "@phi-code-admin/phi-code"]);
+		expect(command?.args).toEqual([
+			"--prefix",
+			prefix,
+			"install",
+			"-g",
+			"--ignore-scripts",
+			"--min-release-age=0",
+			"@phi-code-admin/phi-code",
+		]);
 	});
 
 	test("quotes npm self-update display paths", () => {
@@ -221,7 +276,9 @@ describe("detectInstallMethod", () => {
 
 		const command = getSelfUpdateCommand("@phi-code-admin/phi-code");
 
-		expect(command?.display).toBe(`npm --prefix "${prefix}" install -g @phi-code-admin/phi-code`);
+		expect(command?.display).toBe(
+			`npm --prefix "${prefix}" install -g --ignore-scripts --min-release-age=0 @phi-code-admin/phi-code`,
+		);
 	});
 
 	test("does not infer Windows npm custom prefixes from package paths", () => {
@@ -230,7 +287,9 @@ describe("detectInstallMethod", () => {
 		setExecPath(`${packageDir}\\dist\\cli.js`);
 
 		expect(detectInstallMethod()).toBe("npm");
-		expect(getUpdateInstruction("@phi-code-admin/phi-code")).toBe("Run: npm install -g @phi-code-admin/phi-code");
+		expect(getUpdateInstruction("@phi-code-admin/phi-code")).toBe(
+			"Run: npm install -g --ignore-scripts --min-release-age=0 @phi-code-admin/phi-code",
+		);
 	});
 
 	test.skipIf(process.platform === "win32")("self-updates bun global installs from bun pm bin", () => {
@@ -241,8 +300,8 @@ describe("detectInstallMethod", () => {
 		expect(detectInstallMethod()).toBe("bun");
 		expect(command).toEqual({
 			command: "bun",
-			args: ["install", "-g", "@phi-code-admin/phi-code"],
-			display: "bun install -g @phi-code-admin/phi-code",
+			args: ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@phi-code-admin/phi-code"],
+			display: "bun install -g --ignore-scripts --minimum-release-age=0 @phi-code-admin/phi-code",
 		});
 	});
 
@@ -254,8 +313,9 @@ describe("detectInstallMethod", () => {
 		expect(detectInstallMethod()).toBe("pnpm");
 		expect(command).toEqual({
 			command: "pnpm",
-			args: ["install", "-g", "@new-scope/pi"],
-			display: "pnpm remove -g @mariozechner/pi-coding-agent && pnpm install -g @new-scope/pi",
+			args: ["install", "-g", "--ignore-scripts", "--config.minimumReleaseAge=0", "@new-scope/pi"],
+			display:
+				"pnpm remove -g @mariozechner/pi-coding-agent && pnpm install -g --ignore-scripts --config.minimumReleaseAge=0 @new-scope/pi",
 			steps: [
 				{
 					command: "pnpm",
@@ -264,10 +324,53 @@ describe("detectInstallMethod", () => {
 				},
 				{
 					command: "pnpm",
-					args: ["install", "-g", "@new-scope/pi"],
-					display: "pnpm install -g @new-scope/pi",
+					args: ["install", "-g", "--ignore-scripts", "--config.minimumReleaseAge=0", "@new-scope/pi"],
+					display: "pnpm install -g --ignore-scripts --config.minimumReleaseAge=0 @new-scope/pi",
 				},
 			],
+		});
+	});
+
+	test("self-updates pnpm v11 global installs resolved through the store", () => {
+		const temp = mkdtempSync(join(tmpdir(), "pi-pnpm11-"));
+		const binDir = join(temp, "bin");
+		const root = join(temp, "Library", "pnpm", "global", "v11");
+		const packageName = "@phi-code-admin/phi-code";
+		const globalPackageDir = join(root, "11e9a", "node_modules", "@earendil-works", "pi-coding-agent");
+		const storePackageDir = join(
+			temp,
+			"Library",
+			"pnpm",
+			"store",
+			"v11",
+			"links",
+			"@earendil-works",
+			"pi-coding-agent",
+			"0.75.0",
+			"hash",
+			"node_modules",
+			"@earendil-works",
+			"pi-coding-agent",
+		);
+		mkdirSync(globalPackageDir, { recursive: true });
+		mkdirSync(storePackageDir, { recursive: true });
+		mkdirSync(binDir, { recursive: true });
+		writeFileSync(join(globalPackageDir, "package.json"), "{}");
+		writeFileSync(join(binDir, process.platform === "win32" ? "pnpm.cmd" : "pnpm"), createFakePnpmScript(root));
+		chmodSync(join(binDir, process.platform === "win32" ? "pnpm.cmd" : "pnpm"), 0o755);
+		tempDir = temp;
+		process.env.PATH = `${binDir}${delimiter}${originalPath ?? ""}`;
+		process.env.PI_PACKAGE_DIR = storePackageDir;
+		process.argv[1] = join(globalPackageDir, "dist", "cli.js");
+		setExecPath(join(storePackageDir, "dist", "cli.js"));
+
+		const command = getSelfUpdateCommand(packageName);
+
+		expect(detectInstallMethod()).toBe("pnpm");
+		expect(command).toEqual({
+			command: "pnpm",
+			args: ["install", "-g", "--ignore-scripts", "--config.minimumReleaseAge=0", packageName],
+			display: `pnpm install -g --ignore-scripts --config.minimumReleaseAge=0 ${packageName}`,
 		});
 	});
 
@@ -279,8 +382,8 @@ describe("detectInstallMethod", () => {
 		expect(detectInstallMethod()).toBe("yarn");
 		expect(command).toEqual({
 			command: "yarn",
-			args: ["global", "add", "@new-scope/pi"],
-			display: "yarn global remove @mariozechner/pi-coding-agent && yarn global add @new-scope/pi",
+			args: ["global", "add", "--ignore-scripts", "@new-scope/pi"],
+			display: "yarn global remove @mariozechner/pi-coding-agent && yarn global add --ignore-scripts @new-scope/pi",
 			steps: [
 				{
 					command: "yarn",
@@ -289,13 +392,15 @@ describe("detectInstallMethod", () => {
 				},
 				{
 					command: "yarn",
-					args: ["global", "add", "@new-scope/pi"],
-					display: "yarn global add @new-scope/pi",
+					args: ["global", "add", "--ignore-scripts", "@new-scope/pi"],
+					display: "yarn global add --ignore-scripts @new-scope/pi",
 				},
 			],
 		});
 	});
 
+	// createBunGlobalInstall() writes an executable shell shim; chmod +x is a no-op on
+	// Windows, so the fake `bun` cannot be spawned there. CI (ubuntu-latest) covers it.
 	test.skipIf(process.platform === "win32")(
 		"self-updates renamed bun global installs by removing the old package first",
 		() => {
@@ -306,8 +411,9 @@ describe("detectInstallMethod", () => {
 			expect(detectInstallMethod()).toBe("bun");
 			expect(command).toEqual({
 				command: "bun",
-				args: ["install", "-g", "@new-scope/pi"],
-				display: "bun uninstall -g @mariozechner/pi-coding-agent && bun install -g @new-scope/pi",
+				args: ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@new-scope/pi"],
+				display:
+					"bun uninstall -g @mariozechner/pi-coding-agent && bun install -g --ignore-scripts --minimum-release-age=0 @new-scope/pi",
 				steps: [
 					{
 						command: "bun",
@@ -316,8 +422,8 @@ describe("detectInstallMethod", () => {
 					},
 					{
 						command: "bun",
-						args: ["install", "-g", "@new-scope/pi"],
-						display: "bun install -g @new-scope/pi",
+						args: ["install", "-g", "--ignore-scripts", "--minimum-release-age=0", "@new-scope/pi"],
+						display: "bun install -g --ignore-scripts --minimum-release-age=0 @new-scope/pi",
 					},
 				],
 			});

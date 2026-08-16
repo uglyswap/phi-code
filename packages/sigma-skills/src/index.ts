@@ -1,3 +1,3 @@
-export { SkillLoader } from "./loader.js";
-export { SkillScanner } from "./scanner.js";
-export * from "./types.js";
+export { SkillLoader } from "./loader.ts";
+export { SkillScanner } from "./scanner.ts";
+export * from "./types.ts";

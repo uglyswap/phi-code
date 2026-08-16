@@ -4,7 +4,7 @@ import {
 	type FingerprintGeneratorOptions,
 	type ScreenFingerprint,
 } from "fingerprint-generator";
-import BROWSERFORGE_DATA from "./mappings/browserforge.config.js";
+import BROWSERFORGE_DATA from "./mappings/browserforge.config.ts";
 
 export const SUPPORTED_OS = ["linux", "macos", "windows"] as const;
 

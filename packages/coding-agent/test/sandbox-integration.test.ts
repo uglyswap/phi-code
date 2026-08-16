@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import orchestratorExtension from "../extensions/phi/orchestrator.js";
+import orchestratorExtension from "../extensions/phi/orchestrator.ts";
 
 /**
  * Integration of the sandbox wiring — the `sandbox_run` tool and the `/sandbox`

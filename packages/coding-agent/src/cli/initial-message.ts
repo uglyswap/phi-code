@@ -1,5 +1,5 @@
 import type { ImageContent } from "phi-code-ai";
-import type { Args } from "./args.js";
+import type { Args } from "./args.ts";
 
 export interface InitialMessageInput {
 	parsed: Args;

@@ -2,8 +2,8 @@ import { Type } from "@sinclair/typebox";
 import { extname } from "path";
 import type { AgentTool } from "phi-code-agent";
 import type { ImageContent, TextContent } from "phi-code-ai";
-import type { Executor } from "../sandbox.js";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult, truncateHead } from "./truncate.js";
+import type { Executor } from "../sandbox.ts";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult, truncateHead } from "./truncate.ts";
 
 /**
  * Map of file extensions to MIME types for common image formats

@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
-import { NotesManager } from "./notes.js";
-import { OntologyManager } from "./ontology.js";
-import type { MemoryConfig, MemoryStatus, UnifiedSearchResult } from "./types.js";
-import { VectorStore } from "./vector-store.js";
+import { NotesManager } from "./notes.ts";
+import { OntologyManager } from "./ontology.ts";
+import type { MemoryConfig, MemoryStatus, UnifiedSearchResult } from "./types.ts";
+import { VectorStore } from "./vector-store.ts";
 
 // search() runs during a live TUI session. Writing to stdout/stderr directly
 // corrupts the rendered input line, so these diagnostics are opt-in
@@ -189,10 +189,10 @@ export class SigmaMemory {
 }
 
 // Convenient exports
-export { NotesManager } from "./notes.js";
-export { OntologyManager } from "./ontology.js";
-export * from "./types.js";
-export { VectorStore } from "./vector-store.js";
+export { NotesManager } from "./notes.ts";
+export { OntologyManager } from "./ontology.ts";
+export * from "./types.ts";
+export { VectorStore } from "./vector-store.ts";
 
 // Default export
 export default SigmaMemory;

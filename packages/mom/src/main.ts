@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
 import { join, resolve } from "path";
-import { type AgentRunner, getOrCreateRunner } from "./agent.js";
-import { downloadChannel } from "./download.js";
-import { createEventsWatcher } from "./events.js";
-import * as log from "./log.js";
-import { parseSandboxArg, type SandboxConfig, validateSandbox } from "./sandbox.js";
-import { type MomHandler, type SlackBot, SlackBot as SlackBotClass, type SlackEvent } from "./slack.js";
-import { ChannelStore } from "./store.js";
+import { type AgentRunner, getOrCreateRunner } from "./agent.ts";
+import { downloadChannel } from "./download.ts";
+import { createEventsWatcher } from "./events.ts";
+import * as log from "./log.ts";
+import { parseSandboxArg, type SandboxConfig, validateSandbox } from "./sandbox.ts";
+import { type MomHandler, type SlackBot, SlackBot as SlackBotClass, type SlackEvent } from "./slack.ts";
+import { ChannelStore } from "./store.ts";
 
 // ============================================================================
 // Config
@@ -92,13 +92,13 @@ interface ChannelState {
 
 const channelStates = new Map<string, ChannelState>();
 
-function getState(channelId: string): ChannelState {
+async function getState(channelId: string): Promise<ChannelState> {
 	let state = channelStates.get(channelId);
 	if (!state) {
 		const channelDir = join(workingDir, channelId);
 		state = {
 			running: false,
-			runner: getOrCreateRunner(sandbox, channelId, channelDir),
+			runner: await getOrCreateRunner(sandbox, channelId, channelDir),
 			store: new ChannelStore({ workingDir, botToken: MOM_SLACK_BOT_TOKEN! }),
 			stopRequested: false,
 		};
@@ -297,7 +297,7 @@ const handler: MomHandler = {
 	},
 
 	async handleEvent(event: SlackEvent, slack: SlackBot, isEvent?: boolean): Promise<void> {
-		const state = getState(event.channel);
+		const state = await getState(event.channel);
 
 		// Start run
 		state.running = true;

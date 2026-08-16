@@ -2,8 +2,8 @@ import { Cron } from "croner";
 import { existsSync, type FSWatcher, mkdirSync, readdirSync, statSync, unlinkSync, watch } from "fs";
 import { readFile } from "fs/promises";
 import { join } from "path";
-import * as log from "./log.js";
-import type { SlackBot, SlackEvent } from "./slack.js";
+import * as log from "./log.ts";
+import type { SlackBot, SlackEvent } from "./slack.ts";
 
 // ============================================================================
 // Event Types
@@ -48,10 +48,14 @@ export class EventsWatcher {
 	private watcher: FSWatcher | null = null;
 	private knownFiles: Set<string> = new Set();
 
-	constructor(
-		private eventsDir: string,
-		private slack: SlackBot,
-	) {
+	// Champs explicites : `erasableSyntaxOnly` (tsconfig.base) interdit les
+	// parametres de constructeur avec modificateur.
+	private eventsDir: string;
+	private slack: SlackBot;
+
+	constructor(eventsDir: string, slack: SlackBot) {
+		this.eventsDir = eventsDir;
+		this.slack = slack;
 		this.startTime = Date.now();
 	}
 

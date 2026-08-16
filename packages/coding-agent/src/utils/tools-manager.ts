@@ -1,7 +1,5 @@
-import chalk from "chalk";
-import { spawnSync } from "child_process";
+import { type SpawnSyncReturns, spawnSync } from "child_process";
 import { createHash } from "crypto";
-import extractZip from "extract-zip";
 import {
 	chmodSync,
 	createReadStream,
@@ -16,7 +14,8 @@ import { arch, platform } from "os";
 import { join } from "path";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
-import { APP_NAME, getBinDir } from "../config.js";
+import { APP_NAME, getBinDir } from "../config.ts";
+import { fetchWithRetry } from "./management-http.ts";
 
 const TOOLS_DIR = getBinDir();
 const NETWORK_TIMEOUT_MS = 10_000;
@@ -120,12 +119,15 @@ interface ReleaseInfo {
 	digests: Map<string, string>;
 }
 
-// Fetch latest release info (version + per-asset SHA-256 digests) from GitHub.
-async function getLatestRelease(repo: string): Promise<ReleaseInfo> {
-	const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
-		headers: { "User-Agent": `${APP_NAME}-coding-agent` },
-		signal: AbortSignal.timeout(NETWORK_TIMEOUT_MS),
-	});
+// Fetch release info (version + per-asset SHA-256 digests) from the GitHub API.
+async function fetchReleaseInfo(url: string): Promise<ReleaseInfo> {
+	const response = await fetchWithRetry(
+		url,
+		{
+			headers: { "User-Agent": `${APP_NAME}-coding-agent` },
+		},
+		{ timeoutMs: NETWORK_TIMEOUT_MS },
+	);
 
 	if (!response.ok) {
 		throw new Error(`GitHub API error: ${response.status}`);
@@ -150,6 +152,16 @@ async function getLatestRelease(repo: string): Promise<ReleaseInfo> {
 	return { version: data.tag_name.replace(/^v/, ""), digests };
 }
 
+// Fetch latest release info (version + per-asset SHA-256 digests) from GitHub.
+async function getLatestRelease(repo: string): Promise<ReleaseInfo> {
+	return fetchReleaseInfo(`https://api.github.com/repos/${repo}/releases/latest`);
+}
+
+// Fetch a pinned release by tag, so its assets can still be digest-verified.
+async function getReleaseByTag(repo: string, tag: string): Promise<ReleaseInfo> {
+	return fetchReleaseInfo(`https://api.github.com/repos/${repo}/releases/tags/${encodeURIComponent(tag)}`);
+}
+
 // Compute the SHA-256 hex digest of a file by streaming it (bounded memory).
 async function sha256OfFile(filePath: string): Promise<string> {
 	const hash = createHash("sha256");
@@ -159,9 +171,7 @@ async function sha256OfFile(filePath: string): Promise<string> {
 
 // Download a file from URL
 async function downloadFile(url: string, dest: string): Promise<void> {
-	const response = await fetch(url, {
-		signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-	});
+	const response = await fetchWithRetry(url, undefined, { timeoutMs: DOWNLOAD_TIMEOUT_MS });
 
 	if (!response.ok) {
 		throw new Error(`Failed to download: ${response.status}`);
@@ -197,6 +207,85 @@ function findBinaryRecursively(rootDir: string, binaryFileName: string): string 
 	return null;
 }
 
+function formatSpawnFailure(result: SpawnSyncReturns<Buffer>): string {
+	if (result.error?.message) {
+		return result.error.message;
+	}
+	const stderr = result.stderr?.toString().trim();
+	if (stderr) {
+		return stderr;
+	}
+	const stdout = result.stdout?.toString().trim();
+	if (stdout) {
+		return stdout;
+	}
+	return `exit status ${result.status ?? "unknown"}`;
+}
+
+function runExtractionCommand(command: string, args: string[]): string | null {
+	const result = spawnSync(command, args, { stdio: "pipe" });
+	if (!result.error && result.status === 0) {
+		return null;
+	}
+	return `${command}: ${formatSpawnFailure(result)}`;
+}
+
+function extractTarGzArchive(archivePath: string, extractDir: string, assetName: string): void {
+	const failure = runExtractionCommand("tar", ["xzf", archivePath, "-C", extractDir]);
+	if (failure) {
+		throw new Error(`Failed to extract ${assetName}: ${failure}`);
+	}
+}
+
+function getWindowsTarCommand(): string {
+	const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+	if (systemRoot) {
+		const systemTar = join(systemRoot, "System32", "tar.exe");
+		if (existsSync(systemTar)) {
+			return systemTar;
+		}
+	}
+	return "tar.exe";
+}
+
+function extractZipArchive(archivePath: string, extractDir: string, assetName: string): void {
+	const failures: string[] = [];
+
+	if (platform() === "win32") {
+		// Windows ships bsdtar as tar.exe, which supports zip files. Prefer the
+		// System32 binary over Git Bash's GNU tar, which does not handle zip archives.
+		const tarFailure = runExtractionCommand(getWindowsTarCommand(), ["xf", archivePath, "-C", extractDir]);
+		if (!tarFailure) return;
+		failures.push(tarFailure);
+
+		const script =
+			"& { param($archive, $destination) $ErrorActionPreference = 'Stop'; Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force }";
+		const powershellFailure = runExtractionCommand("powershell.exe", [
+			"-NoLogo",
+			"-NoProfile",
+			"-NonInteractive",
+			"-ExecutionPolicy",
+			"Bypass",
+			"-Command",
+			script,
+			archivePath,
+			extractDir,
+		]);
+		if (!powershellFailure) return;
+		failures.push(powershellFailure);
+	} else {
+		const unzipFailure = runExtractionCommand("unzip", ["-q", archivePath, "-d", extractDir]);
+		if (!unzipFailure) return;
+		failures.push(unzipFailure);
+
+		const tarFailure = runExtractionCommand("tar", ["xf", archivePath, "-C", extractDir]);
+		if (!tarFailure) return;
+		failures.push(tarFailure);
+	}
+
+	throw new Error(`Failed to extract ${assetName}: ${failures.join("; ")}`);
+}
+
 // Download and install a tool
 async function downloadTool(tool: "fd" | "rg"): Promise<string> {
 	const config = TOOLS[tool];
@@ -206,8 +295,16 @@ async function downloadTool(tool: "fd" | "rg"): Promise<string> {
 	const architecture = arch();
 
 	// Get latest release info (version + per-asset digests)
-	const release = await getLatestRelease(config.repo);
-	const version = release.version;
+	let release = await getLatestRelease(config.repo);
+	let version = release.version;
+	if (tool === "fd" && plat === "darwin" && architecture === "x64") {
+		version = "10.3.0";
+	}
+	if (version !== release.version) {
+		// Pinned to a version other than the latest: re-read that release so the
+		// digest check below compares against the assets we are about to download.
+		release = await getReleaseByTag(config.repo, `${config.tagPrefix}${version}`);
+	}
 
 	// Get asset name for this platform
 	const assetName = config.getAssetName(version, plat, architecture);
@@ -255,13 +352,9 @@ async function downloadTool(tool: "fd" | "rg"): Promise<string> {
 
 	try {
 		if (assetName.endsWith(".tar.gz")) {
-			const extractResult = spawnSync("tar", ["xzf", archivePath, "-C", extractDir], { stdio: "pipe" });
-			if (extractResult.error || extractResult.status !== 0) {
-				const errMsg = extractResult.error?.message ?? extractResult.stderr?.toString().trim() ?? "unknown error";
-				throw new Error(`Failed to extract ${assetName}: ${errMsg}`);
-			}
+			extractTarGzArchive(archivePath, extractDir, assetName);
 		} else if (assetName.endsWith(".zip")) {
-			await extractZip(archivePath, { dir: extractDir });
+			extractZipArchive(archivePath, extractDir, assetName);
 		} else {
 			throw new Error(`Unsupported archive format: ${assetName}`);
 		}
@@ -302,9 +395,20 @@ const TERMUX_PACKAGES: Record<string, string> = {
 	rg: "ripgrep",
 };
 
-// Ensure a tool is available, downloading if necessary
-// Returns the path to the tool, or null if unavailable
-export async function ensureTool(tool: "fd" | "rg", silent: boolean = false): Promise<string | undefined> {
+export interface ToolStatus {
+	type: "info" | "warning";
+	message: string;
+}
+
+/**
+ * Ensure a tool is available, downloading if necessary.
+ * Reports progress through `onStatus`; status messages are otherwise silent.
+ * Returns the tool path, or undefined if unavailable.
+ */
+export async function ensureTool(
+	tool: "fd" | "rg",
+	onStatus?: (status: ToolStatus) => void,
+): Promise<string | undefined> {
 	const existingPath = getToolPath(tool);
 	if (existingPath) {
 		return existingPath;
@@ -314,9 +418,7 @@ export async function ensureTool(tool: "fd" | "rg", silent: boolean = false): Pr
 	if (!config) return undefined;
 
 	if (isOfflineModeEnabled()) {
-		if (!silent) {
-			console.log(chalk.yellow(`${config.name} not found. Offline mode enabled, skipping download.`));
-		}
+		onStatus?.({ type: "warning", message: `${config.name} not found. Offline mode enabled, skipping download.` });
 		return undefined;
 	}
 
@@ -324,27 +426,22 @@ export async function ensureTool(tool: "fd" | "rg", silent: boolean = false): Pr
 	// Users must install via pkg.
 	if (platform() === "android") {
 		const pkgName = TERMUX_PACKAGES[tool] ?? tool;
-		if (!silent) {
-			console.log(chalk.yellow(`${config.name} not found. Install with: pkg install ${pkgName}`));
-		}
+		onStatus?.({ type: "warning", message: `${config.name} not found. Install with: pkg install ${pkgName}` });
 		return undefined;
 	}
 
 	// Tool not found - download it
-	if (!silent) {
-		console.log(chalk.dim(`${config.name} not found. Downloading...`));
-	}
+	onStatus?.({ type: "info", message: `${config.name} not found. Downloading...` });
 
 	try {
 		const path = await downloadTool(tool);
-		if (!silent) {
-			console.log(chalk.dim(`${config.name} installed to ${path}`));
-		}
+		onStatus?.({ type: "info", message: `${config.name} installed to ${path}` });
 		return path;
 	} catch (e) {
-		if (!silent) {
-			console.log(chalk.yellow(`Failed to download ${config.name}: ${e instanceof Error ? e.message : e}`));
-		}
+		onStatus?.({
+			type: "warning",
+			message: `Failed to download ${config.name}: ${e instanceof Error ? e.message : e}`,
+		});
 		return undefined;
 	}
 }

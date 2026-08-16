@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { isDestructiveCommand } from "../src/core/tools/bash.js";
+import { isDestructiveCommand } from "../src/core/tools/bash.ts";
 
 describe("isDestructiveCommand (autonomous /plan gate)", () => {
 	const cwd = "/home/user/project";

@@ -8,8 +8,8 @@
  * path to FIXED without execution.
  */
 
-import { type FixCandidate, selectMinimalPassingCandidate } from "./candidate-select.js";
-import { type CommandResult, passed } from "./execution.js";
+import { type FixCandidate, selectMinimalPassingCandidate } from "./candidate-select.ts";
+import { type CommandResult, passed } from "./execution.ts";
 
 /** A concrete, reproducible failing state — /debug's input. */
 export interface FailingState {

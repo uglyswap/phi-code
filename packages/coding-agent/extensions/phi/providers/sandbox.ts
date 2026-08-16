@@ -21,7 +21,7 @@ import {
 	runArgvAsync as realRunArgvAsync,
 	runCommand as realRunCommand,
 	runCommandAsync as realRunCommandAsync,
-} from "./execution.js";
+} from "./execution.ts";
 import {
 	applyConfig,
 	type Backend,
@@ -32,7 +32,7 @@ import {
 	imageTagFor,
 	type SandboxConfig,
 	type SandboxRecipe,
-} from "./sandbox-plan.js";
+} from "./sandbox-plan.ts";
 
 export interface PrepareResult {
 	ok: boolean;

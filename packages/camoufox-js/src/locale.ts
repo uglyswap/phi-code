@@ -11,11 +11,11 @@ import {
 	UnknownIPLocation,
 	UnknownLanguage,
 	UnknownTerritory,
-} from "./exceptions.js";
-import { validateIP } from "./ip.js";
-import { GitHubDownloader, INSTALL_DIR, webdl } from "./pkgman.js";
-import { getAsBooleanFromENV } from "./utils.js";
-import { LeakWarning } from "./warnings.js";
+} from "./exceptions.ts";
+import { validateIP } from "./ip.ts";
+import { GitHubDownloader, INSTALL_DIR, webdl } from "./pkgman.ts";
+import { getAsBooleanFromENV } from "./utils.ts";
+import { LeakWarning } from "./warnings.ts";
 
 const currentDir =
 	import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url));

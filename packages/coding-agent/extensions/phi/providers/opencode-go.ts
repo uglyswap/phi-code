@@ -18,7 +18,7 @@
  * Model IDs follow format: opencode-go/<model-id> (e.g., opencode-go/kimi-k2.6).
  */
 
-import { inferContextWindow } from "./context-window.js";
+import { inferContextWindow } from "./context-window.ts";
 
 export const OPENCODE_GO_ENV_VAR = "OPENCODE_GO_API_KEY";
 export const OPENCODE_GO_AUTH_URL = "https://opencode.ai/auth";

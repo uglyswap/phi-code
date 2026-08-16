@@ -391,10 +391,15 @@ class ChromeProfileBridge {
 	private clientName: string | undefined;
 	private mode: "server" | "client" | undefined;
 
-	constructor(
-		private readonly host: string,
-		private readonly port: number,
-	) {}
+	// Explicit fields rather than constructor parameter properties: the root tsconfig
+	// enables `erasableSyntaxOnly` (extensions run through a type-stripping loader).
+	private readonly host: string;
+	private readonly port: number;
+
+	constructor(host: string, port: number) {
+		this.host = host;
+		this.port = port;
+	}
 
 	get url(): string {
 		return `http://${this.host}:${this.port}`;

@@ -13,22 +13,57 @@
 			"@phi-code-admin/phi-code/hooks": [
 				"./src/core/hooks/index.ts"
 			],
+			"@phi-code-admin/phi-code/*": [
+				"./src/*"
+			],
 			"phi-code-tui": [
 				"../tui/src/index.ts"
+			],
+			"phi-code-tui/*": [
+				"../tui/src/*"
 			],
 			"phi-code-ai": [
 				"../ai/src/index.ts"
 			],
+			"phi-code-ai/oauth": [
+				"../ai/src/oauth.ts"
+			],
+			"phi-code-ai/*": [
+				"../ai/src/*.ts",
+				"../ai/src/providers/*.ts"
+			],
 			"phi-code-agent": [
 				"../agent/src/index.ts"
+			],
+			"phi-code-agent/*": [
+				"../agent/src/*"
+			],
+			"phi-code-protocol": [
+				"../protocol/src/index.ts"
+			],
+			"phi-code-protocol/*": [
+				"../protocol/src/*"
+			],
+			"phi-code-client": [
+				"../client/src/index.ts"
+			],
+			"phi-code-client/*": [
+				"../client/src/*"
+			],
+			"phi-code-telemetry": [
+				"../telemetry/src/index.ts"
 			],
 			"typebox": [
 				"../../node_modules/typebox"
 			]
-		}
+		},
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"resolveJsonModule": true
 	},
 	"include": [
-		"extensions/phi/**/*.ts"
+		"extensions/phi/**/*.ts",
+		"src/**/*.d.ts"
 	],
 	"exclude": [
 		"node_modules",

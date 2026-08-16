@@ -1,3 +1,4 @@
+import { createModelRegistry, getModelRuntime } from "./model-runtime-test-utils.ts";
 /**
  * Shared test utilities for coding-agent tests.
  */
@@ -6,18 +7,24 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Agent } from "phi-code-agent";
-import { getModel, type OAuthCredentials, type OAuthProvider } from "phi-code-ai";
-import { getOAuthApiKey } from "phi-code-ai/oauth";
-import { AgentSession } from "../src/core/agent-session.js";
-import { AuthStorage } from "../src/core/auth-storage.js";
-import { createEventBus } from "../src/core/event-bus.js";
-import type { Extension, ExtensionFactory, LoadExtensionsResult } from "../src/core/extensions/index.js";
-import { createExtensionRuntime, loadExtensionFromFactory } from "../src/core/extensions/loader.js";
-import { ModelRegistry } from "../src/core/model-registry.js";
-import type { ResourceLoader } from "../src/core/resource-loader.js";
-import { SessionManager } from "../src/core/session-manager.js";
-import { SettingsManager } from "../src/core/settings-manager.js";
-import { createCodingTools } from "../src/index.js";
+import type { OAuthCredentials } from "phi-code-ai";
+import { getModel, streamSimple } from "phi-code-ai/compat";
+import { builtinProviders } from "phi-code-ai/providers/all";
+import { CONFIG_DIR_NAME } from "../src/config.ts";
+import { AgentSession } from "../src/core/agent-session.ts";
+import { AuthStorage } from "../src/core/auth-storage.ts";
+import { createEventBus } from "../src/core/event-bus.ts";
+import type {
+	Extension,
+	ExtensionFactory,
+	InlineExtension,
+	LoadExtensionsResult,
+} from "../src/core/extensions/index.ts";
+import { createExtensionRuntime, loadExtensionFromFactory } from "../src/core/extensions/loader.ts";
+import type { ResourceLoader } from "../src/core/resource-loader.ts";
+import { SessionManager } from "../src/core/session-manager.ts";
+import { SettingsManager } from "../src/core/settings-manager.ts";
+import { createCodingTools } from "../src/index.ts";
 
 /**
  * API key for authenticated tests. Tests using this should be wrapped in
@@ -29,7 +36,7 @@ export const API_KEY = process.env.ANTHROPIC_OAUTH_TOKEN || process.env.ANTHROPI
 // OAuth API key resolution from ~/.pi/agent/auth.json
 // ============================================================================
 
-const AUTH_PATH = join(homedir(), ".pi", "agent", "auth.json");
+const AUTH_PATH = join(homedir(), CONFIG_DIR_NAME, "agent", "auth.json");
 
 type ApiKeyCredential = {
 	type: "api_key";
@@ -83,23 +90,15 @@ export async function resolveApiKey(provider: string): Promise<string | undefine
 	}
 
 	if (entry.type === "oauth") {
-		// Build OAuthCredentials record for getOAuthApiKey
-		const oauthCredentials: Record<string, OAuthCredentials> = {};
-		for (const [key, value] of Object.entries(storage)) {
-			if (value.type === "oauth") {
-				const { type: _, ...creds } = value;
-				oauthCredentials[key] = creds;
-			}
+		const oauth = builtinProviders().find((candidate) => candidate.id === provider)?.auth.oauth;
+		if (!oauth) return undefined;
+		let credential = entry;
+		if (Date.now() >= credential.expires) {
+			credential = await oauth.refresh(credential, new AbortController().signal);
+			storage[provider] = credential;
+			saveAuthStorage(storage);
 		}
-
-		const result = await getOAuthApiKey(provider as OAuthProvider, oauthCredentials);
-		if (!result) return undefined;
-
-		// Save refreshed credentials back to auth.json
-		storage[provider] = { type: "oauth", ...result.newCredentials };
-		saveAuthStorage(storage);
-
-		return result.apiKey;
+		return (await oauth.toAuth(credential)).apiKey;
 	}
 
 	return undefined;
@@ -114,7 +113,7 @@ export function hasAuthForProvider(provider: string): boolean {
 }
 
 /** Path to the real pi agent config directory */
-export const PI_AGENT_DIR = join(homedir(), ".pi", "agent");
+export const PI_AGENT_DIR = join(homedir(), CONFIG_DIR_NAME, "agent");
 
 /**
  * Get an AuthStorage instance backed by ~/.pi/agent/auth.json
@@ -181,8 +180,10 @@ export interface CreateTestExtensionsResultInput {
 	path?: string;
 }
 
+type TestExtensionInput = InlineExtension | CreateTestExtensionsResultInput;
+
 export async function createTestExtensionsResult(
-	inputs: Array<ExtensionFactory | CreateTestExtensionsResultInput>,
+	inputs: TestExtensionInput[],
 	cwd = process.cwd(),
 ): Promise<LoadExtensionsResult> {
 	const runtime = createExtensionRuntime();
@@ -190,9 +191,12 @@ export async function createTestExtensionsResult(
 	const extensions: Extension[] = [];
 
 	for (const [index, input] of inputs.entries()) {
-		const factory = typeof input === "function" ? input : input.factory;
-		const extensionPath =
-			typeof input === "function" ? `<inline:${index + 1}>` : (input.path ?? `<inline:${index + 1}>`);
+		const isObject = typeof input !== "function";
+		const hasName = isObject && "name" in input;
+		const hasPath = isObject && "path" in input && typeof input.path === "string" && input.path !== "";
+		const factory = isObject ? input.factory : input;
+		const extensionPath = hasName ? `<inline:${input.name}>` : hasPath ? input.path : `<inline:${index + 1}>`;
+
 		extensions.push(await loadExtensionFromFactory(factory, cwd, eventBus, runtime, extensionPath));
 	}
 
@@ -221,7 +225,9 @@ export function createTestResourceLoader(options: CreateTestResourceLoaderOption
 		getThemes: () => ({ themes: [], diagnostics: [] }),
 		getAgentsFiles: () => ({ agentsFiles: [] }),
 		getSystemPrompt: () => undefined,
+		getSystemPromptSource: () => undefined,
 		getAppendSystemPrompt: () => [],
+		getAppendSystemPromptSources: () => [],
 		extendResources: () => {},
 		reload: async () => {},
 	};
@@ -231,7 +237,7 @@ export function createTestResourceLoader(options: CreateTestResourceLoaderOption
  * Create an AgentSession for testing with proper setup and cleanup.
  * Use this for e2e tests that need real LLM calls.
  */
-export function createTestSession(options: TestSessionOptions = {}): TestSessionContext {
+export async function createTestSession(options: TestSessionOptions = {}): Promise<TestSessionContext> {
 	const tempDir = join(tmpdir(), `pi-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 	mkdirSync(tempDir, { recursive: true });
 
@@ -243,6 +249,7 @@ export function createTestSession(options: TestSessionOptions = {}): TestSession
 			systemPrompt: options.systemPrompt ?? "You are a helpful assistant. Be extremely concise.",
 			tools: createCodingTools(process.cwd()),
 		},
+		streamFn: streamSimple,
 	});
 
 	const sessionManager = options.inMemory ? SessionManager.inMemory() : SessionManager.create(tempDir);
@@ -253,14 +260,14 @@ export function createTestSession(options: TestSessionOptions = {}): TestSession
 	}
 
 	const authStorage = AuthStorage.create(join(tempDir, "auth.json"));
-	const modelRegistry = ModelRegistry.create(authStorage, tempDir);
+	const modelRegistry = await createModelRegistry(authStorage, tempDir);
 
 	const session = new AgentSession({
 		agent,
 		sessionManager,
 		settingsManager,
 		cwd: tempDir,
-		modelRegistry,
+		modelRuntime: getModelRuntime(modelRegistry),
 		resourceLoader: createTestResourceLoader(),
 	});
 

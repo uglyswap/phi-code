@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { getModel, getModels } from "../src/models.js";
+// Upstream 0.84 turned src/models.ts into the Models runtime and moved the static
+// catalog reads to the compat entrypoint. These cases guard runtime behaviour, not
+// the module they live in: an unknown id must come back undefined instead of
+// throwing (web-ui's ProviderKeyInput.testApiKey does `if (!model) return false`).
+import { getModel, getModels } from "../src/compat.ts";
 
 describe("getModel", () => {
 	it("returns the model for a known provider/id pair", () => {

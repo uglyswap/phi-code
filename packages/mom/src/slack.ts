@@ -2,8 +2,8 @@ import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient } from "@slack/web-api";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { basename, join } from "path";
-import * as log from "./log.js";
-import type { Attachment, ChannelStore } from "./store.js";
+import * as log from "./log.ts";
+import type { Attachment, ChannelStore } from "./store.ts";
 
 // ============================================================================
 // Types

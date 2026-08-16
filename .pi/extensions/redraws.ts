@@ -4,8 +4,8 @@
  * Exposes /tui to show TUI redraw stats.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import type { ExtensionAPI } from "@phi-code-admin/phi-code";
+import { Text } from "phi-code-tui";
 
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("tui", {

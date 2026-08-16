@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { beforeEach, describe, test } from "node:test";
-import { SmartRouter } from "../src/router.js";
-import type { RoutingConfig, TaskCategory } from "../src/types.js";
+import { SmartRouter } from "../src/router.ts";
+import type { RoutingConfig, TaskCategory } from "../src/types.ts";
 
 describe("SmartRouter", () => {
 	let router: SmartRouter;

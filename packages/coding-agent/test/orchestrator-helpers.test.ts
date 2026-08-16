@@ -4,7 +4,7 @@ import {
 	extractHandoff,
 	isTransientError,
 	parsePhaseVerdict,
-} from "../extensions/phi/providers/orchestrator-helpers.js";
+} from "../extensions/phi/providers/orchestrator-helpers.ts";
 
 describe("parsePhaseVerdict", () => {
 	test("parses the canonical verdict line with markdown hashes", () => {

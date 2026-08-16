@@ -3,7 +3,7 @@ import {
 	BARE_BUILTIN_COMMAND_NAMES,
 	BUILTIN_SLASH_COMMANDS,
 	matchBareBuiltinWithArgs,
-} from "../src/core/slash-commands.js";
+} from "../src/core/slash-commands.ts";
 
 describe("matchBareBuiltinWithArgs", () => {
 	test("detects a bare builtin invoked with arguments", () => {

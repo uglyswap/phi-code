@@ -4,7 +4,7 @@ import {
 	debugPhaseInstructions,
 	formatFailingState,
 	singleShotInstruction,
-} from "../extensions/phi/providers/debug-build-commands.js";
+} from "../extensions/phi/providers/debug-build-commands.ts";
 
 describe("formatFailingState", () => {
 	it("renders each supplied field and omits the rest", () => {

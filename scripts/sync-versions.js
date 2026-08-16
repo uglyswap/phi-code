@@ -1,36 +1,29 @@
 #!/usr/bin/env node
 
 /**
- * Syncs all workspace package dependency versions to match their current versions.
- * This ensures lockstep versioning across the monorepo.
+ * Validates lockstep versions for published packages, then synchronizes
+ * internal dependency versions in all workspace packages, including private ones.
  */
 
-import { readFileSync, writeFileSync, readdirSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { findPackageDirectories } from "./package-workspaces.mjs";
 
-const packagesDir = join(process.cwd(), 'packages');
-const packageDirs = readdirSync(packagesDir, { withFileTypes: true })
-	.filter(dirent => dirent.isDirectory())
-	.map(dirent => dirent.name);
+const GENERATED_PACKAGE_SUFFIXES = [join("coding-agent", "install-lock")];
 
-// Read all package.json files and build version map
-const packages = {};
-const versionMap = {};
+const packageRoot = process.argv[2] ?? "packages";
+const workspacePackages = findPackageDirectories(packageRoot)
+	.filter((directory) => !GENERATED_PACKAGE_SUFFIXES.some((suffix) => directory.endsWith(suffix)))
+	.map((directory) => {
+		const path = join(directory, "package.json");
+		return { data: JSON.parse(readFileSync(path, "utf8")), path };
+	});
+const publishedPackages = workspacePackages.filter((pkg) => pkg.data.private !== true);
+const versionMap = new Map(workspacePackages.map((pkg) => [pkg.data.name, pkg.data.version]));
 
-for (const dir of packageDirs) {
-	const pkgPath = join(packagesDir, dir, 'package.json');
-	try {
-		const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
-		packages[dir] = { path: pkgPath, data: pkg };
-		versionMap[pkg.name] = pkg.version;
-	} catch (e) {
-		console.error(`Failed to read ${pkgPath}:`, e.message);
-	}
-}
-
-console.log('Current versions:');
-for (const [name, version] of Object.entries(versionMap).sort()) {
-	console.log(`  ${name}: ${version}`);
+console.log("Current versions:");
+for (const pkg of [...publishedPackages].sort((a, b) => a.data.name.localeCompare(b.data.name))) {
+	console.log(`  ${pkg.data.name}: ${pkg.data.version}`);
 }
 
 // Versions are NOT required to be lockstep: this monorepo ships packages on
@@ -39,7 +32,10 @@ for (const [name, version] of Object.entries(versionMap).sort()) {
 // only warn on divergence and continue: the loop below already rewrites each
 // inter-package dependency to its target's own current version via versionMap,
 // which is exactly the correct behaviour for independent versioning.
-const versions = new Set(Object.values(versionMap));
+// versionMap is a Map: Object.values() on it always yields [], which made this
+// check silently report "lockstep" for every repo state. Read the published
+// packages directly — private ones are free to diverge.
+const versions = new Set(publishedPackages.map((pkg) => pkg.data.version));
 if (versions.size > 1) {
 	console.warn('\n⚠️  Packages are not at a single version (independent versioning).');
 	console.warn('   Inter-package dependencies will be synced to each target\'s own current version.');
@@ -49,49 +45,40 @@ if (versions.size > 1) {
 
 // Update all inter-package dependencies
 let totalUpdates = 0;
-for (const [dir, pkg] of Object.entries(packages)) {
-	let updated = false;
-	
-	// Check dependencies
-	if (pkg.data.dependencies) {
-		for (const [depName, currentVersion] of Object.entries(pkg.data.dependencies)) {
-			if (versionMap[depName]) {
-				const newVersion = `^${versionMap[depName]}`;
-				if (currentVersion !== newVersion) {
-					console.log(`\n${pkg.data.name}:`);
-					console.log(`  ${depName}: ${currentVersion} → ${newVersion}`);
-					pkg.data.dependencies[depName] = newVersion;
-					updated = true;
-					totalUpdates++;
-				}
-			}
+const updatedPackages = new Set();
+for (const pkg of workspacePackages) {
+	for (const dependencyType of ["dependencies", "devDependencies"]) {
+		const dependencies = pkg.data[dependencyType];
+		if (!dependencies) {
+			continue;
 		}
-	}
-	
-	// Check devDependencies
-	if (pkg.data.devDependencies) {
-		for (const [depName, currentVersion] of Object.entries(pkg.data.devDependencies)) {
-			if (versionMap[depName]) {
-				const newVersion = `^${versionMap[depName]}`;
-				if (currentVersion !== newVersion) {
-					console.log(`\n${pkg.data.name}:`);
-					console.log(`  ${depName}: ${currentVersion} → ${newVersion} (devDependencies)`);
-					pkg.data.devDependencies[depName] = newVersion;
-					updated = true;
-					totalUpdates++;
-				}
+
+		for (const [dependencyName, currentSpecifier] of Object.entries(dependencies)) {
+			// Registry aliases such as `npm:phi-code-ai@0.1.2` are never workspace-linked,
+			// so lockstep bumping them would point at a version that is not published yet.
+			const version = versionMap.get(dependencyName);
+			const newSpecifier = version ? `^${version}` : null;
+			if (!newSpecifier || currentSpecifier === newSpecifier) {
+				continue;
 			}
+
+			console.log(`\n${pkg.data.name}:`);
+			console.log(
+				`  ${dependencyName}: ${currentSpecifier} → ${newSpecifier}${dependencyType === "devDependencies" ? " (devDependencies)" : ""}`,
+			);
+			dependencies[dependencyName] = newSpecifier;
+			updatedPackages.add(pkg);
+			totalUpdates++;
 		}
-	}
-	
-	// Write if updated
-	if (updated) {
-		writeFileSync(pkg.path, JSON.stringify(pkg.data, null, '\t') + '\n');
 	}
 }
 
+for (const pkg of updatedPackages) {
+	writeFileSync(pkg.path, `${JSON.stringify(pkg.data, null, "\t")}\n`);
+}
+
 if (totalUpdates === 0) {
-	console.log('\nAll inter-package dependencies already in sync.');
+	console.log("\nAll inter-package dependencies are already in sync.");
 } else {
-	console.log(`\n✅ Updated ${totalUpdates} dependency version(s)`);
+	console.log(`\nUpdated ${totalUpdates} dependency version(s).`);
 }

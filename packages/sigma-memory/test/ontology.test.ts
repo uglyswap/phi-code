@@ -2,8 +2,8 @@ import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { existsSync, mkdirSync, rmSync, utimesSync } from "fs";
 import { join } from "path";
-import { OntologyManager } from "../src/ontology.js";
-import type { MemoryConfig } from "../src/types.js";
+import { OntologyManager } from "../src/ontology.ts";
+import type { MemoryConfig } from "../src/types.ts";
 
 describe("OntologyManager", () => {
 	let ontologyManager: OntologyManager;

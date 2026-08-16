@@ -7,8 +7,8 @@
  * source of truth; consumers project the fields they need.
  */
 
-import { ALIBABA_ENV_VAR, ALIBABA_MODELS, ALIBABA_PROVIDERS } from "./alibaba.js";
-import { OPENCODE_GO_AUTH_URL, OPENCODE_GO_ENV_VAR } from "./opencode-go.js";
+import { ALIBABA_ENV_VAR, ALIBABA_MODELS, ALIBABA_PROVIDERS } from "./alibaba.ts";
+import { OPENCODE_GO_AUTH_URL, OPENCODE_GO_ENV_VAR } from "./opencode-go.ts";
 
 export interface ProviderCatalogEntry {
 	id: string;

@@ -4,8 +4,8 @@ import {
 	parseReproCmd,
 	pickCandidateModels,
 	type RoutingLike,
-} from "../extensions/phi/providers/escalation.js";
-import type { CommandResult } from "../extensions/phi/providers/execution.js";
+} from "../extensions/phi/providers/escalation.ts";
+import type { CommandResult } from "../extensions/phi/providers/execution.ts";
 
 const run = (exitCode: number | null, over: Partial<CommandResult> = {}): CommandResult => ({
 	command: "cmd",

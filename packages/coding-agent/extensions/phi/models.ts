@@ -16,14 +16,15 @@
  */
 
 import { type ApiKeyStore, type ConfigWatcher, type ExtensionAPI, getApiKeyStore, getConfigWatcher } from "phi-code";
-import { getModels } from "phi-code-ai";
-import { formatWindow, inferContextWindow, parseContextWindow } from "./providers/context-window.js";
-import { fetchLiveModels, peekCache, resetLiveModelsCache, toPersistedModel } from "./providers/live-models.js";
+// Static catalog read: moved to the compat entrypoint in pi 0.84.
+import { getModels } from "phi-code-ai/compat";
+import { formatWindow, inferContextWindow, parseContextWindow } from "./providers/context-window.ts";
+import { fetchLiveModels, peekCache, resetLiveModelsCache, toPersistedModel } from "./providers/live-models.ts";
 import {
 	buildOpenCodeGoAnthropicProviderConfig,
 	buildOpenCodeGoProviderConfig,
 	getOpenCodeGoModels,
-} from "./providers/opencode-go.js";
+} from "./providers/opencode-go.ts";
 
 const PROVIDER_DISPLAY: Record<string, string> = {
 	opencode: "OpenCode Zen",

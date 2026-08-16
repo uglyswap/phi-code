@@ -199,7 +199,12 @@ class HostExecutor implements Executor {
 }
 
 class DockerExecutor implements Executor {
-	constructor(private container: string) {}
+	// Champ explicite : `erasableSyntaxOnly` interdit les parametres de constructeur.
+	private container: string;
+
+	constructor(container: string) {
+		this.container = container;
+	}
 
 	async exec(command: string, options?: ExecOptions): Promise<ExecResult> {
 		// Invoke docker directly with an argv array so no host shell quoting is

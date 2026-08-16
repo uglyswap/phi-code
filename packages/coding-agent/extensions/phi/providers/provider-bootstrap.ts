@@ -12,14 +12,14 @@
  * call site.
  */
 
-import { ALIBABA_PROVIDERS, buildAlibabaProviderConfig, validateAlibabaApiKey } from "./alibaba.js";
+import { ALIBABA_PROVIDERS, buildAlibabaProviderConfig, validateAlibabaApiKey } from "./alibaba.ts";
 import {
 	buildOpenCodeGoAnthropicProviderConfig,
 	buildOpenCodeGoProviderConfig,
 	OPENCODE_GO_FALLBACK_MODELS,
 	type OpenCodeGoModel,
 	validateOpenCodeGoApiKey,
-} from "./opencode-go.js";
+} from "./opencode-go.ts";
 
 export interface BootstrapModel {
 	id: string;

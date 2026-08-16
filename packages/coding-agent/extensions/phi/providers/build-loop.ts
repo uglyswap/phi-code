@@ -6,9 +6,9 @@
  * spent — report what still fails honestly, never a confident-wrong PASS).
  */
 
-import type { AcceptanceReport, CriterionResult } from "./acceptance.js";
-import type { FailingState } from "./debug-contract.js";
-import { type BreakingCase, breakingCasesToFailingStates } from "./redteam.js";
+import type { AcceptanceReport, CriterionResult } from "./acceptance.ts";
+import type { FailingState } from "./debug-contract.ts";
+import { type BreakingCase, breakingCasesToFailingStates } from "./redteam.ts";
 
 export type BuildStatus = "success" | "continue" | "partial";
 

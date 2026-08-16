@@ -1,12 +1,12 @@
 import type { AgentTool } from "phi-code-agent";
-import type { Executor } from "../sandbox.js";
-import { attachTool } from "./attach.js";
-import { createBashTool } from "./bash.js";
-import { createEditTool } from "./edit.js";
-import { createReadTool } from "./read.js";
-import { createWriteTool } from "./write.js";
+import type { Executor } from "../sandbox.ts";
+import { attachTool } from "./attach.ts";
+import { createBashTool } from "./bash.ts";
+import { createEditTool } from "./edit.ts";
+import { createReadTool } from "./read.ts";
+import { createWriteTool } from "./write.ts";
 
-export { setUploadFunction, setWorkspaceRoot } from "./attach.js";
+export { setUploadFunction, setWorkspaceRoot } from "./attach.ts";
 
 export function createMomTools(executor: Executor): AgentTool<any>[] {
 	return [

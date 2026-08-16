@@ -2,12 +2,12 @@
 
 import { existsSync, rmSync } from "node:fs";
 import { Command } from "commander";
-import { DefaultAddons, maybeDownloadAddons } from "./addons.js";
-import { ALLOW_GEOIP, downloadMMDB, removeMMDB } from "./locale.js";
-import { CamoufoxFetcher, INSTALL_DIR, installedVerStr } from "./pkgman.js";
-import { launchServer } from "./server.js";
-import { Camoufox } from "./sync_api.js";
-import { getAsBooleanFromENV } from "./utils.js";
+import { DefaultAddons, maybeDownloadAddons } from "./addons.ts";
+import { ALLOW_GEOIP, downloadMMDB, removeMMDB } from "./locale.ts";
+import { CamoufoxFetcher, INSTALL_DIR, installedVerStr } from "./pkgman.ts";
+import { launchServer } from "./server.ts";
+import { Camoufox } from "./sync_api.ts";
+import { getAsBooleanFromENV } from "./utils.ts";
 
 class CamoufoxUpdate extends CamoufoxFetcher {
 	currentVerStr: string | null;

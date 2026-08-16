@@ -21,7 +21,7 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, getApiKeyStore } from "phi-code";
-import { getProviderCatalog } from "./providers/catalog.js";
+import { getProviderCatalog } from "./providers/catalog.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 

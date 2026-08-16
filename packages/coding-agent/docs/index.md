@@ -4,17 +4,27 @@ phi is a minimal terminal coding harness. It is designed to stay small at the co
 
 ## Quick start
 
-On linux or mac you can install phi with curl:
+Install phi with npm:
+
+```bash
+npm install -g --ignore-scripts @phi-code-admin/phi-code
+```
+
+`--ignore-scripts` disables dependency lifecycle scripts during install. phi does not require install scripts for normal npm installs.
+
+On Linux or macOS, you can also use the installer:
 
 ```bash
 curl -fsSL https://pi.dev/install.sh | sh
 ```
 
-Or alternatively with npm:
+To uninstall phi itself, use npm for curl and npm installs:
 
 ```bash
-npm install -g @phi-code-admin/phi-code
+npm uninstall -g @phi-code-admin/phi-code
 ```
+
+For pnpm, Yarn, or Bun installs, use the matching global remove command: `pnpm remove -g @phi-code-admin/phi-code`, `yarn global remove @phi-code-admin/phi-code`, or `bun uninstall -g @phi-code-admin/phi-code`.
 
 Then run it in a project directory:
 
@@ -31,6 +41,9 @@ For the full first-run flow, see [Quickstart](quickstart.md).
 - [Quickstart](quickstart.md) - install, authenticate, and run a first session.
 - [Using phi](usage.md) - interactive mode, slash commands, context files, and CLI reference.
 - [Providers](providers.md) - subscription and API-key setup for built-in providers.
+- [llama.cpp](llama-cpp.md) - run a local router and manage models with `/llama`.
+- [Security](security.md) - project trust, sandbox boundaries, and vulnerability reporting.
+- [Containerization](containerization.md) - sandbox phi with Gondolin, Docker, or OpenShell.
 - [Settings](settings.md) - global and project settings.
 - [Keybindings](keybindings.md) - default shortcuts and custom keybindings.
 - [Sessions](sessions.md) - session management, branching, and tree navigation.
@@ -55,6 +68,7 @@ For the full first-run flow, see [Quickstart](quickstart.md).
 
 ## Reference
 
+- [Environment variables](environment-variables.md) - phi process configuration and session metadata available to bash tools.
 - [Session format](session-format.md) - JSONL session file format, entry types, and SessionManager API.
 
 ## Platform setup

@@ -6,7 +6,7 @@ import {
 	summarize,
 	type TaskRunResult,
 	validateTask,
-} from "../evals/lib.js";
+} from "../evals/lib.ts";
 
 const task = (id: string): EvalTask => ({ id, description: "d", prompt: "p", verify: "true" });
 

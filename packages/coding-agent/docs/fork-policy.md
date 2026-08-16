@@ -1,6 +1,6 @@
 # Fork policy — staying mergeable with upstream Pi
 
-phi-code is a fork of [pi-mono](https://github.com/earendil-works/pi-mono)
+phi-code is a fork of [pi-mono](https://github.com/uglyswap/phi-code)
 (`packages/coding-agent` = upstream's coding agent). This document defines
 exactly **what is rebranded and what deliberately stays "pi"**, so upstream
 updates can be merged with minimal conflicts and nobody "finishes" a rename
@@ -47,7 +47,7 @@ use these constants, never a hardcoded "pi" or "phi".**
 
 ## Merging upstream
 
-1. `git remote add upstream https://github.com/earendil-works/pi-mono.git && git fetch upstream`
+1. `git remote add upstream https://github.com/uglyswap/phi-code.git && git fetch upstream`
 2. Merge/cherry-pick into a branch. Conflicts should concentrate in the few
    rebranded files listed above — everything else is untouched by design.
 3. After merging, run the guard-rails: `npm run check && npm test`. The test

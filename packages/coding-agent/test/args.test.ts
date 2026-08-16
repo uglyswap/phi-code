@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { parseArgs } from "../src/cli/args.js";
+import { parseArgs } from "../src/cli/args.ts";
 
 describe("parseArgs", () => {
 	describe("--version flag", () => {
@@ -130,6 +130,11 @@ describe("parseArgs", () => {
 			expect(result.session).toBe("/path/to/session.jsonl");
 		});
 
+		test("parses --session-id", () => {
+			const result = parseArgs(["--session-id", "orchestrated-session"]);
+			expect(result.sessionId).toBe("orchestrated-session");
+		});
+
 		test("parses --fork", () => {
 			const result = parseArgs(["--fork", "1234abcd"]);
 			expect(result.fork).toBe("1234abcd");
@@ -149,6 +154,36 @@ describe("parseArgs", () => {
 		test("parses --models as comma-separated list", () => {
 			const result = parseArgs(["--models", "gpt-4o,claude-sonnet,gemini-pro"]);
 			expect(result.models).toEqual(["gpt-4o", "claude-sonnet", "gemini-pro"]);
+		});
+	});
+
+	describe("--name flag", () => {
+		test("parses --name flag with value", () => {
+			const result = parseArgs(["--name", "my-session"]);
+			expect(result.name).toBe("my-session");
+		});
+
+		test("parses -n shorthand", () => {
+			const result = parseArgs(["-n", "quick-session"]);
+			expect(result.name).toBe("quick-session");
+		});
+
+		test("preserves empty values for main validation", () => {
+			const result = parseArgs(["--name", ""]);
+			expect(result.name).toBe("");
+		});
+
+		test("reports missing value", () => {
+			const result = parseArgs(["--name"]);
+			expect(result.diagnostics).toEqual([{ type: "error", message: "--name requires a value" }]);
+		});
+
+		test("works alongside other flags", () => {
+			const result = parseArgs(["--name", "named-run", "--print", "--model", "gpt-4o", "hello"]);
+			expect(result.name).toBe("named-run");
+			expect(result.print).toBe(true);
+			expect(result.model).toBe("gpt-4o");
+			expect(result.messages).toEqual(["hello"]);
 		});
 	});
 
@@ -225,6 +260,20 @@ describe("parseArgs", () => {
 		});
 	});
 
+	describe("--use-theme flag", () => {
+		test("parses --use-theme", () => {
+			const result = parseArgs(["--use-theme", "light"]);
+			expect(result.useTheme).toBe("light");
+		});
+
+		test("reports when the theme name value is missing", () => {
+			const result = parseArgs(["--use-theme", "--print"]);
+			expect(result.useTheme).toBeUndefined();
+			expect(result.print).toBe(true);
+			expect(result.diagnostics).toEqual([{ type: "error", message: "--use-theme requires a theme name" }]);
+		});
+	});
+
 	describe("--no-skills flag", () => {
 		test("parses --no-skills flag", () => {
 			const result = parseArgs(["--no-skills"]);
@@ -258,6 +307,28 @@ describe("parseArgs", () => {
 		});
 	});
 
+	describe("project approval flags", () => {
+		test("parses --approve", () => {
+			const result = parseArgs(["--approve"]);
+			expect(result.projectTrustOverride).toBe(true);
+		});
+
+		test("parses -a shorthand", () => {
+			const result = parseArgs(["-a"]);
+			expect(result.projectTrustOverride).toBe(true);
+		});
+
+		test("parses --no-approve", () => {
+			const result = parseArgs(["--no-approve"]);
+			expect(result.projectTrustOverride).toBe(false);
+		});
+
+		test("parses -na shorthand", () => {
+			const result = parseArgs(["-na"]);
+			expect(result.projectTrustOverride).toBe(false);
+		});
+	});
+
 	describe("--verbose flag", () => {
 		test("parses --verbose flag", () => {
 			const result = parseArgs(["--verbose"]);
@@ -269,6 +340,31 @@ describe("parseArgs", () => {
 		test("parses --offline flag", () => {
 			const result = parseArgs(["--offline"]);
 			expect(result.offline).toBe(true);
+		});
+	});
+
+	describe("--tui-mode flag", () => {
+		test.each(["regular", "fullscreen"] as const)("parses %s mode", (mode) => {
+			const result = parseArgs(["--tui-mode", mode]);
+			expect(result.tuiMode).toBe(mode);
+		});
+
+		test("rejects invalid modes", () => {
+			const result = parseArgs(["--tui-mode", "other"]);
+			expect(result.diagnostics).toEqual([
+				{ type: "error", message: 'Invalid TUI mode "other". Valid values: regular, fullscreen' },
+			]);
+		});
+
+		test("requires a mode", () => {
+			const result = parseArgs(["--tui-mode"]);
+			expect(result.diagnostics).toEqual([{ type: "error", message: "--tui-mode requires regular or fullscreen" }]);
+		});
+
+		test("does not recognize the old --ui-mode flag", () => {
+			const result = parseArgs(["--ui-mode", "fullscreen"]);
+			expect(result.tuiMode).toBeUndefined();
+			expect(result.unknownFlags.get("ui-mode")).toBe("fullscreen");
 		});
 	});
 
@@ -301,6 +397,16 @@ describe("parseArgs", () => {
 		test("parses -t shorthand", () => {
 			const result = parseArgs(["-t", "read,bash"]);
 			expect(result.tools).toEqual(["read", "bash"]);
+		});
+
+		test("parses --exclude-tools flag", () => {
+			const result = parseArgs(["--exclude-tools", "read,bash"]);
+			expect(result.excludeTools).toEqual(["read", "bash"]);
+		});
+
+		test("parses -xt shorthand", () => {
+			const result = parseArgs(["-xt", "read,bash"]);
+			expect(result.excludeTools).toEqual(["read", "bash"]);
 		});
 
 		test("parses --no-tools with explicit --tools flags", () => {

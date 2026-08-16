@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.artifacts/
 *.log
 .DS_Store
 *.tsbuildinfo
@@ -7,6 +8,10 @@ dist/
 packages/*/dist/
 packages/*/dist-chrome/
 packages/*/dist-firefox/
+# phi-code: le catalogue de modeles genere EST versionne (build offline reproductible
+# depuis un clone neuf, sans acces reseau aux API providers). Il est regenere par
+# `npm run generate:models` a chaque release.
+packages/ai/src/providers/.model-generation-*/
 *.cpuprofile
 
 # Environment
@@ -44,3 +49,8 @@ collect.sh
 .binaries-cache/
 vendor-staging/
 packages/camoufox-bin-*/camoufox-bin/
+
+# Rapports de test locaux
+.vitest-report.json
+.vitest-ca.json
+.vitest-run.log

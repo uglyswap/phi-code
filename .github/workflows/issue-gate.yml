@@ -12,19 +12,18 @@ jobs:
       issues: write
     steps:
       - name: Check issue author
-        uses: actions/github-script@v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const APPROVED_FILE = '.github/APPROVED_CONTRIBUTORS';
             const VALID_CAPABILITIES = new Set(['issue', 'pr']);
-            const ISSUE_GATE_MESSAGE_MODE = 'refactor'; // Switch to 'normal' to restore the standard auto-close message.
+            const TRUSTED_BOT_AUTHORS = new Set(['dependabot[bot]', 'sentry[bot]', 'claude[bot]']);
             const issueAuthor = context.payload.issue.user.login;
             const defaultBranch = context.payload.repository.default_branch;
-            const issueCreatedDay = new Date(context.payload.issue.created_at).getUTCDay();
-            const isFridayThroughSunday = issueCreatedDay === 5 || issueCreatedDay === 6 || issueCreatedDay === 0;
+            const isBotAuthor = issueAuthor.endsWith('[bot]');
 
-            if (issueAuthor.endsWith('[bot]') || issueAuthor === 'dependabot[bot]') {
-              console.log(`Skipping bot: ${issueAuthor}`);
+            if (TRUSTED_BOT_AUTHORS.has(issueAuthor)) {
+              console.log(`Skipping trusted bot: ${issueAuthor}`);
               return;
             }
 
@@ -83,7 +82,7 @@ jobs:
             }
 
             const permission = await getPermission(issueAuthor);
-            if (['admin', 'maintain', 'write'].includes(permission)) {
+            if (!isBotAuthor && ['admin', 'maintain', 'write'].includes(permission)) {
               console.log(`${issueAuthor} is a collaborator with ${permission} access`);
               return;
             }
@@ -92,41 +91,20 @@ jobs:
             const approvedUsers = parseApprovedUsers(approvedContent);
             const capability = approvedUsers.get(issueAuthor.toLowerCase());
 
-            if (capability === 'issue' || capability === 'pr') {
+            if (!isBotAuthor && (capability === 'issue' || capability === 'pr')) {
               console.log(`${issueAuthor} is approved for ${capability}`);
               return;
             }
 
-            function buildNormalGateMessage() {
-              return [
-                'This issue was auto-closed. All issues from new contributors are auto-closed by default.',
-                ...(isFridayThroughSunday
-                  ? [
-                      'Issues submitted Friday through Sunday are not reviewed. If this is urgent, ask on Discord: https://discord.com/invite/3cU7Bz4UPx',
-                    ]
-                  : []),
-                '',
-                `Maintainers review auto-closed issues daily and reopen worthwhile ones. Issues that do not meet the quality bar in [CONTRIBUTING.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${defaultBranch}/CONTRIBUTING.md) will not be reopened or receive a reply.`,
-                '',
-                'If a maintainer replies `lgtmi` on one of your issues, your future issues will stay open. If a maintainer replies `lgtm`, your future issues and PRs will stay open.',
-                '',
-                `See [CONTRIBUTING.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${defaultBranch}/CONTRIBUTING.md).`,
-              ].join('\n');
-            }
-
-            function buildRefactorGateMessage() {
-              return [
-                'This issue was auto-closed. All issues will be closed until 2026-05-17 while the project refactor is being completed.',
-                '',
-                `The refactor is happening on \`${defaultBranch}\`: https://github.com/${context.repo.owner}/${context.repo.repo}/tree/${defaultBranch}`,
-                '',
-                'Issues closed during this period will not be reviewed. The reason is that the refactor will not get done otherwise, because issue triage has been taking about 8 hours per day.',
-                '',
-                'In case of emergency, ask on Discord: https://discord.com/invite/3cU7Bz4UPx',
-              ].join('\n');
-            }
-
-            const message = ISSUE_GATE_MESSAGE_MODE === 'refactor' ? buildRefactorGateMessage() : buildNormalGateMessage();
+            const message = [
+              'This issue was auto-closed. All issues from new contributors are auto-closed by default.',
+              '',
+              `Maintainers review auto-closed issues daily and reopen worthwhile ones. Issues that do not meet the quality bar in [CONTRIBUTING.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${defaultBranch}/CONTRIBUTING.md) will not be reopened or receive a reply.`,
+              '',
+              'If a maintainer replies `lgtmi` on one of your issues, your future issues will stay open. If a maintainer replies `lgtm`, your future issues and PRs will stay open. The command must be at the start of the reply (optionally after one or more `@username` mentions) or at the end.',
+              '',
+              `See [CONTRIBUTING.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/${defaultBranch}/CONTRIBUTING.md).`,
+            ].join('\n');
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -135,36 +113,17 @@ jobs:
               body: message,
             });
 
-            const labelsToAdd = [];
-            if (isFridayThroughSunday) labelsToAdd.push('closed-because-weekend');
-            if (ISSUE_GATE_MESSAGE_MODE === 'refactor') labelsToAdd.push('closed-because-refactor');
-
-            if (labelsToAdd.includes('closed-because-refactor')) {
-              try {
-                await github.rest.issues.createLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  name: 'closed-because-refactor',
-                  color: '5319e7',
-                  description: 'Closed while the project refactor is in progress',
-                });
-              } catch (error) {
-                if (error.status !== 422) throw error;
-              }
-            }
-
-            if (labelsToAdd.length > 0) {
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                labels: labelsToAdd,
-              });
-            }
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['untriaged'],
+            });
 
             await github.rest.issues.update({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
               state: 'closed',
+              state_reason: 'not_planned',
             });

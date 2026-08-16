@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { type CommandResult, passed, runArgv } from "../extensions/phi/providers/execution.js";
-import { probeDocker, resolveSandbox, type SandboxDeps } from "../extensions/phi/providers/sandbox.js";
+import { type CommandResult, passed, runArgv } from "../extensions/phi/providers/execution.ts";
+import { probeDocker, resolveSandbox, type SandboxDeps } from "../extensions/phi/providers/sandbox.ts";
 
 const ok = (over: Partial<CommandResult> = {}): CommandResult => ({
 	command: "x",

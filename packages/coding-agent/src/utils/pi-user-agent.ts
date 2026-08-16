@@ -1,4 +1,4 @@
-import { APP_NAME } from "../config.js";
+import { APP_NAME } from "../config.ts";
 
 // Function name kept as-is (upstream-merge friendly); the emitted UA string
 // follows the configured app name ("phi/<version> (...)" for phi-code).

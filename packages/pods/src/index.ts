@@ -1,2 +1,2 @@
 // Main library exports
-export * from "./types.js";
+export * from "./types.ts";

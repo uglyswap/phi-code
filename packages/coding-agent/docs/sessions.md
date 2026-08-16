@@ -10,6 +10,7 @@ Sessions auto-save to `~/.phi/agent/sessions/`, organized by working directory. 
 phi -c                  # Continue most recent session
 phi -r                  # Browse and select from past sessions
 phi --no-session        # Ephemeral mode; do not save
+phi --name "my task"    # Set session display name at startup
 phi --session <path|id> # Use a specific session file or partial session ID
 phi --fork <path|id>    # Fork a session file or partial session ID into a new session
 ```
@@ -54,6 +55,13 @@ Use `/name <name>` to set a human-readable session name:
 
 ```text
 /name Refactor auth module
+```
+
+Set the name at startup with `--name` or `-n`:
+
+```bash
+phi --name "Refactor auth module"
+phi --name "CI audit" -p "Review this build failure"
 ```
 
 Named sessions are easier to find in `/resume` and `phi -r`.

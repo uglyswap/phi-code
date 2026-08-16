@@ -21,9 +21,9 @@
  */
 
 import { ApiKeyStore, type ExtensionAPI, getApiKeyStore, getConfigWatcher } from "phi-code";
-import { pingAlibaba } from "./providers/alibaba.js";
-import { pingOpenCodeGo } from "./providers/opencode-go.js";
-import { bootstrapProviderConfig, isBootstrappableProvider } from "./providers/provider-bootstrap.js";
+import { pingAlibaba } from "./providers/alibaba.ts";
+import { pingOpenCodeGo } from "./providers/opencode-go.ts";
+import { bootstrapProviderConfig, isBootstrappableProvider } from "./providers/provider-bootstrap.ts";
 
 type ProviderPingFn = (key: string, timeoutMs?: number) => Promise<{ ok: boolean; error?: string }>;
 

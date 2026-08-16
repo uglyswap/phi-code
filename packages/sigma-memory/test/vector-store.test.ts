@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { existsSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
-import { VectorStore } from "../src/vector-store.js";
+import { VectorStore } from "../src/vector-store.ts";
 
 // Mock the embedding function to avoid downloading models in tests
 const _mockEmbedding = new Float32Array([0.1, 0.2, 0.3, 0.4]);

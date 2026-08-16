@@ -14,25 +14,25 @@ import {
 	addDefaultAddons,
 	confirmPaths,
 	type DefaultAddons,
-} from "./addons.js";
+} from "./addons.ts";
 import {
 	InvalidOS,
 	InvalidPropertyType,
 	NonFirefoxFingerprint,
 	UnknownProperty,
-} from "./exceptions.js";
+} from "./exceptions.ts";
 import {
 	fromBrowserforge,
 	generateFingerprint,
 	SUPPORTED_OS,
-} from "./fingerprints.js";
-import { publicIP, validIPv4, validIPv6 } from "./ip.js";
-import { geoipAllowed, getGeolocation, handleLocales } from "./locale.js";
-import FONTS from "./mappings/fonts.config.js";
-import { getPath, installedVerStr, launchPath, OS_NAME } from "./pkgman.js";
-import type { VirtualDisplay } from "./virtdisplay.js";
-import { LeakWarning } from "./warnings.js";
-import { sampleWebGL } from "./webgl/sample.js";
+} from "./fingerprints.ts";
+import { publicIP, validIPv4, validIPv6 } from "./ip.ts";
+import { geoipAllowed, getGeolocation, handleLocales } from "./locale.ts";
+import FONTS from "./mappings/fonts.config.ts";
+import { getPath, installedVerStr, launchPath, OS_NAME } from "./pkgman.ts";
+import type { VirtualDisplay } from "./virtdisplay.ts";
+import { LeakWarning } from "./warnings.ts";
+import { sampleWebGL } from "./webgl/sample.ts";
 
 type Screen = FingerprintGeneratorOptions["screen"];
 

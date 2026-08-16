@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { estimateFiles, MULTI_FILE_THRESHOLD, type Route, triage } from "../extensions/phi/providers/triage.js";
+import { estimateFiles, MULTI_FILE_THRESHOLD, type Route, triage } from "../extensions/phi/providers/triage.ts";
 
 describe("estimateFiles", () => {
 	it("defaults to 1 for prose with no paths", () => {

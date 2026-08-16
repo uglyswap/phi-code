@@ -6,9 +6,9 @@ import { customElement, property, state } from "lit/decorators.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { Brain, Loader2, Paperclip, Send, Sparkles, Square } from "lucide";
 import type { Model } from "phi-code-ai";
-import { type Attachment, loadAttachment } from "../utils/attachment-utils.js";
-import { i18n } from "../utils/i18n.js";
-import "./AttachmentTile.js";
+import { type Attachment, loadAttachment } from "../utils/attachment-utils.ts";
+import { i18n } from "../utils/i18n.ts";
+import "./AttachmentTile.ts";
 import type { ThinkingLevel } from "phi-code-agent";
 
 @customElement("message-editor")

@@ -27,6 +27,8 @@
 		"includes": [
 			"packages/*/src/**/*.ts",
 			"packages/*/test/**/*.ts",
+			"packages/session-backends/*/src/**/*.ts",
+			"packages/session-backends/*/test/**/*.ts",
 			"packages/coding-agent/examples/**/*.ts",
 			"packages/coding-agent/extensions/**/*.ts",
 			"packages/coding-agent/evals/**/*.ts",
@@ -40,6 +42,8 @@
 			"!**/test-sessions.ts",
 			"!**/models.generated.ts",
 			"!**/image-models.generated.ts",
+			"!**/*.models.ts",
+			"!packages/ai/src/providers/data/**/*",
 			"!packages/web-ui/src/app.css",
 			"!packages/mom/data/**/*",
 			"!packages/coding-agent/extensions/**/browser-extension/**/*",
