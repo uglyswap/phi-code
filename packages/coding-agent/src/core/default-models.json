@@ -2,6 +2,7 @@
   "$comment": "Alibaba Coding Plan bundled providers. Two variants: OpenAI-compat (/v1) for legacy compat, Anthropic-compat (/apps/anthropic) for native prompt caching (~99.7% cache hit). Both share the same API key (ALIBABA_CODING_PLAN_KEY) and the same 10 models. The qwen *-plus flagships (3.7/3.6/3.5) and kimi-k2.5 are multimodal (input text+image). Choose via /setup or /phi-init. Refresh model list via scripts/refresh-alibaba-models.ts.",
   "providers": {
     "alibaba-codingplan": {
+      "name": "Alibaba Coding Plan",
       "baseUrl": "https://coding-intl.dashscope.aliyuncs.com/v1",
       "api": "openai-completions",
       "apiKey": "$ALIBABA_CODING_PLAN_KEY",
@@ -10,7 +11,10 @@
           "id": "qwen3.7-plus",
           "name": "Qwen 3.7 Plus",
           "reasoning": true,
-          "input": ["text", "image"],
+          "input": [
+            "text",
+            "image"
+          ],
           "contextWindow": 1000000,
           "maxTokens": 16384
         },
@@ -18,7 +22,10 @@
           "id": "qwen3.6-plus",
           "name": "Qwen 3.6 Plus",
           "reasoning": true,
-          "input": ["text", "image"],
+          "input": [
+            "text",
+            "image"
+          ],
           "contextWindow": 1000000,
           "maxTokens": 16384
         },
@@ -26,7 +33,10 @@
           "id": "qwen3.5-plus",
           "name": "Qwen 3.5 Plus",
           "reasoning": true,
-          "input": ["text", "image"],
+          "input": [
+            "text",
+            "image"
+          ],
           "contextWindow": 1000000,
           "maxTokens": 16384
         },
@@ -34,7 +44,9 @@
           "id": "qwen3-max-2026-01-23",
           "name": "Qwen 3 Max",
           "reasoning": true,
-          "input": ["text"],
+          "input": [
+            "text"
+          ],
           "contextWindow": 262144,
           "maxTokens": 16384
         },
@@ -42,7 +54,9 @@
           "id": "qwen3-coder-plus",
           "name": "Qwen 3 Coder Plus",
           "reasoning": true,
-          "input": ["text"],
+          "input": [
+            "text"
+          ],
           "contextWindow": 1000000,
           "maxTokens": 16384
         },
@@ -50,7 +64,9 @@
           "id": "qwen3-coder-next",
           "name": "Qwen 3 Coder Next",
           "reasoning": true,
-          "input": ["text"],
+          "input": [
+            "text"
+          ],
           "contextWindow": 1000000,
           "maxTokens": 16384
         },
@@ -58,7 +74,10 @@
           "id": "kimi-k2.5",
           "name": "Kimi K2.5",
           "reasoning": true,
-          "input": ["text", "image"],
+          "input": [
+            "text",
+            "image"
+          ],
           "contextWindow": 262144,
           "maxTokens": 16384
         },
@@ -66,7 +85,9 @@
           "id": "glm-5",
           "name": "GLM 5",
           "reasoning": true,
-          "input": ["text"],
+          "input": [
+            "text"
+          ],
           "contextWindow": 200000,
           "maxTokens": 128000
         },
@@ -74,7 +95,9 @@
           "id": "glm-4.7",
           "name": "GLM 4.7",
           "reasoning": true,
-          "input": ["text"],
+          "input": [
+            "text"
+          ],
           "contextWindow": 200000,
           "maxTokens": 128000
         },
@@ -82,13 +105,16 @@
           "id": "MiniMax-M2.5",
           "name": "MiniMax M2.5",
           "reasoning": true,
-          "input": ["text"],
+          "input": [
+            "text"
+          ],
           "contextWindow": 1000000,
           "maxTokens": 16384
         }
       ]
     },
     "alibaba-codingplan-anthropic": {
+      "name": "Alibaba Coding Plan (Anthropic-compat)",
       "baseUrl": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
       "api": "anthropic-messages",
       "apiKey": "$ALIBABA_CODING_PLAN_KEY",
@@ -97,91 +123,135 @@
           "id": "qwen3.7-plus",
           "name": "Qwen 3.7 Plus (Anthropic-compat)",
           "reasoning": true,
-          "input": ["text", "image"],
+          "input": [
+            "text",
+            "image"
+          ],
           "contextWindow": 1000000,
           "maxTokens": 16384,
-          "compat": { "supportsLongCacheRetention": true }
+          "compat": {
+            "supportsLongCacheRetention": true
+          }
         },
         {
           "id": "qwen3.6-plus",
           "name": "Qwen 3.6 Plus (Anthropic-compat)",
           "reasoning": true,
-          "input": ["text", "image"],
+          "input": [
+            "text",
+            "image"
+          ],
           "contextWindow": 1000000,
           "maxTokens": 16384,
-          "compat": { "supportsLongCacheRetention": true }
+          "compat": {
+            "supportsLongCacheRetention": true
+          }
         },
         {
           "id": "qwen3.5-plus",
           "name": "Qwen 3.5 Plus (Anthropic-compat)",
           "reasoning": true,
-          "input": ["text", "image"],
+          "input": [
+            "text",
+            "image"
+          ],
           "contextWindow": 1000000,
           "maxTokens": 16384,
-          "compat": { "supportsLongCacheRetention": true }
+          "compat": {
+            "supportsLongCacheRetention": true
+          }
         },
         {
           "id": "qwen3-max-2026-01-23",
           "name": "Qwen 3 Max (Anthropic-compat)",
           "reasoning": true,
-          "input": ["text"],
+          "input": [
+            "text"
+          ],
           "contextWindow": 262144,
           "maxTokens": 16384,
-          "compat": { "supportsLongCacheRetention": true }
+          "compat": {
+            "supportsLongCacheRetention": true
+          }
         },
         {
           "id": "qwen3-coder-plus",
           "name": "Qwen 3 Coder Plus (Anthropic-compat)",
           "reasoning": true,
-          "input": ["text"],
+          "input": [
+            "text"
+          ],
           "contextWindow": 1000000,
           "maxTokens": 16384,
-          "compat": { "supportsLongCacheRetention": true }
+          "compat": {
+            "supportsLongCacheRetention": true
+          }
         },
         {
           "id": "qwen3-coder-next",
           "name": "Qwen 3 Coder Next (Anthropic-compat)",
           "reasoning": true,
-          "input": ["text"],
+          "input": [
+            "text"
+          ],
           "contextWindow": 1000000,
           "maxTokens": 16384,
-          "compat": { "supportsLongCacheRetention": true }
+          "compat": {
+            "supportsLongCacheRetention": true
+          }
         },
         {
           "id": "kimi-k2.5",
           "name": "Kimi K2.5 (Anthropic-compat)",
           "reasoning": true,
-          "input": ["text", "image"],
+          "input": [
+            "text",
+            "image"
+          ],
           "contextWindow": 262144,
           "maxTokens": 16384,
-          "compat": { "supportsLongCacheRetention": true }
+          "compat": {
+            "supportsLongCacheRetention": true
+          }
         },
         {
           "id": "glm-5",
           "name": "GLM 5 (Anthropic-compat)",
           "reasoning": true,
-          "input": ["text"],
+          "input": [
+            "text"
+          ],
           "contextWindow": 200000,
           "maxTokens": 128000,
-          "compat": { "supportsLongCacheRetention": true }
+          "compat": {
+            "supportsLongCacheRetention": true
+          }
         },
         {
           "id": "glm-4.7",
           "name": "GLM 4.7 (Anthropic-compat)",
           "reasoning": true,
-          "input": ["text"],
+          "input": [
+            "text"
+          ],
           "contextWindow": 200000,
           "maxTokens": 128000,
-          "compat": { "supportsLongCacheRetention": true }
+          "compat": {
+            "supportsLongCacheRetention": true
+          }
         },
         {
           "id": "MiniMax-M2.5",
           "name": "MiniMax M2.5 (Anthropic-compat)",
           "reasoning": true,
-          "input": ["text"],
+          "input": [
+            "text"
+          ],
           "contextWindow": 1000000,
           "maxTokens": 16384,
-          "compat": { "supportsLongCacheRetention": true }
+          "compat": {
+            "supportsLongCacheRetention": true
+          }
         }
       ]
     }

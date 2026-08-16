@@ -364,9 +364,20 @@ export function getUpdateInstruction(packageName: string): string {
  * - For Node.js (dist/): returns __dirname (the dist/ directory)
  * - For tsx (src/): returns parent directory (the package root)
  */
+/**
+ * Environment lookup usable during module initialisation.
+ *
+ * `core/env-vars.ts` derives the prefix from APP_NAME, but APP_NAME comes from the
+ * package.json that getPackageDir() is what locates — so the brand is a literal
+ * here. The inherited PI_* name stays accepted.
+ */
+function readBootstrapEnv(suffix: string): string | undefined {
+	return process.env[`PHI_${suffix}`] ?? process.env[`PI_${suffix}`];
+}
+
 export function getPackageDir(): string {
 	// Allow override via environment variable (useful for Nix/Guix where store paths tokenize poorly)
-	const envDir = process.env.PI_PACKAGE_DIR;
+	const envDir = readBootstrapEnv("PACKAGE_DIR");
 	if (envDir) {
 		return normalizePath(envDir);
 	}
@@ -503,7 +514,7 @@ const DEFAULT_SHARE_VIEWER_URL = "https://pi.dev/session/";
 
 /** Get the share viewer URL for a gist ID */
 export function getShareViewerUrl(gistId: string): string {
-	const baseUrl = process.env.PI_SHARE_VIEWER_URL || DEFAULT_SHARE_VIEWER_URL;
+	const baseUrl = readBootstrapEnv("SHARE_VIEWER_URL") || DEFAULT_SHARE_VIEWER_URL;
 	return `${baseUrl}#${gistId}`;
 }
 

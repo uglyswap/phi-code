@@ -15,6 +15,7 @@ import {
 	trackDetachedChildPid,
 	untrackDetachedChildPid,
 } from "../../utils/shell.ts";
+import { deleteBrandedEnv, setBrandedEnv } from "../env-vars.ts";
 import { getExperimentalToolSampling } from "../experimental.ts";
 import type { ExtensionContext, ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import { OutputAccumulator } from "./output-accumulator.ts";
@@ -323,21 +324,21 @@ function resolveSpawnContext(
 	ctx: ExtensionContext | undefined,
 ): BashSpawnContext {
 	const env = { ...getShellEnv() };
-	delete env.PI_SESSION_ID;
-	delete env.PI_SESSION_FILE;
-	delete env.PI_PROVIDER;
-	delete env.PI_MODEL;
-	delete env.PI_REASONING_LEVEL;
+	// Exposed under both the branded PHI_* names and the inherited PI_* ones, so a
+	// script written for either keeps working. Always cleared first: a stale value
+	// inherited from the parent shell must never leak into a command.
+	const SESSION_ENV_SUFFIXES = ["SESSION_ID", "SESSION_FILE", "PROVIDER", "MODEL", "REASONING_LEVEL"] as const;
+	for (const suffix of SESSION_ENV_SUFFIXES) deleteBrandedEnv(env, suffix);
 	if (exposeSessionEnvironment && ctx) {
 		const model = ctx.model;
-		env.PI_SESSION_ID = ctx.sessionManager.getSessionId();
+		setBrandedEnv(env, "SESSION_ID", ctx.sessionManager.getSessionId());
 		const sessionFile = ctx.sessionManager.getSessionFile();
-		if (sessionFile) env.PI_SESSION_FILE = sessionFile;
+		if (sessionFile) setBrandedEnv(env, "SESSION_FILE", sessionFile);
 		if (model) {
-			env.PI_PROVIDER = model.provider;
-			env.PI_MODEL = model.id;
+			setBrandedEnv(env, "PROVIDER", model.provider);
+			setBrandedEnv(env, "MODEL", model.id);
 		}
-		if (ctx.thinkingLevel) env.PI_REASONING_LEVEL = ctx.thinkingLevel;
+		if (ctx.thinkingLevel) setBrandedEnv(env, "REASONING_LEVEL", ctx.thinkingLevel);
 	}
 	const baseContext: BashSpawnContext = { command, cwd, env };
 	return spawnHook ? spawnHook(baseContext) : baseContext;

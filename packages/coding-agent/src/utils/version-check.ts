@@ -1,5 +1,6 @@
 import { compare, valid } from "semver";
 import { PACKAGE_NAME } from "../config.ts";
+import { readBrandedEnv } from "../core/env-vars.ts";
 import { fetchWithRetry } from "./management-http.ts";
 import { getPiUserAgent } from "./pi-user-agent.ts";
 
@@ -59,7 +60,7 @@ export async function getLatestRelease(
 ): Promise<LatestRelease | undefined> {
 	// PI_SKIP_VERSION_CHECK only disables the *automatic* check
 	// (checkForNewVersion); an explicit `phi update` still queries the registry.
-	if (process.env.PI_OFFLINE) return undefined;
+	if (readBrandedEnv("OFFLINE")) return undefined;
 
 	const response = await fetchWithRetry(
 		`${NPM_REGISTRY_URL}/${PACKAGE_NAME}/latest`,

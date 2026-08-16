@@ -116,9 +116,16 @@ describe("providers/opencode-go", () => {
 				{ id: "glm-5", name: "GLM 5" },
 				{ id: "qwen3-coder" },
 			]);
-			expect(cfg.baseUrl).toBe("https://opencode.ai/zen/go/v1");
-			expect(cfg.api).toBe("openai-completions");
+			// Provider-level baseUrl/api must stay ABSENT: pi 0.84 ships a built-in
+			// opencode-go catalog whose Anthropic-compat models live at ".../zen/go",
+			// and a provider-wide override sent them to ".../zen/go/v1/v1/messages".
+			expect(cfg.baseUrl).toBeUndefined();
+			expect(cfg.api).toBeUndefined();
 			expect(cfg.apiKey).toBe("k");
+			for (const model of cfg.models) {
+				expect(model.api).toBe("openai-completions");
+				expect(model.baseUrl).toBe("https://opencode.ai/zen/go/v1");
+			}
 			expect(cfg.models[0]).toMatchObject({
 				id: "kimi-k2.6",
 				name: "Kimi K2.6",
