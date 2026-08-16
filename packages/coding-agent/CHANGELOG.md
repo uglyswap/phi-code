@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.98.1] - 2026-08-17
+
+### Fixed — configs written before 0.98.0 are repaired at startup
+
+0.98.0 stopped phi from writing a provider-level endpoint for `opencode-go`, but
+it did not clean the one already in `models.json`. That stale
+`"baseUrl": "https://opencode.ai/zen/go/v1"` still applied to the built-in
+Anthropic-compat models of the same provider, so `minimax-m3` and `qwen3.7-plus`
+kept resolving to `.../zen/go/v1/v1/messages` and failing.
+
+A startup migration now moves the endpoint down onto the models the entry itself
+declares and removes it from the provider, leaving the built-in models on their
+own endpoint. It is idempotent, only touches provider ids that also exist in the
+built-in catalog, and reports what it changed. 3 tests.
+
 ## [0.98.0] - 2026-08-17
 
 ### Merged — upstream pi 0.74.0 → 0.84.2 (1627 commits, 10 minor releases)

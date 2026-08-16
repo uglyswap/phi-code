@@ -176,3 +176,120 @@ describe("config value env var syntax migration", () => {
 		}
 	});
 });
+
+describe("colliding provider endpoint migration", () => {
+	const tempDirs: string[] = [];
+
+	afterEach(() => {
+		for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+		vi.restoreAllMocks();
+	});
+
+	function createAgentDir(): string {
+		const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "phi-provider-endpoint-migration-"));
+		tempDirs.push(agentDir);
+		return agentDir;
+	}
+
+	function withAgentDir(agentDir: string, fn: () => void): void {
+		const previous = process.env[ENV_AGENT_DIR];
+		process.env[ENV_AGENT_DIR] = agentDir;
+		try {
+			fn();
+		} finally {
+			if (previous === undefined) delete process.env[ENV_AGENT_DIR];
+			else process.env[ENV_AGENT_DIR] = previous;
+		}
+	}
+
+	function readModels(agentDir: string) {
+		return JSON.parse(fs.readFileSync(path.join(agentDir, "models.json"), "utf-8")) as {
+			providers: Record<string, { baseUrl?: string; api?: string; models?: Array<Record<string, unknown>> }>;
+		};
+	}
+
+	it("moves a provider-level endpoint onto the models the entry declares", () => {
+		const agentDir = createAgentDir();
+		fs.writeFileSync(
+			path.join(agentDir, "models.json"),
+			`${JSON.stringify(
+				{
+					providers: {
+						"opencode-go": {
+							baseUrl: "https://opencode.ai/zen/go/v1",
+							api: "openai-completions",
+							apiKey: "sk-test",
+							models: [{ id: "glm-5.2" }, { id: "kimi-k2.6", baseUrl: "https://custom.example/v1" }],
+						},
+					},
+				},
+				null,
+				2,
+			)}\n`,
+			"utf-8",
+		);
+
+		withAgentDir(agentDir, () => runMigrations(agentDir));
+
+		const entry = readModels(agentDir).providers["opencode-go"];
+		// Provider level is cleared: it also captured the built-in Anthropic-compat
+		// models of the same provider and sent them to ".../zen/go/v1/v1/messages".
+		expect(entry.baseUrl).toBeUndefined();
+		expect(entry.api).toBeUndefined();
+		expect(entry.models?.[0]).toMatchObject({
+			id: "glm-5.2",
+			baseUrl: "https://opencode.ai/zen/go/v1",
+			api: "openai-completions",
+		});
+		// A model that already declared its own endpoint keeps it.
+		expect(entry.models?.[1]).toMatchObject({ id: "kimi-k2.6", baseUrl: "https://custom.example/v1" });
+	});
+
+	it("leaves an already-migrated entry untouched", () => {
+		const agentDir = createAgentDir();
+		const content = `${JSON.stringify(
+			{
+				providers: {
+					"opencode-go": {
+						apiKey: "sk-test",
+						models: [{ id: "glm-5.2", baseUrl: "https://opencode.ai/zen/go/v1", api: "openai-completions" }],
+					},
+				},
+			},
+			null,
+			2,
+		)}\n`;
+		fs.writeFileSync(path.join(agentDir, "models.json"), content, "utf-8");
+
+		withAgentDir(agentDir, () => runMigrations(agentDir));
+
+		expect(fs.readFileSync(path.join(agentDir, "models.json"), "utf-8")).toBe(content);
+	});
+
+	it("does not touch providers that have no built-in counterpart", () => {
+		const agentDir = createAgentDir();
+		fs.writeFileSync(
+			path.join(agentDir, "models.json"),
+			`${JSON.stringify(
+				{
+					providers: {
+						"alibaba-codingplan": {
+							baseUrl: "https://coding-intl.dashscope.aliyuncs.com/v1",
+							api: "openai-completions",
+							models: [{ id: "qwen3.7-plus" }],
+						},
+					},
+				},
+				null,
+				2,
+			)}\n`,
+			"utf-8",
+		);
+
+		withAgentDir(agentDir, () => runMigrations(agentDir));
+
+		const entry = readModels(agentDir).providers["alibaba-codingplan"];
+		expect(entry.baseUrl).toBe("https://coding-intl.dashscope.aliyuncs.com/v1");
+		expect(entry.models?.[0]).not.toHaveProperty("baseUrl");
+	});
+});
