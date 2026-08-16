@@ -7,6 +7,16 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, w
 import { basename, dirname, join } from "path";
 import { CONFIG_DIR_NAME, getAgentDir, getBinDir } from "./config.ts";
 import { migrateKeybindingsConfig } from "./core/keybindings.ts";
+import { stripJsonComments } from "./utils/json.ts";
+
+/** Provider ids phi used to configure itself and that pi now also ships built in. */
+const BUILTIN_COLLIDING_PROVIDER_IDS = ["opencode-go"] as const;
+
+interface ProviderEntry {
+	baseUrl?: string;
+	api?: string;
+	models?: Array<{ baseUrl?: string; api?: string }>;
+}
 
 const MIGRATION_GUIDE_URL = "https://github.com/uglyswap/phi-code/blob/main/packages/coding-agent/CHANGELOG.md";
 const EXTENSIONS_DOC_URL = "https://github.com/uglyswap/phi-code/blob/main/packages/coding-agent/docs/extensions.md";
@@ -322,6 +332,74 @@ export async function showDeprecationWarnings(warnings: string[]): Promise<void>
  *
  * @returns Object with migration results and deprecation warnings
  */
+
+/**
+ * Scope a custom provider's endpoint to its own models when the provider id also
+ * exists in the built-in catalog.
+ *
+ * phi <= 0.97 wrote `opencode-go` into models.json with a provider-level
+ * `baseUrl` of `https://opencode.ai/zen/go/v1`. pi 0.84 then shipped a built-in
+ * `opencode-go` catalog whose Anthropic-compat models (minimax-m3, qwen3.7-plus…)
+ * live at `https://opencode.ai/zen/go`, and a provider-level override applies to
+ * those too — their requests went to `.../zen/go/v1/v1/messages` and 404'd.
+ *
+ * The endpoint moves down onto the models the entry itself declares (which do
+ * need it) and is removed from the provider, so the built-in models keep theirs.
+ * Idempotent: an entry without a provider-level endpoint is left untouched.
+ */
+function migrateCollidingProviderEndpoints(): string[] {
+	const modelsPath = join(getAgentDir(), "models.json");
+	if (!existsSync(modelsPath)) return [];
+
+	let raw: string;
+	try {
+		raw = readFileSync(modelsPath, "utf-8");
+	} catch {
+		return [];
+	}
+
+	let config: { providers?: Record<string, ProviderEntry> };
+	try {
+		config = JSON.parse(stripJsonComments(raw)) as { providers?: Record<string, ProviderEntry> };
+	} catch {
+		// A malformed models.json is reported by the model runtime with a precise
+		// error; a migration must never be the thing that fails first.
+		return [];
+	}
+
+	const providers = config.providers;
+	if (!providers) return [];
+
+	const migrated: string[] = [];
+	for (const providerId of BUILTIN_COLLIDING_PROVIDER_IDS) {
+		const entry = providers[providerId];
+		if (!entry || typeof entry !== "object") continue;
+		if (entry.baseUrl === undefined && entry.api === undefined) continue;
+
+		for (const model of entry.models ?? []) {
+			if (entry.baseUrl !== undefined && model.baseUrl === undefined) model.baseUrl = entry.baseUrl;
+			if (entry.api !== undefined && model.api === undefined) model.api = entry.api;
+		}
+		entry.baseUrl = undefined;
+		entry.api = undefined;
+		migrated.push(providerId);
+	}
+
+	if (migrated.length === 0) return [];
+
+	try {
+		writeFileSync(
+			modelsPath,
+			`${JSON.stringify(config, null, 2)}
+`,
+			"utf-8",
+		);
+	} catch {
+		return [];
+	}
+	return migrated;
+}
+
 export function runMigrations(cwd: string): {
 	migratedAuthProviders: string[];
 	deprecationWarnings: string[];
@@ -331,5 +409,11 @@ export function runMigrations(cwd: string): {
 	migrateToolsToBin();
 	migrateKeybindingsConfigFile();
 	const deprecationWarnings = migrateExtensionSystem(cwd);
+	for (const providerId of migrateCollidingProviderEndpoints()) {
+		deprecationWarnings.push(
+			`models.json: the endpoint of provider "${providerId}" was moved onto its own models. ` +
+				`It also applied to the built-in models of the same provider, which broke their requests.`,
+		);
+	}
 	return { migratedAuthProviders, deprecationWarnings };
 }
