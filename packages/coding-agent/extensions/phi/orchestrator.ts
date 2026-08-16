@@ -22,47 +22,47 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "phi-code";
-import { type AgentDef, loadAgentDef } from "./providers/agent-def.js";
-import { runCandidateFanout } from "./providers/candidate-fanout.js";
-import { diffChangedLines } from "./providers/candidate-select.js";
+import { type AgentDef, loadAgentDef } from "./providers/agent-def.ts";
+import { runCandidateFanout } from "./providers/candidate-fanout.ts";
+import { diffChangedLines } from "./providers/candidate-select.ts";
 import {
 	buildVerifyInstruction,
 	debugPhaseInstructions,
 	reproAuditInstruction,
 	singleShotInstruction,
-} from "./providers/debug-build-commands.js";
+} from "./providers/debug-build-commands.ts";
 import {
 	decideVerify,
 	type FailingState,
 	parseFailingState,
 	type VerifiedCandidate,
-} from "./providers/debug-contract.js";
+} from "./providers/debug-contract.ts";
 import {
 	decideEscalation,
 	parseReproCmd,
 	pickCandidateModels,
 	type RoutingLike,
 	shotBudgetMs,
-} from "./providers/escalation.js";
-import { passed, runCommand, tail } from "./providers/execution.js";
-import { defaultExplorerSpecs, READONLY_EXPLORER_TOOLS, runExploreFanout } from "./providers/explore-fanout.js";
+} from "./providers/escalation.ts";
+import { passed, runCommand, tail } from "./providers/execution.ts";
+import { defaultExplorerSpecs, READONLY_EXPLORER_TOOLS, runExploreFanout } from "./providers/explore-fanout.ts";
 import {
 	analyzePhaseMessages,
 	buildNextBrief,
 	decidePhaseTransition,
 	resolvePhaseOutcome,
 	type StructuredPhaseResult,
-} from "./providers/phase-machine.js";
-import { resolveSandbox, type Sandbox } from "./providers/sandbox.js";
+} from "./providers/phase-machine.ts";
+import { resolveSandbox, type Sandbox } from "./providers/sandbox.ts";
 import {
 	appendRunRecord,
 	buildRunRecord,
 	type PhaseRecord,
 	parseRunsJsonl,
 	summarizeRuns,
-} from "./providers/telemetry.js";
-import { discoverTargetedTests, fsSeamsFor } from "./providers/test-discovery.js";
-import { looksLikeBugReport, triage } from "./providers/triage.js";
+} from "./providers/telemetry.ts";
+import { discoverTargetedTests, fsSeamsFor } from "./providers/test-discovery.ts";
+import { looksLikeBugReport, triage } from "./providers/triage.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 

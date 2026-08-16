@@ -17,7 +17,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertUniqueIds, type EvalTask, formatReport, summarize, type TaskRunResult, validateTask } from "./lib.js";
+import { assertUniqueIds, type EvalTask, formatReport, summarize, type TaskRunResult, validateTask } from "./lib.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 

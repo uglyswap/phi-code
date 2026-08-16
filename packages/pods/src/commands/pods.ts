@@ -1,9 +1,9 @@
 import chalk from "chalk";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { addPod, loadConfig, removePod, setActivePod } from "../config.js";
-import { scpFile, sshExec, sshExecStream } from "../ssh.js";
-import type { GPU, Pod } from "../types.js";
+import { addPod, loadConfig, removePod, setActivePod } from "../config.ts";
+import { scpFile, sshExec, sshExecStream } from "../ssh.ts";
+import type { GPU, Pod } from "../types.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

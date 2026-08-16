@@ -9,7 +9,7 @@ import {
 	imageTagFor,
 	type SandboxRecipe,
 	toBindSource,
-} from "../extensions/phi/providers/sandbox-plan.js";
+} from "../extensions/phi/providers/sandbox-plan.ts";
 
 describe("detectToolchain", () => {
 	it("detects node from package.json", () => {

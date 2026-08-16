@@ -20,11 +20,11 @@
  */
 
 import type { ExtensionAPI } from "phi-code";
-import { I18N_NAMESPACE } from "./state/i18n-bridge.js";
-import { replayFromBranch } from "./state/replay.js";
-import { replaceState } from "./state/store.js";
-import { registerTodosCommand, registerTodoTool, TOOL_NAME } from "./todo.js";
-import { TodoOverlay } from "./todo-overlay.js";
+import { I18N_NAMESPACE } from "./state/i18n-bridge.ts";
+import { replayFromBranch } from "./state/replay.ts";
+import { replaceState } from "./state/store.ts";
+import { registerTodosCommand, registerTodoTool, TOOL_NAME } from "./todo.ts";
+import { TodoOverlay } from "./todo-overlay.ts";
 
 type I18nLoader = {
 	registerLocalesFromDir: (namespace: string, packageUrl: string, options?: { label?: string }) => void;

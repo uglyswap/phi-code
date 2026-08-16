@@ -3,16 +3,16 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createCandidateWorktree, worktreePatch } from "../extensions/phi/providers/candidate-fanout.js";
-import { reproAuditInstruction } from "../extensions/phi/providers/debug-build-commands.js";
-import { shotBudgetMs } from "../extensions/phi/providers/escalation.js";
-import { parseRunsJsonl, summarizeRuns } from "../extensions/phi/providers/telemetry.js";
+import { createCandidateWorktree, worktreePatch } from "../extensions/phi/providers/candidate-fanout.ts";
+import { reproAuditInstruction } from "../extensions/phi/providers/debug-build-commands.ts";
+import { shotBudgetMs } from "../extensions/phi/providers/escalation.ts";
+import { parseRunsJsonl, summarizeRuns } from "../extensions/phi/providers/telemetry.ts";
 import {
 	type DiscoverySeams,
 	discoverTargetedTests,
 	testCandidatesFor,
-} from "../extensions/phi/providers/test-discovery.js";
-import { looksLikeBugReport } from "../extensions/phi/providers/triage.js";
+} from "../extensions/phi/providers/test-discovery.ts";
+import { looksLikeBugReport } from "../extensions/phi/providers/triage.ts";
 
 // ── 1. Targeted test discovery (flask-4992 oracle upgrade) ────────────
 describe("test-discovery", () => {

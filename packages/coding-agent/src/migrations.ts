@@ -5,8 +5,8 @@
 import chalk from "chalk";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
 import { basename, dirname, join } from "path";
-import { CONFIG_DIR_NAME, getAgentDir, getBinDir } from "./config.js";
-import { migrateKeybindingsConfig } from "./core/keybindings.js";
+import { CONFIG_DIR_NAME, getAgentDir, getBinDir } from "./config.ts";
+import { migrateKeybindingsConfig } from "./core/keybindings.ts";
 
 const MIGRATION_GUIDE_URL = "https://github.com/uglyswap/phi-code/blob/main/packages/coding-agent/CHANGELOG.md";
 const EXTENSIONS_DOC_URL = "https://github.com/uglyswap/phi-code/blob/main/packages/coding-agent/docs/extensions.md";

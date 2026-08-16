@@ -11,8 +11,8 @@
  * upside exactly where it can matter.
  */
 
-import type { FailingState } from "./debug-contract.js";
-import { type CommandResult, passed, tail } from "./execution.js";
+import type { FailingState } from "./debug-contract.ts";
+import { type CommandResult, passed, tail } from "./execution.ts";
 
 export type EscalationDecision =
 	| { action: "done-green"; evidence: string }

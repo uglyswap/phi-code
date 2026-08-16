@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { ConfigWatcher } from "../src/core/config-watcher.js";
+import { ConfigWatcher } from "../src/core/config-watcher.ts";
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

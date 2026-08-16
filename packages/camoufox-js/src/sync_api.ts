@@ -5,8 +5,8 @@ import {
 	firefox,
 } from "playwright-core";
 
-import { type LaunchOptions, launchOptions, syncAttachVD } from "./utils.js";
-import { VirtualDisplay } from "./virtdisplay.js";
+import { type LaunchOptions, launchOptions, syncAttachVD } from "./utils.ts";
+import { VirtualDisplay } from "./virtdisplay.ts";
 
 export async function Camoufox<
 	UserDataDir extends string | undefined = undefined,

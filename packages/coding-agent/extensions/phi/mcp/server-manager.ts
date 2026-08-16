@@ -23,9 +23,9 @@ import {
 	LoggingMessageNotificationSchema,
 	ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import type { McpConfig, ServerConfig, Settings } from "./config.js";
-import { McpError } from "./errors.js";
-import { getAuthStatus, McpOAuthProvider, resetAuth } from "./oauth-provider.js";
+import type { McpConfig, ServerConfig, Settings } from "./config.ts";
+import { McpError } from "./errors.ts";
+import { getAuthStatus, McpOAuthProvider, resetAuth } from "./oauth-provider.ts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

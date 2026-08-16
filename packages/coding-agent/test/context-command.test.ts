@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { formatWindow, parseContextWindow } from "../extensions/phi/providers/context-window.js";
+import { formatWindow, parseContextWindow } from "../extensions/phi/providers/context-window.ts";
 
 describe("parseContextWindow", () => {
 	test("parses k / m suffixes (case-insensitive)", () => {

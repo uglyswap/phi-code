@@ -19,9 +19,9 @@
  * are exposed so the wizard can show *something* before the first live fetch.
  */
 
-import { ALIBABA_MODELS, ALIBABA_PROVIDERS, pingAlibaba } from "./alibaba.js";
-import { inferContextWindow } from "./context-window.js";
-import { getOpenCodeGoModels, OPENCODE_GO_FALLBACK_MODELS, pingOpenCodeGo } from "./opencode-go.js";
+import { ALIBABA_MODELS, ALIBABA_PROVIDERS, pingAlibaba } from "./alibaba.ts";
+import { inferContextWindow } from "./context-window.ts";
+import { getOpenCodeGoModels, OPENCODE_GO_FALLBACK_MODELS, pingOpenCodeGo } from "./opencode-go.ts";
 
 export const LAST_VERIFIED = "2026-07-10";
 

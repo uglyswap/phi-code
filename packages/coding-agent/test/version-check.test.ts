@@ -1,15 +1,21 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { PACKAGE_NAME } from "../src/config.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PACKAGE_NAME } from "../src/config.ts";
 import {
 	checkForNewVersion,
 	comparePackageVersions,
+	formatVersionCheckError,
 	getLatestRelease,
 	getLatestVersion,
 	isNewerPackageVersion,
-} from "../src/utils/version-check.js";
+} from "../src/utils/version-check.ts";
+import { allowNetwork } from "./test-network-env.ts";
 
 const originalSkipVersionCheck = process.env.PI_SKIP_VERSION_CHECK;
 const originalOffline = process.env.PI_OFFLINE;
+
+beforeEach(() => {
+	allowNetwork();
+});
 
 afterEach(() => {
 	vi.unstubAllGlobals();
@@ -30,6 +36,7 @@ describe("version checks", () => {
 		expect(comparePackageVersions("0.70.6", "0.70.5")).toBeGreaterThan(0);
 		expect(comparePackageVersions("0.70.5", "0.70.5")).toBe(0);
 		expect(comparePackageVersions("0.70.4", "0.70.5")).toBeLessThan(0);
+		expect(comparePackageVersions("5.0.0-beta.20", "5.0.0-beta.9")).toBeGreaterThan(0);
 		expect(isNewerPackageVersion("0.70.5", "0.70.5")).toBe(false);
 		expect(isNewerPackageVersion("0.70.6", "0.70.5")).toBe(true);
 	});
@@ -39,7 +46,7 @@ describe("version checks", () => {
 		vi.stubGlobal("fetch", fetchMock);
 
 		await expect(checkForNewVersion("1.2.3")).resolves.toBeUndefined();
-		await expect(checkForNewVersion("1.2.2")).resolves.toBe("1.2.3");
+		await expect(checkForNewVersion("1.2.2")).resolves.toEqual({ packageName: PACKAGE_NAME, version: "1.2.3" });
 	});
 
 	it("queries the npm registry for the published package", async () => {
@@ -66,12 +73,50 @@ describe("version checks", () => {
 		await expect(getLatestRelease("1.2.3")).resolves.toEqual({ packageName: PACKAGE_NAME, version: "1.2.4" });
 	});
 
-	it("skips api calls when version checks are disabled", async () => {
+	it("retries a transient version request when explicitly requested", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("fetch failed"))
+			.mockRejectedValueOnce(new Error("fetch failed"))
+			.mockResolvedValueOnce(Response.json({ version: "1.2.4" }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(getLatestRelease("1.2.3", { retry: true })).resolves.toEqual({ version: "1.2.4" });
+		expect(fetchMock).toHaveBeenCalledTimes(3);
+	});
+
+	it("keeps automatic version checks to one request", async () => {
+		const fetchMock = vi.fn().mockRejectedValue(new Error("fetch failed"));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(checkForNewVersion("1.2.3")).resolves.toBeUndefined();
+		expect(fetchMock).toHaveBeenCalledOnce();
+	});
+
+	it("formats nested network error details", () => {
+		const error = new Error("fetch failed", {
+			cause: new AggregateError([
+				Object.assign(new Error("connect timeout"), { code: "ETIMEDOUT" }),
+				Object.assign(new Error("network unreachable"), { code: "ENETUNREACH" }),
+			]),
+		});
+
+		expect(formatVersionCheckError(error)).toBe("fetch failed (ETIMEDOUT, ENETUNREACH)");
+	});
+
+	it("returns update notes from the version check api", async () => {
+		const fetchMock = vi.fn(async () => Response.json({ note: " **Read this** ", version: "1.2.4" }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(getLatestRelease("1.2.3")).resolves.toEqual({ note: "**Read this**", version: "1.2.4" });
+	});
+
+	it("skips automatic api calls when version checks are disabled", async () => {
 		process.env.PI_SKIP_VERSION_CHECK = "1";
 		const fetchMock = vi.fn();
 		vi.stubGlobal("fetch", fetchMock);
 
-		await expect(getLatestVersion("1.2.3")).resolves.toBeUndefined();
+		await expect(checkForNewVersion("1.2.3")).resolves.toBeUndefined();
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
@@ -82,5 +127,14 @@ describe("version checks", () => {
 
 		await expect(getLatestVersion("1.2.3")).resolves.toBeUndefined();
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("allows direct api calls when automatic version checks are disabled", async () => {
+		process.env.PI_SKIP_VERSION_CHECK = "1";
+		const fetchMock = vi.fn(async () => Response.json({ version: "1.2.4" }));
+		vi.stubGlobal("fetch", fetchMock);
+
+		await expect(getLatestVersion("1.2.3")).resolves.toBe("1.2.4");
+		expect(fetchMock).toHaveBeenCalledOnce();
 	});
 });

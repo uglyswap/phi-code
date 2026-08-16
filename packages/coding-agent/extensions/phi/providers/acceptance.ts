@@ -5,7 +5,7 @@
  * something, not by a model's opinion (see docs/design/plan-debug-build.md).
  */
 
-import { type CommandResult, passed, type RunOptions, runCommand, summarize } from "./execution.js";
+import { type CommandResult, passed, type RunOptions, runCommand, summarize } from "./execution.ts";
 
 /** How to build/run/test the project. Emitted by /plan, consumed by /build. */
 export interface RunRecipe {

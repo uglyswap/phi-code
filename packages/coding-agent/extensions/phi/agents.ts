@@ -10,7 +10,7 @@
  */
 
 import type { ExtensionAPI } from "phi-code";
-import { type AgentDef, discoverAgents } from "./providers/agent-def.js";
+import { type AgentDef, discoverAgents } from "./providers/agent-def.ts";
 
 export default function agentsExtension(pi: ExtensionAPI) {
 	/**

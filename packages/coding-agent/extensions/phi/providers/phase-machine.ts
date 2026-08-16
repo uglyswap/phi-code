@@ -19,7 +19,7 @@ import {
 	isTransientError,
 	type PhaseVerdict,
 	parsePhaseVerdict,
-} from "./orchestrator-helpers.js";
+} from "./orchestrator-helpers.ts";
 
 export interface PhaseEndAnalysis {
 	userAborted: boolean;

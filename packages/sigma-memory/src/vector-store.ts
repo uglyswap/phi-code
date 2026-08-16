@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
 import { dirname } from "path";
 import initSqlJs, { type Database } from "sql.js";
-import type { VectorSearchResult } from "./types.js";
+import type { VectorSearchResult } from "./types.ts";
 
 /**
  * Helper for loading ESM-only modules from a CJS context.

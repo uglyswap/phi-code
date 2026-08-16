@@ -3,7 +3,7 @@ import { property } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import type { AgentMessage, AgentTool } from "phi-code-agent";
 import type { AssistantMessage as AssistantMessageType, ToolResultMessage as ToolResultMessageType } from "phi-code-ai";
-import { renderMessage } from "./message-renderer-registry.js";
+import { renderMessage } from "./message-renderer-registry.ts";
 
 export class MessageList extends LitElement {
 	@property({ type: Array }) messages: AgentMessage[] = [];

@@ -1,5 +1,5 @@
-import type { GuidanceFields } from "./rpiv-config/index.js";
-import { configPath, loadJsonConfig, validateGuidanceFields } from "./rpiv-config/index.js";
+import type { GuidanceFields } from "./rpiv-config/index.ts";
+import { configPath, loadJsonConfig, validateGuidanceFields } from "./rpiv-config/index.ts";
 
 const CONFIG_PATH = configPath("rpiv-todo");
 

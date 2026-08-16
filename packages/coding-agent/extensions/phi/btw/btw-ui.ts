@@ -35,7 +35,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "phi-code-tui";
-import { type BtwTurn, userMessageText } from "./btw.js";
+import { type BtwTurn, userMessageText } from "./btw.ts";
 
 const BTW_MAX_HEIGHT_RATIO = 0.85;
 
@@ -76,16 +76,32 @@ export class BtwOverlayController implements Component {
 	private error = "";
 	private scrollOffset = 0;
 	private history: BtwTurn[];
+	// Explicit fields rather than constructor parameter properties: the root tsconfig
+	// enables `erasableSyntaxOnly`, and extensions are loaded by a type-stripping
+	// runtime where parameter properties emit nothing and silently leave the fields
+	// undefined.
+	private readonly question: string;
+	private readonly theme: Theme;
+	private readonly tui: TUI;
+	private readonly done: (result?: undefined) => void;
+	private readonly controller: AbortController;
+	private readonly onClearHistory: () => void;
 
 	constructor(
-		private readonly question: string,
+		question: string,
 		history: BtwTurn[],
-		private readonly theme: Theme,
-		private readonly tui: TUI,
-		private readonly done: (result?: undefined) => void,
-		private readonly controller: AbortController,
-		private readonly onClearHistory: () => void,
+		theme: Theme,
+		tui: TUI,
+		done: (result?: undefined) => void,
+		controller: AbortController,
+		onClearHistory: () => void,
 	) {
+		this.question = question;
+		this.theme = theme;
+		this.tui = tui;
+		this.done = done;
+		this.controller = controller;
+		this.onClearHistory = onClearHistory;
 		this.history = [...history];
 	}
 

@@ -4,7 +4,7 @@ import {
 	checkAcceptance,
 	formatAcceptance,
 	validateCriteria,
-} from "../extensions/phi/providers/acceptance.js";
+} from "../extensions/phi/providers/acceptance.ts";
 
 describe("checkAcceptance (executable criteria)", () => {
 	it("runs each check command and classifies pass/fail/manual", () => {

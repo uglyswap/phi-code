@@ -11,7 +11,7 @@ The interface has four main areas:
 - **Startup header** - shortcuts, loaded context files, prompt templates, skills, and extensions
 - **Messages** - user messages, assistant responses, tool calls, tool results, notifications, errors, and extension UI
 - **Editor** - where you type; border color indicates the current thinking level
-- **Footer** - working directory, session name, token/cache usage, cost, context usage, and current model
+- **Footer** - working directory, session name, token/cache usage, cost, context usage, and current model. Totals include assistant responses, usage reported by tools, and summary generation.
 
 The editor can be replaced temporarily by built-in UI such as `/settings` or by custom extension UI.
 
@@ -22,10 +22,11 @@ The editor can be replaced temporarily by built-in UI such as `/settings` or by 
 | File reference | Type `@` to fuzzy-search project files |
 | Path completion | Press Tab to complete paths |
 | Multi-line input | Shift+Enter, or Ctrl+Enter on Windows Terminal |
+| Copy response | Ctrl+X copies the last assistant message; in `/tree`, it copies the selected message |
 | Images | Paste with Ctrl+V, Alt+V on Windows, or drag into the terminal |
 | Shell command | `!command` runs and sends output to the model |
 | Hidden shell command | `!!command` runs without sending output to the model |
-| External editor | Ctrl+G opens `$VISUAL` or `$EDITOR` |
+| External editor | Ctrl+G opens `externalEditor`, `$VISUAL`, `$EDITOR`, Notepad on Windows, or `nano` elsewhere |
 
 See [Keybindings](keybindings.md) for all shortcuts and customization.
 
@@ -36,6 +37,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | Command | Description |
 |---------|-------------|
 | `/login`, `/logout` | Manage OAuth or API-key credentials |
+| [`/llama`](llama-cpp.md) | Download, load, and unload llama.cpp router models |
 | `/model` | Switch models |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |
@@ -44,13 +46,15 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/name <name>` | Set session display name |
 | `/session` | Show session file, ID, messages, tokens, and cost |
 | `/tree` | Jump to any point in the session and continue from there |
+| `/trust` | Save project trust decision for future sessions |
 | `/fork` | Create a new session from a previous user message |
 | `/clone` | Duplicate the current active branch into a new session |
 | `/compact [prompt]` | Manually compact context, optionally with custom instructions |
 | `/copy` | Copy last assistant message to clipboard |
-| `/export [file]` | Export session to HTML |
+| `/export [file]` | Export session to HTML or JSONL |
+| `/import <file>` | Import and resume a session from a JSONL file |
 | `/share` | Upload as private GitHub gist with shareable HTML link |
-| `/reload` | Reload keybindings, extensions, skills, prompts, and context files |
+| `/reload` | Reload keybindings, extensions, skills, prompts, themes, and context files |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/changelog` | Display version history |
 | `/quit` | Quit phi |
@@ -76,6 +80,7 @@ Sessions are saved automatically to `~/.phi/agent/sessions/`, organized by worki
 phi -c                  # Continue most recent session
 phi -r                  # Browse and select a session
 phi --no-session        # Ephemeral mode; do not save
+phi --name "my task"    # Set session display name at startup
 phi --session <path|id> # Use a specific session file or session ID
 phi --fork <path|id>    # Fork a session into a new session file
 ```
@@ -98,6 +103,8 @@ phi loads `AGENTS.md` or `CLAUDE.md` at startup from:
 - parent directories, walking up from the current working directory
 - the current directory
 
+If a directory contains `AGENTS.override.md`, phi loads it instead of `AGENTS.md` or `CLAUDE.md` from that directory. Context files from other directories still layer normally.
+
 Use context files for project conventions, commands, safety rules, and preferences. Disable loading with `--no-context-files` or `-nc`.
 
 ### System Prompt Files
@@ -109,13 +116,28 @@ Replace the default system prompt with:
 
 Append to the default prompt without replacing it with `APPEND_SYSTEM.md` in either location.
 
+### Project Trust
+
+On interactive startup, phi asks before trusting a project folder that contains project-local settings, resources, or project `.agents/skills` and has no saved decision for the folder or a parent folder in `~/.phi/agent/trust.json`. Trusting a project allows phi to load `.phi/settings.json` and `.phi` resources, install missing project packages, and execute project extensions.
+
+Before the trust decision, phi loads only context files, user/global extensions, and CLI `-e` extensions so they can handle the `project_trust` event. Project-local extensions, project package-managed extensions, and project settings are loaded only after the project is trusted. This split also applies when switching to a session from a different cwd whose trust has not been resolved in the current process.
+
+Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trust prompt. Without an applicable saved trust decision, they use `defaultProjectTrust` from global settings: `ask` (default) and `never` ignore those project resources, while `always` trusts them. Pass `--approve`/`-a` or `--no-approve`/`-na` to override project trust for one run.
+
+If no extension or saved decision applies, `defaultProjectTrust` controls the fallback behavior. Set it to `"ask"`, `"always"`, or `"never"` in `~/.phi/agent/settings.json`, or change it with `/settings`.
+
+`phi config` and package commands use the same project trust flow, except `phi update` never prompts. Pass `--approve` to trust project-local settings for one command or `--no-approve` to ignore them.
+
+Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.phi/agent/trust.json` only; the current session is not reloaded, so restart phi for changes to take effect.
+
+
 ## Exporting and Sharing Sessions
 
 Use `/export [file]` to write a session to HTML.
 
 Use `/share` to upload a private GitHub gist with a shareable HTML link.
 
-If you use pi for open source work and want to publish sessions for model, prompt, tool, and evaluation research, see [`badlogic/pi-share-hf`](https://github.com/badlogic/pi-share-hf). It publishes sessions to Hugging Face datasets.
+If you use phi (or another coding agent) for open source work and want to publish sessions for model, prompt, tool, and evaluation research, see [`badlogic/pi-share-hf`](https://github.com/badlogic/pi-share-hf). It publishes sessions to Hugging Face datasets.
 
 ## CLI Reference
 
@@ -129,13 +151,17 @@ phi [options] [@files...] [messages...]
 phi install <source> [-l]     # Install package, -l for project-local
 phi remove <source> [-l]      # Remove package
 phi uninstall <source> [-l]   # Alias for remove
-phi update [source|self]   # Update phi and packages; skips pinned packages
-phi update --extensions       # Update packages only
+phi update [source|self|phi]  # Update phi only, or one package source
+phi update --all              # Update phi and packages; reconcile pinned git refs
+phi update --extensions       # Update packages only; reconcile pinned git refs
+phi update --models           # Refresh model catalogs only
 phi update --self             # Update phi only
 phi update --extension <src>  # Update one package
 phi list                      # List installed packages
 phi config                    # Enable/disable package resources
 ```
+
+These commands manage phi packages and `phi update` can update the phi CLI installation. To uninstall phi itself, see [Quickstart](quickstart.md#uninstall). `phi config` and project package commands accept `--approve`/`--no-approve` to trust or ignore project-local settings for one command. `phi update` never prompts for project trust.
 
 See [Phi Packages](packages.md) for package sources and security notes.
 
@@ -162,7 +188,7 @@ cat README.md | phi -p "Summarize this text"
 | `--provider <name>` | Provider, such as `anthropic`, `openai`, or `google` |
 | `--model <pattern>` | Model pattern or ID; supports `provider/id` and optional `:<thinking>` |
 | `--api-key <key>` | API key, overriding environment variables |
-| `--thinking <level>` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| `--thinking <level>` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
 | `--models <patterns>` | Comma-separated patterns for Ctrl+P cycling |
 | `--list-models [search]` | List available models |
 
@@ -176,12 +202,14 @@ cat README.md | phi -p "Summarize this text"
 | `--fork <path\|id>` | Fork a session file or partial UUID into a new session |
 | `--session-dir <dir>` | Custom session storage directory |
 | `--no-session` | Ephemeral mode; do not save |
+| `--name <name>`, `-n <name>` | Set session display name at startup |
 
 ### Tool Options
 
 | Option | Description |
 |--------|-------------|
 | `--tools <list>`, `-t <list>` | Allowlist specific built-in, extension, and custom tools |
+| `--exclude-tools <list>`, `-xt <list>` | Disable specific built-in, extension, and custom tools |
 | `--no-builtin-tools`, `-nbt` | Disable built-in tools but keep extension/custom tools enabled |
 | `--no-tools`, `-nt` | Disable all tools |
 
@@ -213,18 +241,26 @@ phi --no-extensions -e ./my-extension.ts
 |--------|-------------|
 | `--system-prompt <text>` | Replace default prompt; context files and skills are still appended |
 | `--append-system-prompt <text>` | Append to system prompt |
+| `--tui-mode <mode>` | TUI mode: `regular` (default) or experimental `fullscreen` |
+| `--use-theme <name[/name]>` | Set the initial interactive theme for this run without changing settings |
 | `--verbose` | Force verbose startup |
+| `-a`, `--approve` | Trust project-local files for this run |
+| `-na`, `--no-approve` | Ignore project-local files for this run |
 | `-h`, `--help` | Show help |
 | `-v`, `--version` | Show version |
+
+In `fullscreen` mode, the transcript scrolls inside the terminal viewport while queued messages, working status, extension widgets, editor, and footer remain fixed at the bottom. Mouse/trackpad input scrolls the region under the pointer; keyboard viewport actions always remain available. Inline images work in terminals that support the Kitty graphics protocol, including Kitty and Ghostty. In iTerm2 they render as text placeholders because its inline-image protocol cannot delete or crop placements during application-owned scrolling. In `regular` mode, phi uses the main screen and terminal-owned scrollback, and iTerm2 inline images continue to render normally. See [Terminal setup](terminal-setup.md) for terminal-specific settings and workarounds.
+
+Set **TUI mode** in `/settings` to switch between `regular` and `fullscreen` immediately and choose the default for future sessions. **Fullscreen exit output** controls whether exiting fullscreen prints the final transcript or restores the previous screen and prints only the session resume hint.
 
 ### File Arguments
 
 Prefix files with `@` to include them in the message:
 
 ```bash
-pi @prompt.md "Answer this"
+phi @prompt.md "Answer this"
 phi -p @screenshot.png "What's in this image?"
-pi @code.ts @test.ts "Review these files"
+phi @code.ts @test.ts "Review these files"
 ```
 
 ### Examples
@@ -238,6 +274,9 @@ phi -p "Summarize this codebase"
 
 # Non-interactive with piped stdin
 cat README.md | phi -p "Summarize this text"
+
+# Named one-shot session
+phi --name "release audit" -p "Audit this repository"
 
 # Different model
 phi --provider openai --model gpt-4o "Help me refactor"
@@ -253,20 +292,39 @@ phi --models "claude-*,gpt-4o"
 
 # Read-only mode
 phi --tools read,grep,find,ls -p "Review the code"
+
+# Disable one extension or built-in tool while keeping the rest available
+phi --exclude-tools ask_question
 ```
 
 ### Environment Variables
 
 | Variable | Description |
 |----------|-------------|
+| `AI_AGENT` | Set by the CLI and RPC entry points so generic tooling can attribute child processes to the coding agent |
+| `PI_CODING_AGENT` | Set to `true` by the CLI and RPC entry points so child processes can detect that they run inside phi |
 | `PHI_CODING_AGENT_DIR` | Override config directory; default is `~/.phi/agent` |
 | `PHI_CODING_AGENT_SESSION_DIR` | Override session storage directory; overridden by `--session-dir` |
+| `PHI_DISABLE_BUNDLED_EXTENSIONS` | Skip loading the bundled phi extensions |
+| `PHI_DISABLE_PROJECT_EXTENSIONS` | Skip loading project-local extensions |
 | `PI_PACKAGE_DIR` | Override package directory, useful for Nix/Guix store paths |
-| `PI_OFFLINE` | Disable startup network operations, including update checks, package update checks, and install/update telemetry |
+| `PI_OFFLINE` | Disable startup network operations, including update checks and package update checks |
 | `PI_SKIP_VERSION_CHECK` | Skip the phi-code version update check at startup. This prevents the npm registry latest-version request |
-| `PI_TELEMETRY` | Override install/update telemetry: `1`/`true`/`yes` or `0`/`false`/`no`. This does not disable update checks |
+| `PI_TELEMETRY` | Override provider attribution headers (phi-code sends no install/update ping): `1`/`true`/`yes` or `0`/`false`/`no`. This does not disable update checks |
 | `PI_CACHE_RETENTION` | Set to `long` for extended prompt cache where supported |
-| `VISUAL`, `EDITOR` | External editor for Ctrl+G |
+| `VISUAL`, `EDITOR` | Fallback external editor for Ctrl+G when `externalEditor` is unset; defaults to Notepad on Windows and `nano` elsewhere |
+
+Commands run by the LLM-callable bash tool also receive current session metadata:
+
+| Variable | Description |
+|----------|-------------|
+| `PI_SESSION_ID` | Current session ID |
+| `PI_SESSION_FILE` | Absolute session JSONL path; unset for ephemeral sessions |
+| `PI_PROVIDER` | Currently selected model provider |
+| `PI_MODEL` | Currently selected model ID |
+| `PI_REASONING_LEVEL` | Current effective reasoning level |
+
+See [Environment Variables](environment-variables.md#bash-tool-session-environment) for semantics, examples, and custom-tool opt-out.
 
 ## Design Principles
 

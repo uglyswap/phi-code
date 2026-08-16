@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import { join } from "node:path";
-import { InvalidAddonPath } from "./exceptions.js";
-import { getPath, unzip, webdl } from "./pkgman.js";
-import { getAsBooleanFromENV } from "./utils.js";
+import { InvalidAddonPath } from "./exceptions.ts";
+import { getPath, unzip, webdl } from "./pkgman.ts";
+import { getAsBooleanFromENV } from "./utils.ts";
 
 export const DefaultAddons = {
 	/**

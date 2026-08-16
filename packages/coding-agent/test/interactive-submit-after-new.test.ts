@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
+import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 
 type SubmitContext = {
 	defaultEditor: { onSubmit?: (text: string) => Promise<void> };
@@ -13,13 +13,14 @@ type SubmitContext = {
 		prompt: (text: string, opts?: unknown) => Promise<void>;
 	};
 	onInputCallback?: (text: string) => void;
-	pendingSubmissions: string[];
+	pendingUserInputs: string[];
 	sessionTransitioning: boolean;
 	flushPendingBashComponents: () => void;
 	showWarning: (message: string) => void;
 	showStatus: (message: string) => void;
 	handleClearCommand: () => Promise<void>;
 	handleDebugCommand: () => void;
+	clearStatusIndicator: () => void;
 	ui: { requestRender: () => void };
 	updatePendingMessagesDisplay: () => void;
 	// wired only in tests that exercise the real handleClearCommand
@@ -52,13 +53,15 @@ function makeContext(overrides: Partial<SubmitContext> = {}): SubmitContext {
 			prompt: vi.fn(async () => {}),
 		},
 		onInputCallback: undefined,
-		pendingSubmissions: [],
+		pendingUserInputs: [],
 		sessionTransitioning: false,
 		flushPendingBashComponents: vi.fn(),
 		showWarning: vi.fn(),
 		showStatus: vi.fn(),
 		handleClearCommand: vi.fn(async () => {}),
 		handleDebugCommand: vi.fn(),
+		// pi 0.84 clears the status indicator at the top of handleClearCommand.
+		clearStatusIndicator: vi.fn(),
 		ui: { requestRender: vi.fn() },
 		updatePendingMessagesDisplay: vi.fn(),
 		...overrides,
@@ -139,7 +142,7 @@ describe("queue + replay (message typed during a busy loop or a session rebuild)
 		await ctx.defaultEditor.onSubmit?.("message pendant transition");
 
 		expect(received).toEqual([]);
-		expect(ctx.pendingSubmissions).toEqual(["message pendant transition"]);
+		expect(ctx.pendingUserInputs).toEqual(["message pendant transition"]);
 		expect(ctx.showStatus).toHaveBeenCalledOnce();
 	});
 
@@ -150,17 +153,17 @@ describe("queue + replay (message typed during a busy loop or a session rebuild)
 		ctx.onInputCallback = undefined; // the loop is inside session.prompt()
 
 		await ctx.defaultEditor.onSubmit?.("pendant le préflight");
-		expect(ctx.pendingSubmissions).toEqual(["pendant le préflight"]);
+		expect(ctx.pendingUserInputs).toEqual(["pendant le préflight"]);
 		expect(ctx.showStatus).toHaveBeenCalledOnce();
 
 		// The loop comes back around: the queued message is replayed first.
 		const next = await ctx.getUserInput?.();
 		expect(next).toBe("pendant le préflight");
-		expect(ctx.pendingSubmissions).toEqual([]);
+		expect(ctx.pendingUserInputs).toEqual([]);
 	});
 
 	it("getUserInput does not drain during a transition; drain hands over once it ends", async () => {
-		const ctx = makeContext({ sessionTransitioning: true, pendingSubmissions: ["queued message"] });
+		const ctx = makeContext({ sessionTransitioning: true, pendingUserInputs: ["queued message"] });
 		ctx.getUserInput = proto.getUserInput;
 		ctx.drainPendingSubmissions = proto.drainPendingSubmissions;
 
@@ -170,13 +173,13 @@ describe("queue + replay (message typed during a busy loop or a session rebuild)
 		});
 		await new Promise((r) => setTimeout(r, 5));
 		expect(resolved).toBeUndefined();
-		expect(ctx.pendingSubmissions).toEqual(["queued message"]);
+		expect(ctx.pendingUserInputs).toEqual(["queued message"]);
 
 		ctx.sessionTransitioning = false;
 		ctx.drainPendingSubmissions?.();
 		await new Promise((r) => setTimeout(r, 0));
 		expect(resolved).toBe("queued message");
-		expect(ctx.pendingSubmissions).toEqual([]);
+		expect(ctx.pendingUserInputs).toEqual([]);
 	});
 
 	it("end to end: a message typed while /new rebuilds is replayed to the loop afterwards", async () => {
@@ -215,13 +218,13 @@ describe("queue + replay (message typed during a busy loop or a session rebuild)
 		// The user types while the rebuild is in flight.
 		await ctx.defaultEditor.onSubmit?.("bonjour après /new");
 		expect(received).toEqual([]); // NOT sent into the half-torn-down session
-		expect(ctx.pendingSubmissions).toEqual(["bonjour après /new"]);
+		expect(ctx.pendingUserInputs).toEqual(["bonjour après /new"]);
 
 		releaseNewSession();
 		await clearPromise;
 
 		expect(ctx.sessionTransitioning).toBe(false);
 		expect(received).toEqual(["bonjour après /new"]); // replayed to the loop
-		expect(ctx.pendingSubmissions).toEqual([]);
+		expect(ctx.pendingUserInputs).toEqual([]);
 	});
 });

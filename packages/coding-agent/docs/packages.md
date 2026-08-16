@@ -28,15 +28,19 @@ phi install ./relative/path/to/package
 
 phi remove npm:@foo/bar
 phi list                     # show installed packages from settings
-phi update                   # update phi and all non-pinned packages
-phi update --extensions      # update all non-pinned packages only
+phi update                   # update phi only
+phi update --all             # update phi, update packages, and reconcile pinned git refs
+phi update --extensions      # update packages and reconcile pinned git refs only
+phi update --models          # refresh model catalogs only
 phi update --self            # update phi only
 phi update --self --force    # reinstall phi even if current
 phi update npm:@foo/bar      # update one package
 phi update --extension npm:@foo/bar
 ```
 
-By default, `install` and `remove` write to global settings (`~/.phi/agent/settings.json`). Use `-l` to write to project settings (`.phi/settings.json`) instead. Project settings can be shared with your team, and phi installs any missing packages automatically on startup.
+These commands manage phi packages and `phi update` can update the phi CLI installation. To uninstall phi itself, see [Quickstart](quickstart.md#uninstall).
+
+By default, `install` and `remove` write to user settings (`~/.phi/agent/settings.json`). Use `-l` to write to project settings (`.phi/settings.json`) instead. Project settings can be shared with your team, and phi installs any missing packages automatically on startup after the project is trusted.
 
 To try a package without installing it, use `--extension` or `-e`. This installs to a temporary directory for the current run only:
 
@@ -56,8 +60,8 @@ npm:@scope/pkg@1.2.3
 npm:pkg
 ```
 
-- Versioned specs are pinned and skipped by package updates (`phi update`, `phi update --extensions`).
-- Global installs use `npm install -g`.
+- Versioned specs are pinned and skipped by package updates (`phi update --extensions`, `phi update --all`).
+- User installs go under `~/.phi/agent/npm/`.
 - Project installs go under `.phi/npm/`.
 - Set `npmCommand` in `settings.json` to pin npm package lookup and install operations to a specific wrapper command such as `mise` or `asdf`.
 
@@ -83,9 +87,10 @@ ssh://git@github.com/user/repo@v1
 - HTTPS and SSH URLs are both supported.
 - SSH URLs use your configured SSH keys automatically (respects `~/.ssh/config`).
 - For non-interactive runs (for example CI), you can set `GIT_TERMINAL_PROMPT=0` to disable credential prompts and set `GIT_SSH_COMMAND` (for example `ssh -o BatchMode=yes -o ConnectTimeout=5`) to fail fast.
-- Refs pin the package and skip package updates (`phi update`, `phi update --extensions`).
+- Refs are pinned tags or commits. `phi update --extensions` and `phi update --all` do not move them to newer refs, but they do reconcile an existing clone to the configured ref.
+- Use `phi install git:host/user/repo@new-ref` to update settings and move an existing package to a new pinned ref.
 - Cloned to `~/.phi/agent/git/<host>/<path>` (global) or `.phi/git/<host>/<path>` (project).
-- Runs `npm install` after clone or pull if `package.json` exists.
+- When reconciliation changes the checkout, phi resets and cleans the clone, then runs `npm install` if `package.json` exists.
 
 **SSH examples:**
 ```bash
@@ -163,7 +168,7 @@ If no `pi` manifest is present, phi auto-discovers resources from these director
 
 Third party runtime dependencies belong in `dependencies` in `package.json`. Dependencies that do not register extensions, skills, prompt templates, or themes also belong in `dependencies`. When phi installs a package from npm or git, it runs `npm install`, so those dependencies are installed automatically.
 
-Pi bundles core packages for extensions and skills. If you import any of these, list them in `peerDependencies` with a `"*"` range and do not bundle them: `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@phi-code-admin/phi-code`, `@earendil-works/pi-tui`, `typebox`.
+Pi bundles core packages for extensions and skills. If you import any of these, list them in `peerDependencies` with a `"*"` range and do not bundle them: `phi-code-ai`, `phi-code-agent`, `@phi-code-admin/phi-code`, `phi-code-tui`, `typebox`.
 
 Other phi packages must be bundled in your tarball. Add them to `dependencies` and `bundledDependencies`, then reference their resources through `node_modules/` paths. phi loads packages with separate module roots, so separate installs do not collide or share modules.
 
@@ -212,11 +217,11 @@ Filter what a package loads using the object form in settings:
 
 ## Enable and Disable Resources
 
-Use `phi config` to enable or disable extensions, skills, prompt templates, and themes from installed packages and local directories. Works for both global (`~/.phi/agent`) and project (`.phi/`) scopes.
+Use `phi config` to enable or disable extensions, skills, prompt templates, and themes from installed packages and local directories. `phi config` starts in global settings (`~/.phi/agent/settings.json`); press Tab to switch between global and project-local modes. Use `phi config -l` to start in project overrides (`.phi/settings.json`) with inherited global resources dimmed.
 
 ## Scope and Deduplication
 
-Packages can appear in both global and project settings. If the same package appears in both, the project entry wins. Identity is determined by:
+Packages can appear in both global and project settings. If the same package appears in both, the project entry wins unless the project entry has `autoload: false`, in which case it is applied as a delta over the global entry. Identity is determined by:
 
 - npm: package name
 - git: repository URL without ref

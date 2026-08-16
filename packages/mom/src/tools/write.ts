@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "phi-code-agent";
-import type { Executor } from "../sandbox.js";
+import type { Executor } from "../sandbox.ts";
 
 const writeSchema = Type.Object({
 	label: Type.String({ description: "Brief description of what you're writing (shown to user)" }),

@@ -20,8 +20,8 @@
 	},
 	"dependencies": {
 		"@lmstudio/sdk": "^1.5.0",
-		"phi-code-ai": "^0.74.0",
-		"phi-code-tui": "^0.74.0",
+		"phi-code-ai": "^0.84.2",
+		"phi-code-tui": "^0.84.2",
 		"typebox": "^1.1.24",
 		"docx-preview": "^0.3.7",
 		"jszip": "^3.10.1",

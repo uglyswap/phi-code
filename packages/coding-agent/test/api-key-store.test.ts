@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { ApiKeyStore } from "../src/core/api-key-store.js";
+import { ApiKeyStore } from "../src/core/api-key-store.ts";
 
 describe("ApiKeyStore", () => {
 	let tempDir: string;
@@ -155,12 +155,15 @@ describe("ApiKeyStore", () => {
 			expect(store.getKey("alibaba")).toBe("sk-literal-123");
 		});
 
-		test("resolves an env-var NAME to its value", () => {
+		test("a bare NAME is a literal credential, not an env-var reference", () => {
+			// pi 0.84 made "$NAME" the only environment reference. A bare name that
+			// happens to match an env var must NOT be substituted: that silently
+			// shadowed literal credentials.
 			process.env.PHI_TEST_KEY_NAME = "resolved-from-env";
 			try {
 				const store = new ApiKeyStore({ configPath });
 				store.setKey("alibaba", "PHI_TEST_KEY_NAME");
-				expect(store.getKey("alibaba")).toBe("resolved-from-env");
+				expect(store.getKey("alibaba")).toBe("PHI_TEST_KEY_NAME");
 			} finally {
 				delete process.env.PHI_TEST_KEY_NAME;
 			}

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { inferContextWindow } from "../extensions/phi/providers/context-window.js";
+import { inferContextWindow } from "../extensions/phi/providers/context-window.ts";
 
 describe("inferContextWindow", () => {
 	test("prefers a positive API-reported value", () => {

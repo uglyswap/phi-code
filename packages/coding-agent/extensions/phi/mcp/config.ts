@@ -13,7 +13,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getAgentDir } from "phi-code";
 import { z } from "zod";
-import { McpError } from "./errors.js";
+import { McpError } from "./errors.ts";
 
 // ─── Zod Schemas ──────────────────────────────────────────────────────────────
 

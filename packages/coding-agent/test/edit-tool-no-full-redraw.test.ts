@@ -1,12 +1,13 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Container, type Terminal, Text, TUI } from "phi-code-tui";
+import { Container, type Terminal, Text, type TUI, TuiMainScreen } from "phi-code-tui";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { createEditToolDefinition } from "../src/core/tools/edit.js";
-import { computeEditsDiff, type Edit } from "../src/core/tools/edit-diff.js";
-import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.js";
-import { initTheme } from "../src/modes/interactive/theme/theme.js";
+import { createEditToolDefinition } from "../src/core/tools/edit.ts";
+import { computeEditsDiff, type Edit } from "../src/core/tools/edit-diff.ts";
+import { ToolExecutionComponent } from "../src/modes/interactive/components/tool-execution.ts";
+import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+import { stripAnsi } from "../src/utils/ansi.ts";
 
 class FakeTerminal implements Terminal {
 	columns = 80;
@@ -50,7 +51,9 @@ async function waitForRenderedText(
 		onRetry?.();
 		await waitForRender();
 		lastRender = getRender();
-		if (lastRender.includes(expectedText)) {
+		// pi 0.84 highlights the changed words inside a line with inverse video, so the
+		// plain text is only contiguous once the escape sequences are stripped.
+		if (stripAnsi(lastRender).includes(expectedText)) {
 			return lastRender;
 		}
 	}
@@ -94,7 +97,7 @@ describe("edit tool TUI rendering", () => {
 		}
 
 		const terminal = new FakeTerminal();
-		const tui = new TUI(terminal);
+		const tui: TUI = new TuiMainScreen(terminal);
 		const root = new Container();
 		for (let i = 0; i < 200; i++) {
 			root.addChild(new Text(`history ${i}`, 0, 0));
@@ -125,7 +128,7 @@ describe("edit tool TUI rendering", () => {
 			() => tui.requestRender(true),
 		);
 		expect(callOnlyRender).toContain("edit");
-		expect(callOnlyRender).toContain("line 950 changed");
+		expect(stripAnsi(callOnlyRender)).toContain("line 950 changed");
 
 		const redrawsBeforeResult = tui.fullRedraws;
 		const clearsBeforeResult = terminal.fullClearCount;
@@ -144,8 +147,8 @@ describe("edit tool TUI rendering", () => {
 		expect(terminal.fullClearCount).toBe(clearsBeforeResult);
 
 		const settledRender = component.render(80).join("\n");
-		expect(settledRender).toContain("line 50 changed");
-		expect(settledRender).toContain("line 950 changed");
+		expect(stripAnsi(settledRender)).toContain("line 50 changed");
+		expect(stripAnsi(settledRender)).toContain("line 950 changed");
 		expect(settledRender).not.toContain("Successfully replaced");
 	});
 
@@ -168,7 +171,7 @@ describe("edit tool TUI rendering", () => {
 		await rm(filePath, { force: true });
 
 		const terminal = new FakeTerminal();
-		const tui = new TUI(terminal);
+		const tui: TUI = new TuiMainScreen(terminal);
 		const component = new ToolExecutionComponent(
 			"edit",
 			"tool-call-replay",
@@ -194,8 +197,8 @@ describe("edit tool TUI rendering", () => {
 		await waitForRender();
 
 		const rendered = component.render(80).join("\n");
-		expect(rendered).toContain("line 50 changed");
-		expect(rendered).toContain("line 150 changed");
+		expect(stripAnsi(rendered)).toContain("line 50 changed");
+		expect(stripAnsi(rendered)).toContain("line 150 changed");
 	});
 
 	it("shows a preflight error without rendering a diff when the edits do not apply", async () => {
@@ -205,7 +208,7 @@ describe("edit tool TUI rendering", () => {
 		await writeFile(filePath, "line 0\nline 1\n", "utf8");
 
 		const terminal = new FakeTerminal();
-		const tui = new TUI(terminal);
+		const tui: TUI = new TuiMainScreen(terminal);
 		const component = new ToolExecutionComponent(
 			"edit",
 			"tool-call-2",

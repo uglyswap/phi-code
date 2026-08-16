@@ -1,11 +1,11 @@
 import {
 	AgentSession,
-	AuthStorage,
+	CONFIG_DIR_NAME,
 	convertToLlm,
 	createExtensionRuntime,
 	formatSkillsForPrompt,
 	loadSkillsFromDir,
-	ModelRegistry,
+	ModelRuntime,
 	type ResourceLoader,
 	SessionManager,
 	type Skill,
@@ -15,13 +15,14 @@ import { mkdir, writeFile } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
 import { Agent, type AgentEvent } from "phi-code-agent";
-import { getModel, type ImageContent } from "phi-code-ai";
-import { createMomSettingsManager, syncLogToSessionManager } from "./context.js";
-import * as log from "./log.js";
-import { createExecutor, type SandboxConfig } from "./sandbox.js";
-import type { ChannelInfo, SlackContext, UserInfo } from "./slack.js";
-import type { ChannelStore } from "./store.js";
-import { createMomTools, setUploadFunction, setWorkspaceRoot } from "./tools/index.js";
+import type { ImageContent } from "phi-code-ai";
+import { getModel } from "phi-code-ai/compat";
+import { createMomSettingsManager, syncLogToSessionManager } from "./context.ts";
+import * as log from "./log.ts";
+import { createExecutor, type SandboxConfig } from "./sandbox.ts";
+import type { ChannelInfo, SlackContext, UserInfo } from "./slack.ts";
+import type { ChannelStore } from "./store.ts";
+import { createMomTools, setUploadFunction, setWorkspaceRoot } from "./tools/index.ts";
 
 // Hardcoded model for now - TODO: make configurable (issue #63)
 const model = getModel("anthropic", "claude-sonnet-4-5");
@@ -42,13 +43,14 @@ export interface AgentRunner {
 	abort(): void;
 }
 
-async function getAnthropicApiKey(authStorage: AuthStorage): Promise<string> {
-	const key = await authStorage.getApiKey("anthropic");
+async function getAnthropicApiKey(modelRuntime: ModelRuntime): Promise<string> {
+	const auth = await modelRuntime.getAuth("anthropic");
+	const key = auth?.auth.apiKey;
 	if (!key) {
 		throw new Error(
 			"No API key found for anthropic.\n\n" +
 				"Set an API key environment variable, or use /login with Anthropic and link to auth.json from " +
-				join(homedir(), ".pi", "mom", "auth.json"),
+				join(homedir(), CONFIG_DIR_NAME, "mom", "auth.json"),
 		);
 	}
 	return key;
@@ -417,11 +419,15 @@ const channelRunners = new Map<string, AgentRunner>();
  * Get or create an AgentRunner for a channel.
  * Runners are cached - one per channel, persistent across messages.
  */
-export function getOrCreateRunner(sandboxConfig: SandboxConfig, channelId: string, channelDir: string): AgentRunner {
+export async function getOrCreateRunner(
+	sandboxConfig: SandboxConfig,
+	channelId: string,
+	channelDir: string,
+): Promise<AgentRunner> {
 	const existing = channelRunners.get(channelId);
 	if (existing) return existing;
 
-	const runner = createRunner(sandboxConfig, channelId, channelDir);
+	const runner = await createRunner(sandboxConfig, channelId, channelDir);
 	channelRunners.set(channelId, runner);
 	return runner;
 }
@@ -430,7 +436,7 @@ export function getOrCreateRunner(sandboxConfig: SandboxConfig, channelId: strin
  * Create a new AgentRunner for a channel.
  * Sets up the session and subscribes to events once.
  */
-function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDir: string): AgentRunner {
+async function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDir: string): Promise<AgentRunner> {
 	const executor = createExecutor(sandboxConfig);
 	const workspacePath = executor.getWorkspacePath(channelDir.replace(`/${channelId}`, ""));
 
@@ -448,10 +454,14 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 	const sessionManager = SessionManager.open(contextFile, channelDir);
 	const settingsManager = createMomSettingsManager(join(channelDir, ".."));
 
-	// Create AuthStorage and ModelRegistry
-	// Auth stored outside workspace so agent can't access it
-	const authStorage = AuthStorage.create(join(homedir(), ".pi", "mom", "auth.json"));
-	const modelRegistry = ModelRegistry.inMemory(authStorage);
+	// Create AuthStorage and the model runtime.
+	// Auth stored outside workspace so agent can't access it.
+	// modelsPath: null keeps mom off the user's models.json — its model set is fixed here.
+	const modelRuntime = await ModelRuntime.create({
+		authPath: join(homedir(), CONFIG_DIR_NAME, "mom", "auth.json"),
+		modelsPath: null,
+		allowModelNetwork: false,
+	});
 
 	// Create agent
 	const agent = new Agent({
@@ -462,7 +472,8 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 			tools,
 		},
 		convertToLlm,
-		getApiKey: async () => getAnthropicApiKey(authStorage),
+		streamFn: (model, context, options) => modelRuntime.streamSimple(model, context, options),
+		getApiKey: async () => getAnthropicApiKey(modelRuntime),
 	});
 
 	// Load existing messages
@@ -479,7 +490,9 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 		getThemes: () => ({ themes: [], diagnostics: [] }),
 		getAgentsFiles: () => ({ agentsFiles: [] }),
 		getSystemPrompt: () => systemPrompt,
+		getSystemPromptSource: () => undefined,
 		getAppendSystemPrompt: () => [],
+		getAppendSystemPromptSources: () => [],
 		// getPathMetadata removed upstream; safe to skip for mom
 		extendResources: () => {},
 		reload: async () => {},
@@ -493,7 +506,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 		sessionManager,
 		settingsManager,
 		cwd: process.cwd(),
-		modelRegistry,
+		modelRuntime,
 		resourceLoader,
 		baseToolsOverride,
 	});

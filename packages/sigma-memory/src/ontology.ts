@@ -10,7 +10,7 @@ import type {
 	OntologyJSONLEntry,
 	OntologyRelation,
 	OntologyRelationEntry,
-} from "./types.js";
+} from "./types.ts";
 
 export class OntologyManager {
 	private graphPath: string;

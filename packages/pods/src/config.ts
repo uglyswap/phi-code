@@ -1,11 +1,11 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
-import type { Config, Pod } from "./types.js";
+import type { Config, Pod } from "./types.ts";
 
 // Get config directory from env or use default
 const getConfigDir = (): string => {
-	const configDir = process.env.PI_CONFIG_DIR || join(homedir(), ".pi");
+	const configDir = process.env.PHI_CONFIG_DIR || process.env.PI_CONFIG_DIR || join(homedir(), ".phi");
 	if (!existsSync(configDir)) {
 		mkdirSync(configDir, { recursive: true, mode: 0o700 });
 	}

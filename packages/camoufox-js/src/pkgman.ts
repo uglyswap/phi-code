@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import AdmZip from "adm-zip";
 import cliProgress, { Options } from "cli-progress";
 import prettyBytes from "pretty-bytes";
-import { CONSTRAINTS } from "./__version__.js";
+import { CONSTRAINTS } from "./__version__.ts";
 import {
 	CamoufoxNotInstalled,
 	FileNotFoundError,
@@ -19,7 +19,7 @@ import {
 	UnsupportedArchitecture,
 	UnsupportedOS,
 	UnsupportedVersion,
-} from "./exceptions.js";
+} from "./exceptions.ts";
 
 const ARCH_MAP: { [key: string]: string } = {
 	x64: "x86_64",

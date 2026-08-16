@@ -2,8 +2,8 @@ import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
-import { SkillScanner } from "../src/scanner.js";
-import type { SkillsConfig } from "../src/types.js";
+import { SkillScanner } from "../src/scanner.ts";
+import type { SkillsConfig } from "../src/types.ts";
 
 describe("SkillScanner", () => {
 	let scanner: SkillScanner;

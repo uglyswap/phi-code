@@ -17,7 +17,7 @@ pkg update && pkg upgrade
 pkg install nodejs termux-api git
 
 # Install phi
-npm install -g @phi-code-admin/phi-code
+npm install -g --ignore-scripts @phi-code-admin/phi-code
 
 # Create config directory
 mkdir -p ~/.phi/agent
@@ -36,7 +36,7 @@ Image clipboard is not supported on Termux (the `ctrl+v` image paste feature wil
 
 Create `~/.phi/agent/AGENTS.md` to help the agent understand the Termux environment:
 
-```markdown
+````markdown
 # Agent Environment: Termux on Android
 
 ## Location
@@ -91,7 +91,7 @@ termux-camera-photo out.jpg   # Take photo
 - Termux:API app must be installed for `termux-*` commands
 - Use `pkg install termux-api` for the command-line tools
 - Storage permission needed for `/storage/emulated/0` access
-```
+````
 
 ## Limitations
 

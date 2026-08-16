@@ -7,8 +7,8 @@ import {
 	parseFailingState,
 	reproCommand,
 	type VerifiedCandidate,
-} from "../extensions/phi/providers/debug-contract.js";
-import type { CommandResult } from "../extensions/phi/providers/execution.js";
+} from "../extensions/phi/providers/debug-contract.ts";
+import type { CommandResult } from "../extensions/phi/providers/execution.ts";
 
 const run = (exitCode: number | null, over: Partial<CommandResult> = {}): CommandResult => ({
 	command: "cmd",

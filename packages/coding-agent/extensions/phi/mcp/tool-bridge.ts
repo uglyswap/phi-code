@@ -17,8 +17,8 @@ import { CallToolResultSchema, ListToolsResultSchema } from "@modelcontextprotoc
 import type { ExtensionAPI } from "phi-code";
 import type { TSchema } from "typebox";
 import * as Type from "typebox";
-import type { Settings } from "./config.js";
-import { McpError } from "./errors.js";
+import type { Settings } from "./config.ts";
+import { McpError } from "./errors.ts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

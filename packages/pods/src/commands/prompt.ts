@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { getActivePod, loadConfig } from "../config.js";
+import { getActivePod, loadConfig } from "../config.ts";
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Types

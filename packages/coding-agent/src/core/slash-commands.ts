@@ -1,5 +1,5 @@
-import { APP_NAME } from "../config.js";
-import type { SourceInfo } from "./source-info.js";
+import { APP_NAME } from "../config.ts";
+import type { SourceInfo } from "./source-info.ts";
 
 export type SlashCommandSource = "extension" | "prompt" | "skill";
 
@@ -13,29 +13,35 @@ export interface SlashCommandInfo {
 export interface BuiltinSlashCommand {
 	name: string;
 	description: string;
+	argumentHint?: string;
 }
 
 export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "settings", description: "Open settings menu" },
-	{ name: "model", description: "Select model (opens selector UI)" },
+	{ name: "model", description: "Select model (opens selector UI)", argumentHint: "<provider/model>" },
 	{ name: "scoped-models", description: "Enable/disable models for Ctrl+P cycling" },
-	{ name: "export", description: "Export session (HTML default, or specify path: .html/.jsonl)" },
-	{ name: "import", description: "Import and resume a session from a JSONL file" },
+	{
+		name: "export",
+		description: "Export session (HTML default, or specify path: .html/.jsonl)",
+		argumentHint: "[path]",
+	},
+	{ name: "import", description: "Import and resume a session from a JSONL file", argumentHint: "<file.jsonl>" },
 	{ name: "share", description: "Share session as a secret GitHub gist" },
 	{ name: "copy", description: "Copy last agent message to clipboard" },
-	{ name: "name", description: "Set session display name" },
+	{ name: "name", description: "Set session display name", argumentHint: "<name>" },
 	{ name: "session", description: "Show session info and stats" },
 	{ name: "changelog", description: "Show changelog entries" },
 	{ name: "hotkeys", description: "Show all keyboard shortcuts" },
 	{ name: "fork", description: "Create a new fork from a previous user message" },
 	{ name: "clone", description: "Duplicate the current session at the current position" },
 	{ name: "tree", description: "Navigate session tree (switch branches)" },
-	{ name: "login", description: "Configure provider authentication" },
+	{ name: "trust", description: "Save project trust decision for future sessions" },
+	{ name: "login", description: "Configure provider authentication", argumentHint: "<provider>" },
 	{ name: "logout", description: "Remove provider authentication" },
 	{ name: "new", description: "Start a new session" },
-	{ name: "compact", description: "Manually compact the session context" },
+	{ name: "compact", description: "Manually compact the session context", argumentHint: "[instructions]" },
 	{ name: "resume", description: "Resume a different session" },
-	{ name: "reload", description: "Reload keybindings, extensions, skills, prompts, and themes" },
+	{ name: "reload", description: "Reload keybindings, extensions, skills, prompts, themes, and context files" },
 	{ name: "quit", description: `Quit ${APP_NAME}` },
 ];
 
@@ -45,28 +51,18 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
  * silent and surprising. matchBareBuiltinWithArgs detects that shape so the
  * TUI can surface a usage warning instead.
  *
- * Commands that DO take arguments (/model, /export, /import, /name, /compact)
- * are not listed. Neither is /debug: an extension (the debug orchestrator)
- * legitimately owns "/debug <text>".
+ * DERIVED from BUILTIN_SLASH_COMMANDS rather than hand-maintained: a builtin
+ * takes arguments exactly when it declares an `argumentHint` (/model, /login,
+ * /export, /import, /name, /compact). A hand-written list silently rotted the
+ * first time upstream gave an existing command an argument — `/login <provider>`
+ * gained one in 0.84 and the stale list turned it into a usage warning.
+ *
+ * `/debug` is absent by construction: it is not a builtin at all, so an
+ * extension (the debug orchestrator) legitimately owns "/debug <text>".
  */
-export const BARE_BUILTIN_COMMAND_NAMES: ReadonlySet<string> = new Set([
-	"settings",
-	"scoped-models",
-	"share",
-	"copy",
-	"session",
-	"changelog",
-	"hotkeys",
-	"fork",
-	"clone",
-	"tree",
-	"login",
-	"logout",
-	"new",
-	"reload",
-	"resume",
-	"quit",
-]);
+export const BARE_BUILTIN_COMMAND_NAMES: ReadonlySet<string> = new Set(
+	BUILTIN_SLASH_COMMANDS.filter((command) => command.argumentHint === undefined).map((command) => command.name),
+);
 
 /** Return the command name when `text` is `/bare-builtin <extra args>`, else null. */
 export function matchBareBuiltinWithArgs(text: string): string | null {

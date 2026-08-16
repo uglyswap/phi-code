@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { appendFile, writeFile } from "fs/promises";
 import { join } from "path";
-import * as log from "./log.js";
+import * as log from "./log.ts";
 
 export interface Attachment {
 	original: string; // original filename from uploader

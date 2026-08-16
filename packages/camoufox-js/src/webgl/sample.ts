@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { OS_ARCH_MATRIX } from "../pkgman.js";
+import { OS_ARCH_MATRIX } from "../pkgman.ts";
 
 declare const Bun: unknown;
 declare const Deno: unknown;

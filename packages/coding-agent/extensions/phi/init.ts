@@ -24,7 +24,7 @@ import {
 	ORCHESTRATION_ROLES,
 	runSetupWizard,
 	writeRoutingConfig,
-} from "./setup.js";
+} from "./setup.ts";
 
 const phiDir = join(homedir(), ".phi");
 const agentDir = join(phiDir, "agent");

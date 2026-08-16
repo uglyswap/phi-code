@@ -6,7 +6,7 @@ import {
 	decidePhaseTransition,
 	type PhaseEndAnalysis,
 	resolvePhaseOutcome,
-} from "../extensions/phi/providers/phase-machine.js";
+} from "../extensions/phi/providers/phase-machine.ts";
 
 const MAX = 60;
 

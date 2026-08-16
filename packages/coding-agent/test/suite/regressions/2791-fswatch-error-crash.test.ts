@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ENV_AGENT_DIR } from "../../../src/config.ts";
 
 /**
  * Regression test for https://github.com/earendil-works/pi-mono/issues/2791
@@ -39,10 +40,12 @@ describe("issue #2791 fs.watch error event crashes process", () => {
 		rmSync(tempRoot, { recursive: true, force: true });
 	});
 
-	// 40s budget: the child is `npx tsx` — under full-suite load on Windows its
-	// startup alone can exceed the previous 10s and made this test flaky.
+	// Generous budget: the child cold-starts Node's type stripping over the whole
+	// theme module graph; under full-suite load on Windows that can exceed 10s.
 	it("process should survive an error event on the theme FSWatcher", { timeout: 45_000 }, () => {
-		const themeModulePath = pathToFileURL(join(__dirname, "../../../src/modes/interactive/theme/theme.js")).href;
+		// A file:// URL, not a bare path: on Windows "C:/..." is parsed as a URL scheme
+		// by the ESM resolver and fails with ERR_UNSUPPORTED_ESM_URL_SCHEME.
+		const themeModulePath = pathToFileURL(join(__dirname, "../../../src/modes/interactive/theme/theme.ts")).href;
 		const agentDir = join(tempRoot, "agent").replace(/\\/g, "/");
 
 		// Script that sets up the watcher and emits a synthetic error on it.
@@ -54,7 +57,7 @@ describe("issue #2791 fs.watch error event crashes process", () => {
 			`
 import { setTheme, stopThemeWatcher } from "${themeModulePath}";
 
-process.env.PI_CODING_AGENT_DIR = "${agentDir}";
+process.env["${ENV_AGENT_DIR}"] = "${agentDir}";
 process.env.PHI_CODING_AGENT_DIR = "${agentDir}";
 
 setTheme("custom-test", true);
@@ -91,13 +94,11 @@ process.exit(0);
 		let stderr = "";
 		let exitCode: number;
 		try {
-			_stdout = execFileSync("npx", ["tsx", scriptPath], {
+			_stdout = execFileSync(process.execPath, [scriptPath], {
 				timeout: 40_000,
 				encoding: "utf-8",
-				env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PHI_CODING_AGENT_DIR: agentDir },
+				env: { ...process.env, [ENV_AGENT_DIR]: agentDir },
 				stdio: ["pipe", "pipe", "pipe"],
-				// On Windows `npx` is npx.cmd and cannot be spawned without a shell.
-				shell: process.platform === "win32",
 			});
 			exitCode = 0;
 		} catch (err: unknown) {

@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { discoverAgents, loadAgentDef, parseAgentMarkdown } from "../extensions/phi/providers/agent-def.js";
+import { discoverAgents, loadAgentDef, parseAgentMarkdown } from "../extensions/phi/providers/agent-def.ts";
 
 const BUNDLED_AGENTS = ["code", "explore", "plan", "review", "test"];
 

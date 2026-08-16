@@ -5,7 +5,7 @@
  */
 
 import type { Component, TUI } from "phi-code-tui";
-import { theme } from "../theme/theme.js";
+import { theme } from "../theme/theme.ts";
 
 // 32x32 RGB image of dax, hex encoded (3 bytes per pixel)
 const DAX_HEX =

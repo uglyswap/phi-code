@@ -9,7 +9,7 @@
  * red-team) that routes real failures back to the /debug protocol.
  */
 
-import type { FailingState } from "./debug-contract.js";
+import type { FailingState } from "./debug-contract.ts";
 
 /** Render a failing state as a compact, unambiguous block for an instruction. */
 export function formatFailingState(state: FailingState): string {

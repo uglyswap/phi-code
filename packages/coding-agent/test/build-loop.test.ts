@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { AcceptanceReport, CriterionResult } from "../extensions/phi/providers/acceptance.js";
-import { decideBuildRound } from "../extensions/phi/providers/build-loop.js";
-import type { BreakingCase } from "../extensions/phi/providers/redteam.js";
+import type { AcceptanceReport, CriterionResult } from "../extensions/phi/providers/acceptance.ts";
+import { decideBuildRound } from "../extensions/phi/providers/build-loop.ts";
+import type { BreakingCase } from "../extensions/phi/providers/redteam.ts";
 
 const crit = (description: string, satisfied: boolean | null, check?: string): CriterionResult => ({
 	criterion: { description, check },

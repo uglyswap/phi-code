@@ -9,7 +9,7 @@ import {
 	OPENCODE_GO_FALLBACK_MODELS,
 	pingOpenCodeGo,
 	validateOpenCodeGoApiKey,
-} from "../extensions/phi/providers/opencode-go.js";
+} from "../extensions/phi/providers/opencode-go.ts";
 
 describe("providers/opencode-go", () => {
 	const originalFetch = global.fetch;

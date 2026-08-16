@@ -4,11 +4,11 @@ import { spawn } from "child_process";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { listModels, showKnownModels, startModel, stopAllModels, stopModel, viewLogs } from "./commands/models.js";
-import { listPods, removePodCommand, setupPod, switchActivePod } from "./commands/pods.js";
-import { promptModel } from "./commands/prompt.js";
-import { getActivePod, loadConfig } from "./config.js";
-import { sshExecStream } from "./ssh.js";
+import { listModels, showKnownModels, startModel, stopAllModels, stopModel, viewLogs } from "./commands/models.ts";
+import { listPods, removePodCommand, setupPod, switchActivePod } from "./commands/pods.ts";
+import { promptModel } from "./commands/prompt.ts";
+import { getActivePod, loadConfig } from "./config.ts";
+import { sshExecStream } from "./ssh.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -156,7 +156,7 @@ try {
 			case "shell": {
 				// pi shell [<name>] - open interactive shell
 				const podName = args[1];
-				let podInfo: { name: string; pod: import("./types.js").Pod } | null = null;
+				let podInfo: { name: string; pod: import("./types.ts").Pod } | null = null;
 
 				if (podName) {
 					const config = loadConfig();
@@ -208,7 +208,7 @@ try {
 					process.exit(1);
 				}
 
-				let podInfo: { name: string; pod: import("./types.js").Pod } | null = null;
+				let podInfo: { name: string; pod: import("./types.ts").Pod } | null = null;
 
 				if (podName) {
 					const config = loadConfig();

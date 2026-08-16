@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { ALIBABA_ENV_VAR, ALIBABA_MODELS } from "../extensions/phi/providers/alibaba.js";
-import { getProviderCatalog } from "../extensions/phi/providers/catalog.js";
+import { ALIBABA_ENV_VAR, ALIBABA_MODELS } from "../extensions/phi/providers/alibaba.ts";
+import { getProviderCatalog } from "../extensions/phi/providers/catalog.ts";
 
 describe("provider catalog (shared by /setup, /phi-init, /benchmark)", () => {
 	const catalog = getProviderCatalog();

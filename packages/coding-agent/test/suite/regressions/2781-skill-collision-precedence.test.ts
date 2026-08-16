@@ -2,8 +2,8 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CONFIG_DIR_NAME } from "../../../src/config.js";
-import { DefaultResourceLoader } from "../../../src/core/resource-loader.js";
+import { CONFIG_DIR_NAME } from "../../../src/config.ts";
+import { DefaultResourceLoader } from "../../../src/core/resource-loader.ts";
 
 describe("issue #2781 skill collision precedence: user skills should override package skills", () => {
 	let tempDir: string;

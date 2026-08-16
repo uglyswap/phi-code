@@ -3,7 +3,7 @@ import {
 	diffChangedLines,
 	type FixCandidate,
 	selectMinimalPassingCandidate,
-} from "../extensions/phi/providers/candidate-select.js";
+} from "../extensions/phi/providers/candidate-select.ts";
 
 const patch = (changedLines: number) => {
 	// A well-formed unified diff with `changedLines` +/- lines plus headers.

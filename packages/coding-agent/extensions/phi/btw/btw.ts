@@ -16,8 +16,11 @@ import {
 	type ExtensionContext,
 	type SessionEntry,
 } from "phi-code";
-import { type AssistantMessage, completeSimple, type Message, type StopReason, type UserMessage } from "phi-code-ai";
-import { showBtwOverlay } from "./btw-ui.js";
+import type { AssistantMessage, Message, StopReason, UserMessage } from "phi-code-ai";
+// completeSimple moved to the compat entrypoint in pi 0.84 (the loader maps the
+// "phi-code-ai" root to compat at runtime, but the type resolution needs it named).
+import { completeSimple } from "phi-code-ai/compat";
+import { showBtwOverlay } from "./btw-ui.ts";
 
 // ---------------------------------------------------------------------------
 // Constants — flat named consts, grouped by concern (advisor pattern, b9428e9)

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { stripJsonComments } from "../src/core/json-utils.js";
+import { stripJsonComments } from "../src/core/json-utils.ts";
 
 describe("stripJsonComments", () => {
 	test("passes plain JSON through unchanged", () => {

@@ -27,9 +27,9 @@
 import { EventEmitter } from "node:events";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { getModelsPath } from "../config.js";
-import { stripJsonComments } from "./json-utils.js";
-import { resolveConfigValue } from "./resolve-config-value.js";
+import { getModelsPath } from "../config.ts";
+import { stripJsonComments } from "./json-utils.ts";
+import { resolveConfigValue } from "./resolve-config-value.ts";
 
 export interface ProviderConfigPersisted {
 	baseUrl?: string;
@@ -94,12 +94,15 @@ export class ApiKeyStore extends EventEmitter {
 	/**
 	 * Get the API key for a provider, with env-var fallback.
 	 *
-	 * The stored value follows the documented convention ("env var name or
-	 * literal value", plus "!cmd"): it is resolved through the same logic as
-	 * model-registry instead of being returned raw, so a config that works at
-	 * request time also works here. Legacy "$NAME" values resolve NAME and
-	 * fall through to the envVar fallback when unset (they are never returned
-	 * literally — no real API key starts with "$").
+	 * The stored value is resolved through `resolveConfigValue`, the single
+	 * convention shared with the model runtime, so a config that works at
+	 * request time also works here: `$NAME` / `${NAME}` read the environment,
+	 * `!cmd` runs a shell command, anything else is a literal credential.
+	 *
+	 * (Before pi 0.84 a bare `NAME` also read the environment. That was
+	 * ambiguous — a literal key matching an env-var name was silently shadowed —
+	 * and the convention is now explicit. Configs written the old way must add
+	 * the `$`.)
 	 *
 	 * Returns undefined if no source yields a value.
 	 */
@@ -107,13 +110,8 @@ export class ApiKeyStore extends EventEmitter {
 		if (!this.loaded) this.load();
 		const stored = this.config.providers[providerId]?.apiKey?.trim();
 		if (stored && stored.length > 0) {
-			if (stored.startsWith("$")) {
-				const fromEnv = process.env[stored.slice(1)]?.trim();
-				if (fromEnv) return fromEnv;
-			} else {
-				const resolved = resolveConfigValue(stored)?.trim();
-				if (resolved) return resolved;
-			}
+			const resolved = resolveConfigValue(stored)?.trim();
+			if (resolved) return resolved;
 		}
 		if (envVar) return process.env[envVar]?.trim() || undefined;
 		return undefined;

@@ -5,8 +5,8 @@ import {
 	CannotExecuteXvfb,
 	CannotFindXvfb,
 	VirtualDisplayNotSupported,
-} from "./exceptions.js";
-import { OS_NAME } from "./pkgman.js";
+} from "./exceptions.ts";
+import { OS_NAME } from "./pkgman.ts";
 
 // Safe timeout for xvfb writing display num, prevents infinite hang
 const DISPLAYFD_READ_TIMEOUT_MS = 10_000;

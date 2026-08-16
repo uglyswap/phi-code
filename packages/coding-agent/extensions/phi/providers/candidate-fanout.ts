@@ -13,8 +13,8 @@ import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runCommand } from "./execution.js";
-import { getPiInvocation, isRateLimited } from "./explore-fanout.js";
+import { runCommand } from "./execution.ts";
+import { getPiInvocation, isRateLimited } from "./explore-fanout.ts";
 
 export interface CandidateSpec {
 	/** Model ref for this candidate (e.g. "alibaba-codingplan/qwen3.7-plus"). */

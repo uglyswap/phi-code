@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import type { RoutingConfig, TaskCategory } from "./types.js";
+import type { RoutingConfig, TaskCategory } from "./types.ts";
 
 export class SmartRouter {
 	private config: RoutingConfig;

@@ -7,7 +7,11 @@
 		"removeComments": false,
 		"outDir": "./dist",
 		"declaration": true,
-		"strict": true
+		"strict": true,
+		"allowImportingTsExtensions": true,
+		"rewriteRelativeImportExtensions": true
 	},
-	"include": ["src/**/*.ts"]
+	"include": [
+		"src/**/*.ts"
+	]
 }

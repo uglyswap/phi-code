@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { appendRunRecord, buildRunRecord, toJsonlLine } from "../extensions/phi/providers/telemetry.js";
+import { appendRunRecord, buildRunRecord, toJsonlLine } from "../extensions/phi/providers/telemetry.ts";
 
 const input = {
 	mode: "debug",

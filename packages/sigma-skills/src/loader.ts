@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
-import type { SkillScanner } from "./scanner.js";
-import type { Skill, SkillMatch } from "./types.js";
+import type { SkillScanner } from "./scanner.ts";
+import type { Skill, SkillMatch } from "./types.ts";
 
 export class SkillLoader {
 	private scanner: SkillScanner;

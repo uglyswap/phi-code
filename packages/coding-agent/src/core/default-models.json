@@ -4,7 +4,7 @@
     "alibaba-codingplan": {
       "baseUrl": "https://coding-intl.dashscope.aliyuncs.com/v1",
       "api": "openai-completions",
-      "apiKey": "ALIBABA_CODING_PLAN_KEY",
+      "apiKey": "$ALIBABA_CODING_PLAN_KEY",
       "models": [
         {
           "id": "qwen3.7-plus",
@@ -91,7 +91,7 @@
     "alibaba-codingplan-anthropic": {
       "baseUrl": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
       "api": "anthropic-messages",
-      "apiKey": "ALIBABA_CODING_PLAN_KEY",
+      "apiKey": "$ALIBABA_CODING_PLAN_KEY",
       "models": [
         {
           "id": "qwen3.7-plus",

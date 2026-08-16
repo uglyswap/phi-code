@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import WARNINGS_DATA from "./mappings/warnings.config.js";
+import WARNINGS_DATA from "./mappings/warnings.config.ts";
 
 const currentDir =
 	import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url));

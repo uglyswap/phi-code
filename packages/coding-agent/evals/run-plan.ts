@@ -21,7 +21,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { assertUniqueIds, type EvalTask, formatReport, summarize, type TaskRunResult, validateTask } from "./lib.js";
+import { assertUniqueIds, type EvalTask, formatReport, summarize, type TaskRunResult, validateTask } from "./lib.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PLAN_TIMEOUT_MS = 20 * 60 * 1000;

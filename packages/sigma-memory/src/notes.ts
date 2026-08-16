@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import { join, resolve, sep } from "path";
-import type { MemoryConfig, Note } from "./types.js";
+import type { MemoryConfig, Note } from "./types.ts";
 
 export class NotesManager {
 	private config: MemoryConfig;

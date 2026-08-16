@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { resolveSummaryUnion } from "../src/core/compaction/compaction.js";
+import { resolveSummaryUnion } from "../src/core/compaction/compaction.ts";
 
 describe("resolveSummaryUnion (anti-drift guard)", () => {
 	test("no previous summary returns the new summary unchanged", () => {

@@ -2,26 +2,49 @@
 	"extends": "./tsconfig.base.json",
 	"compilerOptions": {
 		"noEmit": true,
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
 		"paths": {
 			"*": ["./*"],
 			"phi-code": ["./packages/coding-agent/src/index.ts"],
 			"@phi-code-admin/phi-code": ["./packages/coding-agent/src/index.ts"],
 			"@phi-code-admin/phi-code/hooks": ["./packages/coding-agent/src/core/hooks/index.ts"],
 			"@phi-code-admin/phi-code/*": ["./packages/coding-agent/src/*"],
+			"phi-code-telemetry": ["./packages/telemetry/src/index.ts"],
+			"phi-code-telemetry/testing": ["./packages/telemetry/src/testing/index.ts"],
 			"phi-code-ai": ["./packages/ai/src/index.ts"],
 			"phi-code-ai/oauth": ["./packages/ai/src/oauth.ts"],
 			"phi-code-ai/*": ["./packages/ai/src/*.ts", "./packages/ai/src/providers/*.ts"],
 			"phi-code-ai/dist/*": ["./packages/ai/src/*"],
 			"phi-code-agent": ["./packages/agent/src/index.ts"],
+			"phi-code-agent/node": ["./packages/agent/src/node.ts"],
+			"phi-code-agent/session/testing": [
+				"./packages/agent/src/harness/session/testing/index.ts"
+			],
 			"phi-code-agent/*": ["./packages/agent/src/*"],
+			"phi-code-session-backend-sqlite-node": [
+				"./packages/session-backends/sqlite-node/src/index.ts"
+			],
+			"phi-code-protocol": ["./packages/protocol/src/index.ts"],
+			"phi-code-protocol/*": ["./packages/protocol/src/*"],
+			"phi-code-client": ["./packages/client/src/index.ts"],
+			"phi-code-client/*": ["./packages/client/src/*"],
+			"phi-code-server": ["./packages/server/src/index.ts"],
+			"phi-code-server/*": ["./packages/server/src/*"],
+			"typebox": ["./node_modules/typebox"],
 			"phi-code-tui": ["./packages/tui/src/index.ts"],
 			"phi-code-tui/*": ["./packages/tui/src/*"],
-			"typebox": ["./node_modules/typebox"],
 			"@mariozechner/pi-web-ui": ["./packages/web-ui/src/index.ts"],
 			"@mariozechner/pi-web-ui/*": ["./packages/web-ui/src/*"]
 		}
 	},
-	"include": ["packages/*/src/**/*", "packages/*/test/**/*", "packages/coding-agent/examples/**/*"],
+	"include": [
+		"packages/*/src/**/*",
+		"packages/*/test/**/*",
+		"packages/session-backends/*/src/**/*",
+		"packages/session-backends/*/test/**/*",
+		"packages/coding-agent/examples/**/*"
+	],
 	"exclude": [
 		"packages/web-ui/**/*",
 		"packages/mom/**/*",
@@ -30,6 +53,7 @@
 		"packages/camofox-browser/**/*",
 		"packages/camoufox-bin-*/**/*",
 		"packages/browser/**/*",
+		"packages/coding-agent/examples/extensions/gondolin/**",
 		"**/dist/**"
 	]
 }
