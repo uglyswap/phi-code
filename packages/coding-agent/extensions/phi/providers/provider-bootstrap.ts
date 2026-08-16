@@ -29,11 +29,19 @@ export interface BootstrapModel {
 	contextWindow: number;
 	maxTokens: number;
 	compat?: Record<string, unknown>;
+	/** Per-model endpoint, used when the provider itself must not be overridden. */
+	api?: string;
+	baseUrl?: string;
 }
 
+/**
+ * `baseUrl`/`api` are optional at the provider level: a provider whose id also
+ * exists in the built-in catalog (opencode-go) declares them per model instead,
+ * so the built-in entries keep their own endpoints.
+ */
 export interface BootstrapConfig {
-	baseUrl: string;
-	api: string;
+	baseUrl?: string;
+	api?: string;
 	apiKey: string;
 	models: BootstrapModel[];
 }

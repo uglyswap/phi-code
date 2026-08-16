@@ -1969,6 +1969,12 @@ Tag the note with relevant keywords for vector search.
 	pi.on("agent_end", async (event, ctx) => {
 		if (!orchestrationActive) return;
 
+		// pi 0.84 retries transient provider errors (429, overloaded, 5xx) inside the
+		// same run and fires agent_end BEFORE the retry. Chaining on that event would
+		// advance to the next phase while the retried turn is still coming, so the
+		// phase would be skipped and the next one would run twice.
+		if (event.willRetry) return;
+
 		// An internal abort (phase timeout) re-emits agent_end; that transition was
 		// already handled by the timeout. Consume the flag and ignore this event so
 		// it is not mistaken for a user cancellation below.

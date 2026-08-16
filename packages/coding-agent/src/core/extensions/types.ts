@@ -717,6 +717,13 @@ export interface AgentStartEvent {
 export interface AgentEndEvent {
 	type: "agent_end";
 	messages: AgentMessage[];
+	/**
+	 * True when the session is about to retry this run automatically (transient
+	 * provider error). An extension that chains work off agent_end MUST ignore
+	 * those events: the run is not over, and acting on them advances the chain
+	 * while the retried turn is still to come.
+	 */
+	willRetry?: boolean;
 }
 
 /** Fired after an agent run has fully settled and no automatic retry, compaction, or queued continuation will run. */

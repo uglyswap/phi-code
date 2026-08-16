@@ -7,6 +7,7 @@ import type { TuiMode as RendererTuiMode, ScrollViewScrollbar } from "phi-code-t
 import lockfile from "proper-lockfile";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
+import { readBrandedEnv } from "./env-vars.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
 
 export interface CompactionSettings {
@@ -1106,7 +1107,7 @@ export class SettingsManager {
 		if (this.settings.terminal?.clearOnShrink !== undefined) {
 			return this.settings.terminal.clearOnShrink;
 		}
-		return process.env.PI_CLEAR_ON_SHRINK === "1";
+		return readBrandedEnv("CLEAR_ON_SHRINK") === "1";
 	}
 
 	setClearOnShrink(enabled: boolean): void {
@@ -1226,7 +1227,7 @@ export class SettingsManager {
 	}
 
 	getShowHardwareCursor(): boolean {
-		return this.settings.showHardwareCursor ?? process.env.PI_HARDWARE_CURSOR === "1";
+		return this.settings.showHardwareCursor ?? readBrandedEnv("HARDWARE_CURSOR") === "1";
 	}
 
 	setShowHardwareCursor(enabled: boolean): void {

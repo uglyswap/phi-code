@@ -235,16 +235,34 @@ function toPersistedOpenCodeGoModel(m: OpenCodeGoModel) {
 	};
 }
 
+/** OpenAI-compatible endpoint of the OpenCode Go plan (the `/v1` suffix is required). */
+export const OPENCODE_GO_OPENAI_BASE_URL = "https://opencode.ai/zen/go/v1";
+
 /**
  * OpenAI-compatible provider entry (GLM / Kimi / DeepSeek / Mimo / Hy3).
  * Qwen/MiniMax are intentionally excluded — see buildOpenCodeGoAnthropicProviderConfig.
+ *
+ * `baseUrl` and `api` are declared PER MODEL, never on the provider. pi 0.84 ships a
+ * built-in `opencode-go` catalog whose Anthropic-compat models (minimax-m3, qwen3.7-plus…)
+ * live at `https://opencode.ai/zen/go`; a provider-level override applies to those models
+ * too and sent them to `…/zen/go/v1/v1/messages`. Scoping the override to the models this
+ * entry actually declares leaves the built-in ones on their correct endpoint.
  */
 export function buildOpenCodeGoProviderConfig(apiKey: string, models: OpenCodeGoModel[]) {
 	return {
-		baseUrl: "https://opencode.ai/zen/go/v1",
-		api: "openai-completions" as const,
+		// Explicitly undefined, not omitted: writing them clears a provider-level
+		// override left by an earlier phi version, which is exactly the stale value
+		// that mis-routed the built-in Anthropic-compat models.
+		baseUrl: undefined,
+		api: undefined,
 		apiKey,
-		models: models.filter((m) => !isOpenCodeGoAnthropicModel(m.id)).map(toPersistedOpenCodeGoModel),
+		models: models
+			.filter((m) => !isOpenCodeGoAnthropicModel(m.id))
+			.map((m) => ({
+				...toPersistedOpenCodeGoModel(m),
+				api: "openai-completions" as const,
+				baseUrl: OPENCODE_GO_OPENAI_BASE_URL,
+			})),
 	};
 }
 

@@ -55,8 +55,14 @@ describe("bootstrapProviderConfig — OpenCode Go", () => {
 	it("builds the OpenAI-compat entry (GLM/Kimi/DeepSeek families)", () => {
 		const r = bootstrapProviderConfig("opencode-go", "sk-1234567890abcdef");
 		if (!r.ok) throw new Error(r.error);
-		expect(r.config.baseUrl).toContain("opencode.ai/zen/go");
-		expect(r.config.api).toBe("openai-completions");
+		// No provider-level endpoint: it would also capture the built-in
+		// Anthropic-compat models of the same provider id.
+		expect(r.config.baseUrl).toBeUndefined();
+		expect(r.config.api).toBeUndefined();
+		for (const model of r.config.models) {
+			expect(model.baseUrl).toContain("opencode.ai/zen/go");
+			expect(model.api).toBe("openai-completions");
+		}
 		expect(r.config.models.length).toBeGreaterThan(0);
 		// Qwen/MiniMax are anthropic-endpoint models and must NOT be here.
 		expect(r.config.models.some((m) => /^(qwen|minimax)/i.test(m.id))).toBe(false);

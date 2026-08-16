@@ -1,5 +1,110 @@
 # Changelog
 
+## [0.98.0] - 2026-08-17
+
+### Merged — upstream pi 0.74.0 → 0.84.2 (1627 commits, 10 minor releases)
+
+A real merge of `earendil-works/pi`, not a selective port. 258 conflicts. The
+rename noise was removed first: the merge base and the upstream side were both
+passed through the fork's pi → phi codemod, so every conflict left to resolve
+was a genuine semantic overlap between the two projects.
+
+#### What phi gains
+
+- **Fullscreen TUI mode** with sticky editor/footer, independently scrollable
+  transcript, draggable scrollbar and stacked notifications (`--tui-mode`,
+  `/settings`).
+- **Mermaid and LaTeX rendering** in the terminal, mouse selection (double-click
+  word, triple-click paragraph), `Ctrl+Shift+F` transcript search, `Ctrl+P`/`Ctrl+N`
+  prompt history, `Ctrl+X` copy.
+- **`phi auth check | print-api-key | print-bearer-token`** — credential preflight
+  and export for external clients, with automatic OAuth refresh.
+- New flags: `--session-id`, `--name`, `--exclude-tools`, `--approve`,
+  `--use-theme`, `--thinking max`.
+- **Project trust**: a project's extensions, skills and prompts only load once the
+  project is trusted; `/trust` records the decision.
+- `AGENTS.override.md`, prompt-template defaults (`${1:-7}`), provider-scoped auth
+  env in `auth.json`, `samplingParams`, per-token-tier pricing.
+- Providers and models added upstream: Baseten, Qwen Token Plan (+CN/Individual),
+  Ant Ling, NVIDIA NIM, llama.cpp router, Claude Opus 5 / Sonnet 5 / Fable 5,
+  Kimi K3, GPT-5.6, Grok 4.5, MiniMax-M3.
+- Extension API: 33 hooks (was 29), strictly additive — `agent_settled`,
+  `project_trust`, `before_provider_headers`, `session_info_changed`,
+  `registerProvider`, markdown transformers, entry renderers, dynamic tool loading.
+- New workspace packages, renamed into the phi graph so a single dependency tree
+  gets installed: `phi-code-protocol`, `-client`, `-server`, `-telemetry`,
+  `-evals`, `-session-backend-sqlite-node`.
+- `ModelRuntime` replaces `ModelRegistry`; phi's providers and its `/keys`,
+  `/models`, `/benchmark`, `/setup` extensions run on the new runtime.
+- The TUI no longer bundles koffi: Windows VT input goes through a prebuilt N-API
+  addon, removing 74 MB of cross-platform native binaries from the compiled binary.
+
+#### Fixed
+
+1. **An external editor whose path contains a space could never launch.**
+   `options.command.split(" ")` turned `C:\Program Files\Microsoft VS Code\Code.exe
+   --wait` into the executable `C:\Program`. Replaced by a quote-aware parser
+   (`parseEditorCommand`, unit-tested) that also quotes back for the Windows shell.
+2. **Enable/disable patterns were written with backslashes on Windows.** `/config`
+   stored `-extensions\bar.ts` in settings.json, and minimatch treats `\` as an
+   escape — the resource was never actually disabled. Patterns and eval artifact
+   references are now POSIX.
+3. **`scripts/sync-versions.js` claimed lockstep for every repo state.**
+   `Object.values()` on a `Map` is always `[]`, so the divergence branch was dead.
+4. **The retryable-provider regex matched `429`/`500` anywhere in a message**,
+   including request ids and token counts, turning permanent failures into retry
+   loops. Now word-bounded.
+5. **The orchestrator advanced a phase on an `agent_end` that only preceded an
+   automatic retry.** pi 0.84 retries transient provider errors inside the run and
+   fires `agent_end` first, so `/fix` and `/debug` skipped a phase and ran the next
+   one twice. `willRetry` is now propagated to extensions and the orchestrator
+   ignores those events (regression test in the fake-Pi harness).
+6. **`opencode-go` collided with the new built-in catalog.** phi wrote a
+   provider-level `baseUrl` of `.../zen/go/v1`, which also captured upstream's
+   built-in Anthropic-compat models and sent them to `.../zen/go/v1/v1/messages`.
+   The endpoint is now declared per model; `minimax-m3` routes correctly again.
+7. **Session files were no longer created owner-only.** The upstream refactor
+   dropped the 0o600/0o700 hardening; sessions persist tool output, so it is
+   restored in `session-manager.ts`, with a catch-up `chmod` for existing files.
+8. **Attribution headers identified upstream Pi.** OpenRouter, NVIDIA and
+   Cloudflare traffic from phi was credited to `pi.dev` / `Pi`. Now `phi-code`.
+   `x-opencode-client` is deliberately unchanged: it gates a paid subscription.
+9. **`isOfficialDistribution()` compared the phi package name against `"pi"` and
+   `".pi"`**, so it was always false.
+10. **`/login <provider>` was rejected** with "takes no arguments":
+    `BARE_BUILTIN_COMMAND_NAMES` was hand-maintained and `/login` gained an
+    argument in 0.84. It is now derived from the command table, so the list cannot
+    rot again.
+11. **A bare env-var name in a credential is a literal again**, matching the
+    upstream contract (a literal key that happened to match an env var was
+    silently shadowed). The bundled `default-models.json` now uses
+    `"$ALIBABA_CODING_PLAN_KEY"`.
+12. **Running the CLI from source failed** with `ERR_MODULE_NOT_FOUND`: 537
+    relative `.js` specifiers were rewritten to `.ts`, the convention pi 0.84
+    adopted (`rewriteRelativeImportExtensions`).
+13. **The provider display names of the fork's own providers were lost** with
+    `provider-display-names.ts`; they now live on the provider entries.
+14. **`stripJsonComments` had two copies again** — `core/json-utils.ts` re-exports
+    the single implementation.
+
+### Changed
+
+- **The generated model catalog is versioned** (`packages/ai/src/providers/data`,
+  39 providers). Upstream gitignores it and rebuilds it by calling every provider
+  API, so a fresh clone could not build offline; `npm run build:offline` now works
+  from a clone.
+- **Environment variables are branded**: `PHI_OFFLINE`, `PHI_TELEMETRY`,
+  `PHI_EXPERIMENTAL`, `PHI_PACKAGE_DIR`, `PHI_TIMING`, `PHI_SESSION_ID`… The
+  inherited `PI_*` names are still read, and both are set for child processes.
+- **`npm run check` gained `check:extensions-smoke`**: the bundled extensions are
+  shipped as source and loaded by jiti against the built core, so typechecking
+  them proves nothing about loading. The new gate caught a module-initialisation
+  cycle that typechecked cleanly and crashed at startup.
+- Versioning stays independent: internal packages track upstream at `0.84.2`, the
+  CLI continues its own line.
+- Windows: symlink-dependent tests now probe the capability instead of assuming
+  it, and shell-flavour assertions are guarded.
+
 ## [0.97.1] - 2026-07-12
 
 ### Fixed — a message typed during a session transition is queued, not lost

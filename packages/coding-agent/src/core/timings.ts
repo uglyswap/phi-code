@@ -1,9 +1,11 @@
 /**
  * Central timing instrumentation for startup profiling.
- * Enable with PI_TIMING=1 environment variable.
+ * Enable with PHI_TIMING=1 (PI_TIMING is still accepted).
  */
 
-const ENABLED = process.env.PI_TIMING === "1";
+import { readBrandedEnv } from "./env-vars.ts";
+
+const ENABLED = readBrandedEnv("TIMING") === "1";
 interface TimingNamespace {
 	timings: Array<{ label: string; ms: number }>;
 	lastTime: number;

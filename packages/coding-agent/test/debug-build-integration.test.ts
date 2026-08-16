@@ -129,6 +129,22 @@ describe("/debug + /build integration", () => {
 		expect(notes).toContain("finished");
 	});
 
+	it("/debug ignores an agent_end that only precedes an automatic provider retry", async () => {
+		await cap.commands.get("debug")!("pytest tests/test_x.py::test_y", makeCtx(cap, tempDir));
+		await sleep(300);
+		expect(cap.sentMessages[0]).toContain("REPRODUCE agent");
+
+		// pi 0.84 fires agent_end before retrying a transient provider error. Acting on
+		// it would send LOCALIZE while the retried REPRODUCE turn is still to come.
+		await cap.events.get("agent_end")!({ messages: [], willRetry: true }, makeCtx(cap, tempDir));
+		await sleep(300);
+		expect(cap.sentMessages.length).toBe(1);
+
+		// The real end of the phase still advances it.
+		await finishPhase({ verdict: "PASS", handoff: "reproduced: assertion error" });
+		expect(cap.sentMessages[1]).toContain("LOCALIZE agent");
+	});
+
 	it("/debug retries a BLOCKED REPRODUCE once on the fallback, then halts honestly", async () => {
 		await cap.commands.get("debug")!("pytest tests/test_x.py::test_y", makeCtx(cap, tempDir));
 		await sleep(300);

@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import {
 	appendFileSync,
+	chmodSync,
 	closeSync,
 	createReadStream,
 	existsSync,
@@ -483,9 +484,35 @@ function getDefaultSessionDirPath(cwd: string, agentDir: string = getDefaultAgen
 export function getDefaultSessionDir(cwd: string, agentDir: string = getDefaultAgentDir()): string {
 	const sessionDir = getDefaultSessionDirPath(cwd, agentDir);
 	if (!existsSync(sessionDir)) {
-		mkdirSync(sessionDir, { recursive: true });
+		mkdirSync(sessionDir, sessionDirOptions());
 	}
 	return sessionDir;
+}
+
+/**
+ * Session files persist full tool output, which routinely contains credentials,
+ * tokens and private source. They are created owner-only (0o600) inside an
+ * owner-only directory (0o700) instead of inheriting the process umask.
+ *
+ * Node applies `mode` only when it CREATES the file, so an existing session
+ * written before this gets a catch-up chmod. On Windows the POSIX bits are
+ * meaningless and both calls are skipped.
+ */
+const SESSION_FILE_MODE = 0o600;
+const SESSION_DIR_MODE = 0o700;
+const isPosixFilesystem = process.platform !== "win32";
+
+function sessionDirOptions(): { recursive: true; mode?: number } {
+	return isPosixFilesystem ? { recursive: true, mode: SESSION_DIR_MODE } : { recursive: true };
+}
+
+function restrictSessionFilePermissions(filePath: string): void {
+	if (!isPosixFilesystem) return;
+	try {
+		chmodSync(filePath, SESSION_FILE_MODE);
+	} catch {
+		// Best effort: a read-only or foreign-owned file must not break the session.
+	}
 }
 
 const SESSION_READ_BUFFER_SIZE = 1024 * 1024;
@@ -877,7 +904,7 @@ export class SessionManager {
 		this.sessionDir = normalizePath(sessionDir);
 		this.persist = persist;
 		if (persist && this.sessionDir && !existsSync(this.sessionDir)) {
-			mkdirSync(this.sessionDir, { recursive: true });
+			mkdirSync(this.sessionDir, sessionDirOptions());
 		}
 
 		if (sessionFile) {
@@ -978,7 +1005,8 @@ export class SessionManager {
 
 	private _rewriteFile(): void {
 		if (!this.persist || !this.sessionFile) return;
-		const fd = openSync(this.sessionFile, "w");
+		const fd = openSync(this.sessionFile, "w", SESSION_FILE_MODE);
+		restrictSessionFilePermissions(this.sessionFile);
 		try {
 			for (const entry of this.fileEntries) {
 				writeFileSync(fd, `${JSON.stringify(entry)}\n`);
@@ -1027,7 +1055,8 @@ export class SessionManager {
 		}
 
 		if (!this.flushed) {
-			const fd = openSync(this.sessionFile, "wx");
+			const fd = openSync(this.sessionFile, "wx", SESSION_FILE_MODE);
+			restrictSessionFilePermissions(this.sessionFile);
 			try {
 				for (const e of this.fileEntries) {
 					writeFileSync(fd, `${JSON.stringify(e)}\n`);
@@ -1596,7 +1625,7 @@ export class SessionManager {
 
 		const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(resolvedTargetCwd);
 		if (!existsSync(dir)) {
-			mkdirSync(dir, { recursive: true });
+			mkdirSync(dir, sessionDirOptions());
 		}
 
 		// Create new session file with new ID but forked content

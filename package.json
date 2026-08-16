@@ -22,6 +22,7 @@
 		"dev:tsc": "concurrently --names \"ai\" --prefix-colors \"cyan\" \"cd packages/ai && npm run dev:tsc\"",
 		"check": "biome check --write --error-on-warnings . && npm run check:ts-imports && tsgo --noEmit && npm run check:browser-smoke",
 		"check:browser-smoke": "node scripts/check-browser-smoke.mjs",
+		"check:extensions-smoke": "node scripts/check-extensions-smoke.mjs",
 		"check:pinned-deps": "node scripts/check-pinned-deps.mjs",
 		"check:shrinkwrap": "node scripts/generate-coding-agent-shrinkwrap.mjs --check",
 		"check:install-lock:coding-agent": "node scripts/generate-coding-agent-install-lock.mjs --check",

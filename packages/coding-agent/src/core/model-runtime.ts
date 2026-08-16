@@ -40,6 +40,7 @@ import * as builtinProviderCatalog from "phi-code-ai/providers/all";
 import { getAgentDir } from "../config.ts";
 import { operationSignal, raceWithAbortSignal } from "../utils/abort.ts";
 import { AuthStorage as DefaultAuthStorage } from "./auth-storage.ts";
+import { readBrandedEnv } from "./env-vars.ts";
 import { ModelConfig } from "./model-config.ts";
 import { FileModelsStore, InMemoryCodingAgentModelsStore } from "./models-store.ts";
 import {
@@ -193,7 +194,7 @@ export class ModelRuntime implements Models {
 			modelsPath,
 			modelsStore,
 			providers,
-			process.env.PI_OFFLINE === undefined,
+			readBrandedEnv("OFFLINE") === undefined,
 		);
 		runtime.configureRadiusProviders();
 		runtime.rebuildProviders();
