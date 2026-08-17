@@ -3,7 +3,7 @@
  * Post-install script: copies bundled extensions, agents, and skills
  * to ~/.phi/agent/ and makes sigma packages resolvable from there.
  */
-const { existsSync, mkdirSync, cpSync, readdirSync, symlinkSync, unlinkSync, readlinkSync } = require("fs");
+const { existsSync, lstatSync, mkdirSync, cpSync, readdirSync, realpathSync, rmSync, rmdirSync, symlinkSync, unlinkSync, readlinkSync } = require("fs");
 const { join, dirname } = require("path");
 const { homedir } = require("os");
 
@@ -106,20 +106,50 @@ try {
   }
 } catch { /* skip */ }
 
+/**
+ * Clear whatever occupies `dest`, INCLUDING a link whose target no longer exists.
+ *
+ * The old code gated removal on existsSync(dest), which follows the link: a
+ * junction left by an earlier install whose target has since been deleted reads
+ * as "absent", so nothing was removed, symlinkSync then failed with EEXIST, and
+ * the copy fallback ran against that dangling junction — which does not throw,
+ * it CRASHES the process (STATUS_STACK_BUFFER_OVERRUN, exit 0xC0000409). No
+ * catch could run, npm saw a failed lifecycle script, and rolled the install
+ * back: phi could not be installed at all until the stale link was removed by
+ * hand.
+ *
+ * rmSync is not enough either, with or without `force`: on a dangling link it
+ * tries to enumerate the missing target and leaves the link in place (silently,
+ * with force). unlinkSync/rmdirSync act on the link itself, which is what a
+ * stale entry needs; rmSync stays for a real directory.
+ */
+function removeExisting(dest) {
+  let stat;
+  try {
+    stat = lstatSync(dest);
+  } catch {
+    return; // nothing there
+  }
+  if (stat.isSymbolicLink()) {
+    try { unlinkSync(dest); return; } catch { /* try rmdir below */ }
+    try { rmdirSync(dest); return; } catch { /* fall through */ }
+  }
+  try { rmSync(dest, { recursive: true, force: true }); } catch { /* reported by the caller */ }
+}
+
 function createLink(src, dest, name) {
   try {
-    // Remove existing (symlink or directory)
-    if (existsSync(dest)) {
-      try { unlinkSync(dest); } catch { 
-        try { cpSync(src, dest, { recursive: true, force: true }); return; } catch { return; }
-      }
-    }
-    // Try symlink first, fall back to copy (Windows may not support symlinks)
+    removeExisting(dest);
+    // Try symlink first, fall back to copy (Windows may not support symlinks).
     try {
       symlinkSync(src, dest, "junction");
       console.log(`  Φ Linked ${name}`);
     } catch {
-      cpSync(src, dest, { recursive: true, force: true });
+      // Copy the contents, not the link: a workspace layout hands us a symlinked
+      // source, and cpSync is the operation that crashes on link edge cases.
+      let source = src;
+      try { source = realpathSync(src); } catch { /* keep src */ }
+      cpSync(source, dest, { recursive: true, force: true });
       console.log(`  Φ Copied ${name}`);
     }
   } catch (e) {
