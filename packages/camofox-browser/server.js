@@ -248,6 +248,30 @@ function isBlockedIp(address) {
   return false;
 }
 
+// Opt-in exception to the SSRF guard above. OFF unless explicitly configured.
+//
+// The guard had no exception at all, which also made the server unable to drive an
+// app running on the operator's own machine — the most common local use, and what
+// the test suites do against their fixture site. These two switches keep the secure
+// default while making that possible:
+//
+//   CAMOFOX_ALLOW_PRIVATE_HOSTS=1              allow every private/loopback target
+//   CAMOFOX_ALLOWED_HOSTS=localhost,10.0.0.5   allow only these hostnames
+//
+// The scheme check stays ahead of them: file:// and friends are never reachable,
+// whatever the host allowance says.
+const ALLOW_PRIVATE_HOSTS = /^(1|true|yes)$/i.test(process.env.CAMOFOX_ALLOW_PRIVATE_HOSTS || '');
+const ALLOWED_PRIVATE_HOSTS = new Set(
+  (process.env.CAMOFOX_ALLOWED_HOSTS || '')
+    .split(',')
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+function isExplicitlyAllowedHost(hostname) {
+  return ALLOW_PRIVATE_HOSTS || ALLOWED_PRIVATE_HOSTS.has(hostname);
+}
+
 function validateUrl(url) {
   try {
     const parsed = new URL(url);
@@ -255,6 +279,9 @@ function validateUrl(url) {
       return `Blocked URL scheme: ${parsed.protocol} (only http/https allowed)`;
     }
     const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    if (isExplicitlyAllowedHost(hostname)) {
+      return null;
+    }
     if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
       return `Blocked host: ${parsed.hostname} (internal/metadata addresses are not allowed)`;
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// PHI-VENDOR: original upstream postinstall is preserved at
-// `scripts/postinstall.upstream.js` for reference. The Camoufox binary
+// PHI-VENDOR: the upstream postinstall (which fetched the binary from a
+// third-party GitHub release at install time) was removed. The Camoufox binary
 // is now provided by the @phi-code-admin/camoufox-bin-<platform>-<arch>
 // npm package via @phi-code-admin/camoufox-js#optionalDependencies, so
 // this postinstall is a deliberate no-op.

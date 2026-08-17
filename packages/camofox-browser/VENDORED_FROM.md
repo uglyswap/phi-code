@@ -14,7 +14,7 @@ monorepo.
 | Upstream version | `1.10.1` |
 | Vendored date | 2026-05-15 |
 | Vendored by | uglyswap (phi-code maintainer) |
-| Local version | `1.0.0` |
+| Local version | `1.1.0` |
 | License | MIT (preserved — see `LICENSE`) |
 
 ## Modifications versus upstream
@@ -32,7 +32,20 @@ monorepo.
    existing REST surface. The legacy HTTP server is still available via
    `camofox-browser serve` for users who want it.
 5. **Telemetry / analytics / update checks** disabled (search for
-   `// PHI-VENDOR:` markers).
+   `// PHI-VENDOR:` markers). The crash relay defaults to no endpoint, so
+   nothing is sent unless `CAMOFOX_CRASH_REPORT_URL` names a relay; the
+   worker source is still shipped for anyone self-hosting one, but no
+   workflow deploys it and the repo holds no Cloudflare credentials.
+6. **Private-network guard is opt-in-able**: `validateUrl` still refuses
+   loopback, link-local and RFC1918 hosts by default (SSRF), but
+   `CAMOFOX_ALLOW_PRIVATE_HOSTS=1` or a `CAMOFOX_ALLOWED_HOSTS` list lets
+   an operator reach an internal target on purpose. The scheme check runs
+   first, so `file:`/`data:` stay refused either way.
+7. **Windows fixes** upstream never needed on Linux: `plugin install`
+   accepts a drive-letter or UNC path (it used to route them to
+   `git clone`), and an external `CAMOUFOX_EXECUTABLE` bundle falls back
+   to a hard link or copy when the OS refuses a file symlink (creating one
+   requires Administrator or Developer Mode).
 
 ## License compliance (MIT)
 

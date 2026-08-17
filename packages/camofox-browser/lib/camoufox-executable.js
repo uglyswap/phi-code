@@ -2,7 +2,10 @@ import crypto from 'crypto';
 import {
   accessSync,
   constants,
+  copyFileSync,
+  cpSync,
   existsSync,
+  linkSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -87,10 +90,44 @@ function findResourceDir(executablePath) {
   return null;
 }
 
+/**
+ * Link `target` at `linkPath`, degrading gracefully when the OS forbids symlinks.
+ *
+ * Creating a *file* symlink on Windows requires either Administrator rights or
+ * Developer Mode; without them symlinkSync throws EPERM. Directory junctions
+ * need no privilege, which is why they are already special-cased — but every
+ * file link here (camoufox.exe, properties.json, version.json) hit EPERM on a
+ * normal Windows account, so an external CAMOUFOX_EXECUTABLE could not be used
+ * at all.
+ *
+ * Fallbacks, cheapest first: a hard link costs no disk and is instant, but only
+ * works within one volume; a copy always works. Both produce the same bytes at
+ * linkPath, which is all the launcher and camoufox-js read.
+ */
 function ensureSymlink(target, linkPath, type = 'file') {
   rmSync(linkPath, { force: true, recursive: true });
-  symlinkSync(target, linkPath, platform() === 'win32' && type === 'dir' ? 'junction' : type);
+  const symlinkType = platform() === 'win32' && type === 'dir' ? 'junction' : type;
+  try {
+    symlinkSync(target, linkPath, symlinkType);
+    return;
+  } catch (error) {
+    if (!PRIVILEGE_ERRORS.has(error.code)) throw error;
+  }
+
+  if (type === 'dir') {
+    cpSync(target, linkPath, { recursive: true });
+    return;
+  }
+
+  try {
+    linkSync(target, linkPath);
+  } catch {
+    copyFileSync(target, linkPath);
+  }
 }
+
+/** Codes Windows reports when symlink creation is refused for lack of privilege. */
+const PRIVILEGE_ERRORS = new Set(['EPERM', 'EACCES', 'UNKNOWN']);
 
 function shimRootFor(executablePath, resourceDir) {
   const key = crypto

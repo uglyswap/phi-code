@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { launchServer } from '../../lib/launcher.js';
 import { loadConfig } from '../../lib/config.js';
+import { reserveFreePort } from './../helpers/freePort.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -11,7 +12,7 @@ let serverProcess = null;
 let serverUrl = null;
 
 async function startServerWithApiKey(apiKey) {
-  const port = Math.floor(3100 + Math.random() * 900);
+  const port = await reserveFreePort();
   const cfg = loadConfig();
   const pluginDir = path.join(__dirname, '../..');
 
@@ -36,7 +37,7 @@ async function startServerWithApiKey(apiKey) {
 }
 
 async function startServerWithoutApiKey() {
-  const port = Math.floor(3100 + Math.random() * 900);
+  const port = await reserveFreePort();
   const cfg = loadConfig();
   const pluginDir = path.join(__dirname, '../..');
 
@@ -63,18 +64,30 @@ async function startServerWithoutApiKey() {
   throw new Error('Server failed to start');
 }
 
+/**
+ * Stop the running server.
+ *
+ * The SIGKILL fallback used to be a timer that was never cleared and that read the
+ * SHARED `serverProcess` binding. When the process closed quickly the timer stayed
+ * pending, the next describe block started its own server into that same binding,
+ * and ~5 s later the stale timer killed THAT server — the block's requests then
+ * died on ECONNRESET. The timer now targets the process it was created for and is
+ * cleared as soon as it closes.
+ */
 function stopServer() {
   return new Promise((resolve) => {
-    if (!serverProcess) return resolve();
-    serverProcess.on('close', () => {
-      serverProcess = null;
-      serverUrl = null;
+    const child = serverProcess;
+    if (!child) return resolve();
+    const forceKill = setTimeout(() => child.kill('SIGKILL'), 5000);
+    child.on('close', () => {
+      clearTimeout(forceKill);
+      if (serverProcess === child) {
+        serverProcess = null;
+        serverUrl = null;
+      }
       resolve();
     });
-    serverProcess.kill('SIGTERM');
-    setTimeout(() => {
-      if (serverProcess) serverProcess.kill('SIGKILL');
-    }, 5000);
+    child.kill('SIGTERM');
   });
 }
 

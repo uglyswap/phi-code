@@ -6,7 +6,7 @@
  * "file read + network send" pattern.
  */
 import { describe, test, expect } from '@jest/globals';
-import { readFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -74,13 +74,28 @@ describe('no embedded secrets in distributed files', () => {
     expect(toml).toContain('name = "camofox-telemetry"');
   });
 
-  test('deploy workflow triggers on worker changes from main', () => {
-    const workflow = readFileSync(join(__dirname, '../../.github/workflows/telemetry-deploy.yml'), 'utf-8');
-    expect(workflow).toContain('workers/crash-reporter/**');
-    expect(workflow).toContain('branches: [master]');
-    expect(workflow).toContain('CLOUDFLARE_API_TOKEN');
-    expect(workflow).toContain('CLOUDFLARE_ACCOUNT_ID');
-    expect(workflow).toContain('__COMMIT_SHA__');
-    expect(workflow).toContain('__SOURCE_SHA256__');
+  /**
+   * Upstream shipped a workflow that deployed this worker to its own Cloudflare
+   * account on every push. The vendored snapshot keeps the worker *source* — it
+   * is what a user needs to stand up their own relay for CAMOFOX_CRASH_REPORT_URL
+   * — but deploys nothing and holds no Cloudflare credentials. The old case read
+   * `.github/workflows/telemetry-deploy.yml`, a file this repo does not have, so
+   * it failed on a missing file instead of checking anything.
+   */
+  test('the worker source ships, but no workflow deploys it', () => {
+    const workerDir = join(__dirname, '../../workers/crash-reporter');
+    expect(existsSync(join(workerDir, 'index.ts'))).toBe(true);
+    expect(existsSync(join(workerDir, 'wrangler.toml'))).toBe(true);
+
+    const workflowDir = join(__dirname, '../../../../.github/workflows');
+    const workflows = existsSync(workflowDir)
+      ? readdirSync(workflowDir).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))
+      : [];
+    for (const file of workflows) {
+      const body = readFileSync(join(workflowDir, file), 'utf-8');
+      expect(body).not.toContain('CLOUDFLARE_API_TOKEN');
+      expect(body).not.toContain('CLOUDFLARE_ACCOUNT_ID');
+      expect(body).not.toContain('wrangler');
+    }
   });
 });
