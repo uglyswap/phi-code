@@ -28,15 +28,28 @@ This snapshot is intentionally close to upstream. The diffs are tracked in
    `camoufox-js` is preserved as a `keyword` for discoverability.
 2. **Binary lookup** (`src/pkgman.ts`): the `CamoufoxFetcher` class no
    longer hits `https://api.github.com/repos/daijro/camoufox/releases`.
-   Instead, it discovers the platform-specific binary from one of the
-   sibling `@phi-code-admin/camoufox-bin-<os>-<arch>` packages installed
-   via `optionalDependencies`. The legacy GitHub-fetch code path is
-   preserved as `LEGACY_GITHUB_FETCH` and only kicks in when the env
-   variable `CAMOUFOX_ALLOW_GITHUB_FETCH=1` is set.
-3. **Telemetry / analytics / update checks** are no-ops. See the audit
+   The binary is downloaded by `scripts/postinstall.mjs` from the
+   `uglyswap/phi-code` GitHub Release into a versioned cache
+   (`~/.cache/phi-code/camoufox/v1.0.0/<platform>-<arch>/camoufox-bin`, or
+   the platform equivalent), checksum-verified, and looked up there first —
+   `CAMOUFOX_BIN_DIR` and `CAMOUFOX_EXECUTABLE` override it. The download
+   never fails an install: on failure it prints how to retry
+   (`npx @phi-code-admin/camoufox-js fetch`) and exits 0. The legacy
+   GitHub-fetch code path is preserved as `LEGACY_GITHUB_FETCH` and only
+   kicks in when `CAMOUFOX_ALLOW_GITHUB_FETCH=1` is set.
+3. **playwright-core is bounded** to `>=1.58.0 <1.61.0`, and a guard in
+   `NewBrowser` refuses anything outside that range with an actionable
+   message. Camoufox is driven over juggler, a protocol versioned with
+   playwright itself: from 1.61.0 playwright sends a
+   `Browser.setDefaultViewport` field this Firefox 135 build rejects, and
+   the first `newPage()` failed with
+   `Found property "<root>.viewport.isMobile"` — a message that says
+   nothing about versions. Measured: 1.58.1, 1.59.1 and 1.60.0 work;
+   1.61.0, 1.61.1, 1.62.0 and 1.62.1 do not.
+4. **Telemetry / analytics / update checks** are no-ops. See the audit
    header at the top of each modified file (look for `// PHI-VENDOR:`
    comment markers).
-4. **Auto-update disabled**: `AUTO_UPDATE = false` is enforced at module
+5. **Auto-update disabled**: `AUTO_UPDATE = false` is enforced at module
    scope.
 
 ## License compliance (MPL-2.0)

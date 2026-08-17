@@ -73,7 +73,7 @@ The Docker image includes yt-dlp. For local dev, install it for the `/youtube/tr
 ### OpenClaw Plugin
 
 ```bash
-openclaw plugins install @askjo/camofox-browser
+openclaw plugins install @phi-code-admin/camofox-browser
 ```
 
 **Tools:** `camofox_create_tab`  |  `camofox_snapshot`  |  `camofox_click`  |  `camofox_type`  |  `camofox_navigate`  |  `camofox_scroll`  |  `camofox_screenshot`  |  `camofox_close_tab`  |  `camofox_list_tabs`  |  `camofox_import_cookies`
@@ -673,7 +673,7 @@ npm run test:debug    # with server output
 ## npm
 
 ```bash
-npm install @askjo/camofox-browser
+npm install @phi-code-admin/camofox-browser
 ```
 
 ## Credits
