@@ -4,6 +4,7 @@ import { spawn } from "child_process";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { CLI_COMMAND } from "./branding.ts";
 import { listModels, showKnownModels, startModel, stopAllModels, stopModel, viewLogs } from "./commands/models.ts";
 import { listPods, removePodCommand, setupPod, switchActivePod } from "./commands/pods.ts";
 import { promptModel } from "./commands/prompt.ts";
@@ -16,31 +17,31 @@ const __dirname = dirname(__filename);
 const packageJson = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf-8"));
 
 function printHelp() {
-	console.log(`pi v${packageJson.version} - Manage vLLM deployments on GPU pods
+	console.log(`${CLI_COMMAND} v${packageJson.version} - Manage vLLM deployments on GPU pods
 
 Pod Management:
-  pi pods setup <name> "<ssh>" --mount "<mount>"    Setup pod with mount command
+  ${CLI_COMMAND} pods setup <name> "<ssh>" --mount "<mount>"    Setup pod with mount command
     Options:
       --vllm release    Install latest vLLM release >=0.10.0 (default)
       --vllm nightly    Install vLLM nightly build (latest features)
       --vllm gpt-oss    Install vLLM 0.10.1+gptoss with PyTorch nightly (GPT-OSS only)
-  pi pods                                           List all pods (* = active)
-  pi pods active <name>                             Switch active pod
-  pi pods remove <name>                             Remove pod from local config
-  pi shell [<name>]                                 Open shell on pod (active or specified)
-  pi ssh [<name>] "<command>"                       Run SSH command on pod
+  ${CLI_COMMAND} pods                                           List all pods (* = active)
+  ${CLI_COMMAND} pods active <name>                             Switch active pod
+  ${CLI_COMMAND} pods remove <name>                             Remove pod from local config
+  ${CLI_COMMAND} shell [<name>]                                 Open shell on pod (active or specified)
+  ${CLI_COMMAND} ssh [<name>] "<command>"                       Run SSH command on pod
 
 Model Management:
-  pi start <model> --name <name> [options]          Start a model
+  ${CLI_COMMAND} start <model> --name <name> [options]          Start a model
     --memory <percent>   GPU memory allocation (30%, 50%, 90%)
     --context <size>     Context window (4k, 8k, 16k, 32k, 64k, 128k)
     --gpus <count>       Number of GPUs to use (predefined models only)
     --vllm <args...>     Pass remaining args to vLLM (ignores other options)
-  pi stop [<name>]                                  Stop model (or all if no name)
-  pi list                                           List running models
-  pi logs <name>                                    Stream model logs
-  pi agent <name> ["<message>"...] [options]        Chat with model using agent & tools
-  pi agent <name> [options]                         Interactive chat mode
+  ${CLI_COMMAND} stop [<name>]                                  Stop model (or all if no name)
+  ${CLI_COMMAND} list                                           List running models
+  ${CLI_COMMAND} logs <name>                                    Stream model logs
+  ${CLI_COMMAND} agent <name> ["<message>"...] [options]        Chat with model using agent & tools
+  ${CLI_COMMAND} agent <name> [options]                         Interactive chat mode
     --continue, -c       Continue previous session
     --json              Output as JSONL
     (All pi-agent options are supported)
@@ -71,7 +72,7 @@ const subcommand = args[1];
 
 // Main command handler
 try {
-	// Handle "pi pods" commands
+	// Handle `${CLI_COMMAND} pods` commands
 	if (command === "pods") {
 		if (!subcommand) {
 			// pi pods - list all pods
@@ -172,7 +173,7 @@ try {
 					if (podName) {
 						console.error(chalk.red(`Pod '${podName}' not found`));
 					} else {
-						console.error(chalk.red("No active pod. Use 'pi pods active <name>' to set one."));
+						console.error(chalk.red(`No active pod. Use '${CLI_COMMAND} pods active <name>' to set one.`));
 					}
 					process.exit(1);
 				}
@@ -224,7 +225,7 @@ try {
 					if (podName) {
 						console.error(chalk.red(`Pod '${podName}' not found`));
 					} else {
-						console.error(chalk.red("No active pod. Use 'pi pods active <name>' to set one."));
+						console.error(chalk.red(`No active pod. Use '${CLI_COMMAND} pods active <name>' to set one.`));
 					}
 					process.exit(1);
 				}

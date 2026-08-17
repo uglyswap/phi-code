@@ -1,7 +1,7 @@
 {
-	"name": "@mariozechner/pi-mom",
+	"name": "@phi-code-admin/mom",
 	"version": "0.56.3",
-	"description": "Slack bot that delegates messages to the pi coding agent",
+	"description": "Slack bot that delegates messages to the phi coding agent",
 	"type": "module",
 	"bin": {
 		"mom": "dist/main.js"

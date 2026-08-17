@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed to `@phi-code-admin/mom`. Entries below refer to the package by its
+  former name, `@mariozechner/pi-mom`; that history is left as written.
+- Ported to the pi 0.84.2 APIs: the model runtime replaces `ModelRegistry`
+  (`ModelRuntime.create` is async, so the runner factory is too), the agent takes
+  an explicit `streamFn`, and `ResourceLoader` gained
+  `getSystemPromptSource` / `getAppendSystemPromptSources`.
+- Auth now lives under the phi config directory (`~/.phi/mom/auth.json`, derived
+  from `CONFIG_DIR_NAME`) instead of a hardcoded `~/.pi`.
+
 ## [0.56.3] - 2026-03-06
 
 ## [0.56.2] - 2026-03-05
