@@ -11,8 +11,26 @@ const outputDir = join(codingAgentDir, "install-lock");
 const rootLockfilePath = join(repoRoot, "package-lock.json");
 const outputPackageJsonPath = join(outputDir, "package.json");
 const outputLockfilePath = join(outputDir, "package-lock.json");
-const internalPackagePrefixes = ["phi-code-", "@phi-code-admin/"];
-const isInternalPackage = (name) => internalPackagePrefixes.some((prefix) => name.startsWith(prefix));
+/**
+ * Which packages are ours, rather than something to copy from the root lockfile.
+ *
+ * This used to be a name-prefix list ("phi-code-", "@phi-code-admin/"). The fork
+ * added workspaces that do not match it — sigma-memory, sigma-agents,
+ * sigma-skills — so they were classified as external, and an external dependency
+ * must have a real registry entry in the root lockfile. A workspace only has a
+ * LINK entry there, so generation died with "Cannot resolve sigma-agents ... No
+ * matching lockfile entry found" and the shipped artifact stayed at whatever the
+ * last successful run produced.
+ *
+ * Deriving the set from the workspaces themselves cannot drift: every published
+ * package under packages/ is internal, whatever it is called. Private workspaces
+ * are excluded on purpose — they have no registry tarball, so if one ever became
+ * a dependency the generator should fail loudly rather than emit a URL that 404s.
+ */
+let internalPackageNames = new Set();
+/** name -> version declared by the workspace, for the validation pass. */
+let internalWorkspaceVersions = new Map();
+const isInternalPackage = (name) => internalPackageNames.has(name);
 const installPackageName = "@phi-code-admin/phi-code-install";
 const allowedInstallScriptPackages = new Map([
 	["@google/genai@1.52.0", "preinstall is a no-op in the published package"],
@@ -38,6 +56,16 @@ function packageDependencies(entry) {
 		...(entry.dependencies ?? {}),
 		...(entry.optionalDependencies ?? {}),
 	};
+}
+
+/** Dependencies to walk, each flagged with whether its absence is tolerable. */
+function dependencyItems(entry, from) {
+	const optionalNames = new Set(Object.keys(entry.optionalDependencies ?? {}));
+	return Object.keys(packageDependencies(entry)).map((name) => ({
+		name,
+		from,
+		optional: optionalNames.has(name) && !(name in (entry.dependencies ?? {})),
+	}));
 }
 
 function sortedObject(object) {
@@ -141,19 +169,32 @@ function getInternalWorkspaces(lockPackages) {
 	const workspaces = new Map();
 
 	for (const [lockPath, entry] of Object.entries(lockPackages)) {
-		if (!lockPath.startsWith("packages/") || lockPath.includes("/node_modules/") || !entry.name || !entry.version) {
-			continue;
-		}
-		if (!isInternalPackage(entry.name)) {
+		if (!lockPath.startsWith("packages/") || lockPath.includes("/node_modules/") || !entry.version) {
 			continue;
 		}
 
-		workspaces.set(entry.name, {
-			lockPath,
-			packageJson: readJson(join(repoRoot, lockPath, "package.json")),
-		});
+		// The name comes from the manifest, not the lockfile entry: npm OMITS "name"
+		// whenever the package name equals its directory name. Every phi-code-* and
+		// @phi-code-admin/* package lives in a differently-named folder and so carries
+		// one, but packages/sigma-agents, packages/sigma-memory and packages/sigma-skills
+		// do not — they were dropped here before any classification could happen, which
+		// is what actually broke generation.
+		const manifestPath = join(repoRoot, lockPath, "package.json");
+		if (!existsSync(manifestPath)) {
+			continue;
+		}
+		const packageJson = readJson(manifestPath);
+		if (!packageJson.name || packageJson.private) {
+			continue; // unnamed, or private: no registry tarball to point at
+		}
+
+		workspaces.set(packageJson.name, { lockPath, packageJson });
 	}
 
+	internalPackageNames = new Set(workspaces.keys());
+	internalWorkspaceVersions = new Map(
+		[...workspaces].map(([name, workspace]) => [name, workspace.packageJson.version]),
+	);
 	return workspaces;
 }
 
@@ -200,6 +241,26 @@ function resolveExternalDependency(lockPackages, packageName, fromLockPath) {
 	);
 }
 
+/**
+ * Where a root-lockfile path lands in the generated installer tree.
+ *
+ * A workspace lives at `packages/<dir>` in the root lockfile but at
+ * `node_modules/<name>` in the installer, and anything npm nested beneath it
+ * moves with it: `packages/coding-agent/node_modules/undici` becomes
+ * `node_modules/@phi-code-admin/phi-code/node_modules/undici`. Without this
+ * rewrite a nested dependency was emitted under a `packages/…` path that does
+ * not exist in the installer tree, so npm would not find it there.
+ */
+function toInstallerPath(lockPath, workspaceOutputPaths) {
+	for (const [workspaceLockPath, outputPath] of workspaceOutputPaths) {
+		if (lockPath === workspaceLockPath) return outputPath;
+		if (lockPath.startsWith(`${workspaceLockPath}/`)) {
+			return `${outputPath}${lockPath.slice(workspaceLockPath.length)}`;
+		}
+	}
+	return lockPath;
+}
+
 function addInternalWorkspace(installLockPackages, addedPaths, queue, name, workspace) {
 	const packageJson = workspace.packageJson;
 	const outputPath = `node_modules/${name}`;
@@ -209,24 +270,25 @@ function addInternalWorkspace(installLockPackages, addedPaths, queue, name, work
 	installLockPackages[outputPath] = sortedPackageEntry(entry);
 	addedPaths.add(outputPath);
 
-	for (const dependencyName of Object.keys(packageDependencies(packageJson))) {
-		queue.push({ name: dependencyName, from: outputPath });
-	}
+	// Resolve from where the workspace really sits in the root lockfile, not from its
+	// installer path: npm nests a conflicting version under `packages/<dir>/node_modules/`,
+	// which is invisible from `node_modules/<name>` and left the lookup ambiguous between
+	// unrelated copies elsewhere in the tree.
+	queue.push(...dependencyItems(packageJson, workspace.lockPath));
 }
 
-function addExternalPackage(lockPackages, installLockPackages, addedPaths, queue, name, from) {
+function addExternalPackage(lockPackages, installLockPackages, addedPaths, queue, name, from, workspaceOutputPaths) {
 	const lockPath = resolveExternalDependency(lockPackages, name, from);
-	if (addedPaths.has(lockPath)) {
+	const outputPath = toInstallerPath(lockPath, workspaceOutputPaths);
+	if (addedPaths.has(outputPath)) {
 		return;
 	}
 
 	const entry = lockPackages[lockPath];
-	installLockPackages[lockPath] = copyLockEntry(entry);
-	addedPaths.add(lockPath);
+	installLockPackages[outputPath] = copyLockEntry(entry);
+	addedPaths.add(outputPath);
 
-	for (const dependencyName of Object.keys(packageDependencies(entry))) {
-		queue.push({ name: dependencyName, from: lockPath });
-	}
+	queue.push(...dependencyItems(entry, lockPath));
 }
 
 function createInstallerPackageJson(codingAgentPackage) {
@@ -295,8 +357,20 @@ function validateGeneratedFiles(installerPackageJson, installLock, internalNames
 		if (entry.dev || entry.devOptional || entry.extraneous) {
 			errors.push(`${lockPath || "root"} contains dev/extraneous metadata`);
 		}
-		if (packageName && isInternalPackage(packageName) && entry.version !== installerPackageJson.version) {
-			errors.push(`${lockPath} internal package version ${entry.version} does not match ${installerPackageJson.version}`);
+		// An internal package must carry the version its workspace declares.
+		//
+		// This used to require the INSTALLER's version instead, which assumes every
+		// internal package is released in lockstep. The fork versions them
+		// independently (coding-agent 0.98.x, the pi-derived packages 0.84.x, sigma
+		// and the camoufox/pods/mom satellites on their own tracks), so the check
+		// could only ever fail here. Comparing against the workspace still catches
+		// the failure that matters: an entry that does not describe what would
+		// actually be published.
+		if (packageName && isInternalPackage(packageName)) {
+			const expected = internalWorkspaceVersions.get(packageName);
+			if (expected && entry.version !== expected) {
+				errors.push(`${lockPath} internal package version ${entry.version} does not match workspace version ${expected}`);
+			}
 		}
 		if (entry.hasInstallScript) {
 			if (!packageName || !entry.version) {
@@ -327,11 +401,18 @@ function validateGeneratedFiles(installerPackageJson, installLock, internalNames
 	}
 
 	for (const [lockPath, entry] of Object.entries(installLock.packages)) {
+		const optionalNames = new Set(Object.keys(entry.optionalDependencies ?? {}));
 		for (const [dependencyName, dependencySpec] of Object.entries(packageDependencies(entry))) {
 			let dependencyLockPath;
 			try {
 				dependencyLockPath = resolveExternalDependency(installLock.packages, dependencyName, lockPath);
 			} catch {
+				// Optional means optional here too: npm records only the platform variants
+				// it installed, so an artifact generated on one OS legitimately lacks the
+				// others. Requiring them turned every generation into a failure.
+				if (optionalNames.has(dependencyName) && !(dependencyName in (entry.dependencies ?? {}))) {
+					continue;
+				}
 				errors.push(`${lockPath || "root"} dependency ${dependencyName} is missing`);
 				continue;
 			}
@@ -371,7 +452,15 @@ function generateInstallLock() {
 	};
 	const addedPaths = new Set([""]);
 	const internalNames = new Set();
-	const queue = Object.keys(packageDependencies(installerPackageJson)).map((name) => ({ name, from: "" }));
+	// packages/<dir> -> node_modules/<name>, so anything npm nested under a workspace
+	// is emitted where the installer will actually look for it. Longest first: a
+	// nested workspace path must win over its parent.
+	const workspaceOutputPaths = [...internalWorkspaces]
+		.map(([name, workspace]) => [workspace.lockPath, `node_modules/${name}`])
+		.sort(([a], [b]) => b.length - a.length);
+	const queue = dependencyItems(installerPackageJson, "");
+	/** Optional platform packages the root lockfile does not carry (see the warning below). */
+	const skippedOptional = [];
 
 	while (queue.length > 0) {
 		const item = queue.shift();
@@ -389,7 +478,25 @@ function generateInstallLock() {
 			continue;
 		}
 
-		addExternalPackage(lockPackages, installLockPackages, addedPaths, queue, item.name, item.from);
+		try {
+			addExternalPackage(
+				lockPackages,
+				installLockPackages,
+				addedPaths,
+				queue,
+				item.name,
+				item.from,
+				workspaceOutputPaths,
+			);
+		} catch (error) {
+			// An optional dependency is allowed to be absent — that is what optional
+			// means. npm only records the platform variants it actually installed, so a
+			// lockfile refreshed on Windows has no darwin/linux entries and generation
+			// used to die on the first one. Skipping them keeps the tool usable; the
+			// warning below makes the resulting gap impossible to ship unnoticed.
+			if (!item.optional) throw error;
+			skippedOptional.push(item.name);
+		}
 	}
 
 	const installLock = {
@@ -401,11 +508,31 @@ function generateInstallLock() {
 	};
 
 	validateGeneratedFiles(installerPackageJson, installLock, internalNames);
-	return { installerPackageJson, installLock };
+	return { installerPackageJson, installLock, skippedOptional };
+}
+
+/**
+ * The artifact is only as cross-platform as the lockfile it was generated from:
+ * npm records the platform variants it actually installed, so a lockfile refreshed
+ * on Windows carries no darwin/linux entries and the installer built from it would
+ * silently lack them. Say so, loudly, rather than shipping a one-OS lock.
+ */
+function reportPlatformCoverage(skippedOptional) {
+	if (skippedOptional.length === 0) return;
+	const unique = [...new Set(skippedOptional)].sort();
+	console.warn(
+		`Warning: ${unique.length} optional (platform-specific) package(s) are absent from the root lockfile and were skipped:`,
+	);
+	console.warn(`  ${unique.join(", ")}`);
+	console.warn(
+		"  The generated installer lock therefore only covers this machine's platform. Regenerate it where the",
+	);
+	console.warn("  root lockfile carries every variant (CI/Linux) before shipping it as a release asset.");
 }
 
 try {
-	const { installerPackageJson, installLock } = generateInstallLock();
+	const { installerPackageJson, installLock, skippedOptional } = generateInstallLock();
+	reportPlatformCoverage(skippedOptional);
 	const packageJsonContent = `${JSON.stringify(installerPackageJson, null, "\t")}\n`;
 	const lockfileContent = `${JSON.stringify(installLock, null, "\t")}\n`;
 

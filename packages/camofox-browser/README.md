@@ -84,16 +84,31 @@ openclaw plugins install @phi-code-admin/camofox-browser
 git clone https://github.com/jo-inc/camofox-browser
 cd camofox-browser
 npm install
-npm start  # downloads Camoufox on first run (~300MB)
+npm start  # the Camoufox binary is fetched at install time by camoufox-js (~300MB, cached)
 ```
 
 Default port is `9377`. See [Environment Variables](#environment-variables) for all options.
 
-> **Note:** the postinstall script unsets `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` for itself before fetching the Camoufox binary. Without that override, an exported `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` (common when Playwright is configured to use system Chrome) would silently skip the binary download and crash the server at runtime.
+> **Where the browser comes from:** this package's own postinstall does nothing. The
+> Camoufox binary is fetched by `@phi-code-admin/camoufox-js`'s postinstall, from the
+> `uglyswap/phi-code` GitHub Release, into a versioned cache
+> (`~/.cache/phi-code/camoufox/v1.0.0/<platform>-<arch>/` on Linux, the platform
+> equivalent elsewhere). It is checksum-verified, survives `rm -rf node_modules`, and
+> the download **never fails the install**: on error it prints a retry command and
+> exits 0, so the browser errors on first use rather than breaking `npm install`.
 >
-> **External Camoufox executable:** set `CAMOUFOX_EXECUTABLE=/path/to/camoufox-bin` before `npm install` and when starting the server to skip the bundled download and launch that executable. Compatibility aliases are `CAMOUFOX_EXECUTABLE_PATH` and `CAMOFOX_EXECUTABLE_PATH`. This is useful for NixOS paths such as `/nix/store/.../camoufox-bin`; the executable must come from a Camoufox bundle that includes `properties.json`, `version.json`, and `fontconfig/`.
+> **External Camoufox executable:** set `CAMOUFOX_EXECUTABLE=/path/to/camoufox-bin`
+> when starting the server to launch your own build instead. Compatibility aliases are
+> `CAMOUFOX_EXECUTABLE_PATH` and `CAMOFOX_EXECUTABLE_PATH`. Useful for NixOS paths such
+> as `/nix/store/.../camoufox-bin`; the executable must come from a Camoufox bundle that
+> includes `properties.json`, `version.json`, and `fontconfig/`.
 >
-> **Air-gapped or custom binary management:** prefer `CAMOUFOX_EXECUTABLE` when you already have a Camoufox bundle. Otherwise disable the auto-fetch with `npm install --ignore-scripts` (skips lifecycle scripts for *every* dependency -- bluntest option) or, more surgically, `npm install --omit=optional` plus a manual `npx camoufox-js fetch` step against your mirror. Note that `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install` no longer skips the Camoufox download (the postinstall sanitizes the env locally); use `--ignore-scripts` or `CAMOUFOX_EXECUTABLE` for that.
+> **Air-gapped or custom binary management:** prefer `CAMOUFOX_EXECUTABLE` when you
+> already have a bundle. Otherwise skip the download with `CAMOUFOX_SKIP_DOWNLOAD=1`,
+> point the lookup elsewhere with `CAMOUFOX_BIN_DIR`, or run
+> `npx @phi-code-admin/camoufox-js fetch` later against your mirror.
+> `npm install --ignore-scripts` also works, but it skips lifecycle scripts for *every*
+> dependency.
 
 ### Docker
 
@@ -643,11 +658,11 @@ The cookie import endpoint (`POST /sessions/:userId/cookies`) is gated behind `C
 
 ### Binary download
 
-The Camoufox browser engine (~300MB) is downloaded at `npm install` time by [`camoufox-js`](https://www.npmjs.com/package/camoufox-js), an npm package maintained by the [Camoufox project](https://camoufox.com). It downloads from [official GitHub releases](https://github.com/nicedayzhu/camoufox/releases) with integrity verification handled by `camoufox-js`. No custom download URLs, no URL shorteners, no raw IP addresses.
+The Camoufox browser engine (~300MB) is downloaded at `npm install` time by [`@phi-code-admin/camoufox-js`](https://www.npmjs.com/package/@phi-code-admin/camoufox-js), the vendored launcher in this monorepo. It downloads from the [`uglyswap/phi-code` GitHub Release](https://github.com/uglyswap/phi-code/releases/tag/binaries-v1.0.0) — not from a third party — and verifies each archive against the SHA256SUMS file published in the same release before extracting. No custom download URLs, no URL shorteners, no raw IP addresses. Skip it with `CAMOUFOX_SKIP_DOWNLOAD=1` or supply your own build with `CAMOUFOX_EXECUTABLE`.
 
 ### Telemetry
 
-Anonymized crash/hang telemetry is sent to a Cloudflare Worker endpoint. The endpoint source is [in this repo](workers/crash-reporter/index.ts) and auditable. Verification: `GET /source` on the endpoint returns the deployed commit hash and sha256 so you can compare against the repo. The reporter ([`lib/reporter.js` L28-290](lib/reporter.js#L28-L290)) applies paranoid anonymization: private domains are HMAC-hashed (not reversible), paths are stripped, tokens/IPs/emails are redacted. No page content, cookies, or user data is ever sent. Disable with `CAMOFOX_CRASH_REPORT_ENABLED=false` or point to your own endpoint with `CAMOFOX_CRASH_REPORT_URL`.
+**Telemetry is off.** This build ships with no crash-report endpoint: `sendToRelay` returns without touching the network unless `CAMOFOX_CRASH_REPORT_URL` names one, so nothing leaves the machine by default. The worker source is still [in this repo](workers/crash-reporter/index.ts) for anyone who wants to self-host a relay, but no workflow deploys it and the repo holds no credentials for one. If you do opt in, the reporter ([`lib/reporter.js`](lib/reporter.js)) anonymizes before sending: private domains are HMAC-hashed (not reversible), paths are stripped, tokens/IPs/emails are redacted, and no page content, cookies or user data is ever included.
 
 ### Session persistence
 
