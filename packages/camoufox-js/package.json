@@ -1,6 +1,6 @@
 {
 	"name": "@phi-code-admin/camoufox-js",
-	"version": "1.0.4",
+	"version": "1.0.5",
 	"description": "Phi-code vendored JS port of Camoufox (anti-detect Firefox launcher). Snapshot of apify/camoufox-js@562117321; the binary is fetched from the uglyswap/phi-code GitHub Release into a versioned cache instead of from a third party. MPL-2.0.",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
