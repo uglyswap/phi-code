@@ -25,8 +25,12 @@ the typecheck after the merge. It is now back in the quality gates
   cheapest listed model — so a catalogue refresh cannot silently break key validation
   again.
 
-The package is also renamed `@mariozechner/pi-web-ui` → `@phi-code-admin/web-ui`,
-so the whole workspace now lives under the fork's own names.
+The last three packages sitting under a third party's npm scope are renamed too, so
+the whole workspace now lives under the fork's own names:
+`@mariozechner/pi-web-ui` → `@phi-code-admin/web-ui` (private),
+`@mariozechner/pi-mom` → `@phi-code-admin/mom`, and
+`@mariozechner/pi` → `@phi-code-admin/pods` (binary `pi-pods` → `phi-pods`, which
+collided with the upstream pi tooling).
 
 Nothing published changed: web-ui is private and no published package was touched.
 

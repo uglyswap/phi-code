@@ -3,6 +3,7 @@ import { spawn } from "child_process";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { CLI_COMMAND } from "../branding.ts";
 import { getActivePod, loadConfig, saveConfig } from "../config.ts";
 import { getModelConfig, getModelName, isKnownModel } from "../model-configs.ts";
 import { sshExec } from "../ssh.ts";
@@ -45,7 +46,7 @@ const getPod = (podOverride?: string): { name: string; pod: Pod } => {
 
 	const active = getActivePod();
 	if (!active) {
-		console.error(chalk.red("No active pod. Use 'pi pods active <name>' to set one."));
+		console.error(chalk.red(`No active pod. Use '${CLI_COMMAND} pods active <name>' to set one.`));
 		process.exit(1);
 	}
 	return active;
@@ -637,7 +638,9 @@ export const showKnownModels = async () => {
 		console.log(chalk.bold(`Known Models for ${activePod.name} (${podGpuCount}x ${podGpuType || "GPU"}):\n`));
 	} else {
 		console.log(chalk.bold("Known Models:\n"));
-		console.log(chalk.yellow("No active pod. Use 'pi pods active <name>' to filter compatible models.\n"));
+		console.log(
+			chalk.yellow(`No active pod. Use '${CLI_COMMAND} pods active <name>' to filter compatible models.\n`),
+		);
 	}
 
 	console.log("Usage: pi start <model> --name <name> [options]\n");
