@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Release script for @askjo/camofox-browser
+# Release script for @phi-code-admin/camofox-browser
 # Usage: ./release.sh [patch|minor|major]
 # Defaults to patch if no argument given.
 #
 # This script:
-#   1. Runs pre-flight checks (clean tree, on master, up to date)
+#   1. Runs pre-flight checks (clean tree, on main, up to date)
 #   2. Runs tests locally
 #   3. Bumps version via npm version (which syncs openclaw.plugin.json)
 #   4. Pushes commit + tag to origin
-#   5. GitHub Actions publishes to npm with provenance
 #
-# The actual npm publish happens in CI (.github/workflows/publish.yml).
+# PHI-VENDOR: upstream ended here by pointing at a CI job
+# (.github/workflows/publish.yml) that published @askjo/camofox-browser with
+# provenance. That workflow belongs to jo-inc/camofox-browser and does not exist
+# in this monorepo, so nothing publishes on push: run `npm publish` from this
+# directory yourself. The branch check also said `master`, which this repo does
+# not have — the script stopped before doing anything either way.
 
 BUMP="${1:-patch}"
 
@@ -32,19 +36,19 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 
-# On master
+# On main
 BRANCH=$(git branch --show-current)
-if [[ "$BRANCH" != "master" ]]; then
-  echo "❌ Not on master (on $BRANCH). Switch to master first."
+if [[ "$BRANCH" != "main" ]]; then
+  echo "❌ Not on main (on $BRANCH). Switch to main first."
   exit 1
 fi
 
 # Up to date with remote
-git fetch origin master --quiet
+git fetch origin main --quiet
 LOCAL=$(git rev-parse HEAD)
-REMOTE=$(git rev-parse origin/master)
+REMOTE=$(git rev-parse origin/main)
 if [[ "$LOCAL" != "$REMOTE" ]]; then
-  echo "❌ Local master ($LOCAL) differs from origin ($REMOTE). Pull/push first."
+  echo "❌ Local main ($LOCAL) differs from origin ($REMOTE). Pull/push first."
   exit 1
 fi
 
@@ -73,13 +77,12 @@ NEW_VERSION=$(node -p "require('./package.json').version")
 echo ""
 echo "📦 New version: $NEW_VERSION"
 
-# --- Push (triggers CI publish) ---
+# --- Push ---
 echo ""
-echo "📤 Pushing commit and tag (CI will publish to npm)..."
-git push origin master --follow-tags
+echo "📤 Pushing commit and tag..."
+git push origin main --follow-tags
 
 echo ""
-echo "✅ Release v${NEW_VERSION} triggered"
-echo "   CI will publish @askjo/camofox-browser@${NEW_VERSION} with provenance"
-echo "   Watch: https://github.com/jo-inc/camofox-browser/actions"
-echo "   Package: https://www.npmjs.com/package/@askjo/camofox-browser"
+echo "✅ v${NEW_VERSION} committed, tagged and pushed"
+echo "   Nothing publishes on push in this repo — run: npm publish"
+echo "   Package: https://www.npmjs.com/package/@phi-code-admin/camofox-browser"

@@ -23,14 +23,22 @@ monorepo.
    `@askjo/camofox-browser`).
 2. **camoufox-js dependency** pinned to `@phi-code-admin/camoufox-js`
    (workspace protocol).
-3. **postinstall** script (`scripts/postinstall.js`) **disabled**: no
-   network calls during `npm install`. The binary is provided by the
-   `@phi-code-admin/camoufox-bin-<os>-<arch>` package via npm
-   `optionalDependencies`.
-4. **Express server** decoupled: the 10 OpenClaw tools are exposed as
-   programmatic ES module exports (`lib/api.js`) in addition to the
-   existing REST surface. The legacy HTTP server is still available via
-   `camofox-browser serve` for users who want it.
+3. **postinstall** script (`scripts/postinstall.js`) **disabled**: this
+   package makes no network call during `npm install`. The browser binary
+   is fetched by `@phi-code-admin/camoufox-js`'s own postinstall from the
+   `uglyswap/phi-code` GitHub Release into a versioned cache
+   (`~/.cache/phi-code/camoufox/v1.0.0/<platform>-<arch>/`, or the
+   platform equivalent). That download never fails the install; retry it
+   with `npx @phi-code-admin/camoufox-js fetch`, point at an existing
+   build with `CAMOUFOX_EXECUTABLE`, or skip it with
+   `CAMOUFOX_SKIP_DOWNLOAD=1`.
+4. **playwright-core is bounded** to `>=1.58.0 <1.61.0`. Camoufox is a
+   Firefox fork driven over juggler, a protocol versioned with playwright
+   itself: from 1.61.0 playwright sends a `Browser.setDefaultViewport`
+   field this Firefox 135 build rejects, and the first `newPage()` fails
+   with `Found property "<root>.viewport.isMobile"`. Upstream left the
+   dependency unbounded, so a fresh install picked the newest playwright
+   and the browser could not open a page.
 5. **Telemetry / analytics / update checks** disabled (search for
    `// PHI-VENDOR:` markers). The crash relay defaults to no endpoint, so
    nothing is sent unless `CAMOFOX_CRASH_REPORT_URL` names a relay; the
