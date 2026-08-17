@@ -4,7 +4,7 @@ import { spawn } from "child_process";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { CLI_COMMAND } from "./branding.ts";
+import { AGENT_COMMAND, CLI_COMMAND } from "./branding.ts";
 import { listModels, showKnownModels, startModel, stopAllModels, stopModel, viewLogs } from "./commands/models.ts";
 import { listPods, removePodCommand, setupPod, switchActivePod } from "./commands/pods.ts";
 import { promptModel } from "./commands/prompt.ts";
@@ -44,14 +44,14 @@ Model Management:
   ${CLI_COMMAND} agent <name> [options]                         Interactive chat mode
     --continue, -c       Continue previous session
     --json              Output as JSONL
-    (All pi-agent options are supported)
+    (All ${AGENT_COMMAND} options are supported)
 
   All model commands support --pod <name> to override the active pod.
 
 Environment:
   HF_TOKEN         HuggingFace token for model downloads
-  PI_API_KEY     API key for vLLM endpoints
-  PI_CONFIG_DIR    Config directory (default: ~/.pi)`);
+  PHI_API_KEY      API key for vLLM endpoints (PI_API_KEY still honoured)
+  PHI_CONFIG_DIR   Config directory (default: ~/.phi)`);
 }
 
 // Parse command line arguments
@@ -84,7 +84,7 @@ try {
 
 			if (!name || !sshCmd) {
 				console.error(
-					'Usage: pi pods setup <name> "<ssh>" [--mount "<mount>"] [--models-path <path>] [--vllm release|nightly|gpt-oss]',
+					`Usage: ${CLI_COMMAND} pods setup <name> "<ssh>" [--mount "<mount>"] [--models-path <path>] [--vllm release|nightly|gpt-oss]`,
 				);
 				process.exit(1);
 			}
@@ -126,7 +126,7 @@ try {
 			// pi pods active <name>
 			const name = args[2];
 			if (!name) {
-				console.error("Usage: pi pods active <name>");
+				console.error(`Usage: ${CLI_COMMAND} pods active <name>`);
 				process.exit(1);
 			}
 			switchActivePod(name);
@@ -134,7 +134,7 @@ try {
 			// pi pods remove <name>
 			const name = args[2];
 			if (!name) {
-				console.error("Usage: pi pods remove <name>");
+				console.error(`Usage: ${CLI_COMMAND} pods remove <name>`);
 				process.exit(1);
 			}
 			removePodCommand(name);
@@ -205,7 +205,7 @@ try {
 					podName = args[1];
 					sshCommand = args[2];
 				} else {
-					console.error('Usage: pi ssh [<name>] "<command>"');
+					console.error(`Usage: ${CLI_COMMAND} ssh [<name>] "<command>"`);
 					process.exit(1);
 				}
 
@@ -320,7 +320,7 @@ try {
 				// pi logs <name>
 				const name = args[1];
 				if (!name) {
-					console.error("Usage: pi logs <name>");
+					console.error(`Usage: ${CLI_COMMAND} logs <name>`);
 					process.exit(1);
 				}
 				await viewLogs(name, { pod: podOverride });
@@ -330,11 +330,11 @@ try {
 				// pi agent <name> [messages...] [options]
 				const name = args[1];
 				if (!name) {
-					console.error("Usage: pi agent <name> [messages...] [options]");
+					console.error(`Usage: ${CLI_COMMAND} agent <name> [messages...] [options]`);
 					process.exit(1);
 				}
 
-				const apiKey = process.env.PI_API_KEY;
+				const apiKey = process.env.PHI_API_KEY || process.env.PI_API_KEY;
 
 				// Pass all args after the model name
 				const agentArgs = args.slice(2);
@@ -343,9 +343,12 @@ try {
 				await promptModel(name, agentArgs, {
 					pod: podOverride,
 					apiKey,
-				}).catch(() => {
-					// Error already handled in promptModel, just exit cleanly
-					process.exit(0);
+				}).catch((error) => {
+					// promptModel reports and exits on the failures it expects, so
+					// anything arriving here is unexpected — exiting 0 used to report
+					// success for it, which hid the failure from scripts and CI.
+					console.error("Error:", error);
+					process.exit(1);
 				});
 				break;
 			}

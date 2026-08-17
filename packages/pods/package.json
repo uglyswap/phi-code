@@ -1,6 +1,6 @@
 {
 	"name": "@phi-code-admin/pods",
-	"version": "0.56.3",
+	"version": "0.57.0",
 	"description": "CLI tool for managing vLLM deployments on GPU pods",
 	"type": "module",
 	"bin": {
