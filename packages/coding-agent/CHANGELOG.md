@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.98.2]
+
+### Fixed — a stale link in ~/.phi made the package impossible to install
+
+`npm install @phi-code-admin/phi-code` aborted on Windows whenever
+`~/.phi/agent/extensions/node_modules/` still held a link from an earlier install
+whose target had since been deleted. The postinstall exits non-zero, so npm rolled
+the whole package back: the agent could not be installed at all, and neither could
+`@phi-code-admin/mom`, which depends on it. A home directory that had never seen
+phi was unaffected, which is why the release went out green.
+
+The chain, each step verified against the real filesystem:
+
+- `existsSync(dest)` follows the link, so a dangling one reads as absent and the
+  removal step was skipped.
+- `symlinkSync` then failed with `EEXIST` — the link was still there.
+- The copy fallback ran against that dangling link, and `cpSync` does not throw on
+  it: it kills the process (`STATUS_STACK_BUFFER_OVERRUN`, exit `0xC0000409`).
+  No `catch` could run.
+- `rmSync` would not have helped either: with or without `force`, it tries to
+  enumerate the missing target and leaves the link in place — silently, with
+  `force`. `unlinkSync`/`rmdirSync` act on the link itself.
+
+Removal is now driven by `lstatSync` (which does not follow the link) and uses
+`unlinkSync`/`rmdirSync` for a link, `rmSync` for a real directory. The copy
+fallback also dereferences its source, so a workspace-symlinked package is copied
+by content rather than handed to `cpSync` as a link.
+
+Covered by `scripts/coding-agent-postinstall.test.mjs` (3 cases, run by
+`npm test`): a first install, an install over a dangling link, and an install over
+a real directory squatting a link's place.
+
 ## [Unreleased]
 
 ### Fixed — packages/web-ui compiles and builds against the 0.84.2 APIs again
