@@ -20,7 +20,8 @@ import {
 import { html, render } from "lit";
 import { Bell, History, Plus, Settings } from "lucide";
 import { Agent, type AgentMessage } from "phi-code-agent";
-import { getModel, type TextContent } from "phi-code-ai";
+import type { TextContent } from "phi-code-ai";
+import { getModel, streamSimple } from "phi-code-ai/compat";
 import "./app.css";
 import { icon } from "@mariozechner/mini-lit";
 import { Button } from "@mariozechner/mini-lit/dist/Button.js";
@@ -174,6 +175,9 @@ Feel free to use these tools when needed to provide accurate and helpful respons
 			messages: [],
 			tools: [],
 		},
+		// pi 0.84 made streamFn a required Agent option. Passing the plain streamSimple
+		// is what tells AgentInterface it may upgrade it to the proxy-aware variant.
+		streamFn: streamSimple,
 		// Custom transformer: convert custom messages to LLM-compatible format
 		convertToLlm: customConvertToLlm,
 	});

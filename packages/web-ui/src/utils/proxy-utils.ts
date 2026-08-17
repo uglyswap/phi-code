@@ -1,5 +1,5 @@
 import type { Api, Context, Model, SimpleStreamOptions } from "phi-code-ai";
-import { streamSimple } from "phi-code-ai";
+import { streamSimple } from "phi-code-ai/compat";
 
 /**
  * Centralized proxy decision logic.

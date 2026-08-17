@@ -60,7 +60,14 @@ function getLanguageFromFilename(filename?: string): string {
 }
 
 export class ArtifactsToolRenderer implements ToolRenderer<ArtifactsParams, undefined> {
-	constructor(public artifactsPanel?: ArtifactsPanel) {}
+	// Champs explicites : `erasableSyntaxOnly` (tsconfig.base) interdit les parametres
+	// de constructeur avec modificateur, qui n'emettent rien sous un runtime qui se
+	// contente de retirer les types.
+	public artifactsPanel?: ArtifactsPanel;
+
+	constructor(artifactsPanel?: ArtifactsPanel) {
+		this.artifactsPanel = artifactsPanel;
+	}
 
 	render(
 		params: ArtifactsParams | undefined,

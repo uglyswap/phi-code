@@ -1,5 +1,32 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed — packages/web-ui compiles and builds against the 0.84.2 APIs again
+
+Upstream removed `packages/web-ui`; the fork keeps it, so it was left excluded from
+the typecheck after the merge. It is now back in the quality gates
+(`npm run check:web-ui`, wired into `npm run check`) and in the build chain.
+
+- Symbols moved to the compat entrypoint: `streamSimple`, `complete`, `getModel`,
+  `getModels`, `getProviders` now come from `phi-code-ai/compat`.
+- `Agent.streamFn` became the read/write `streamFunction` and a required constructor
+  option. `AgentInterface` upgrades it to the proxy-aware variant as before, and the
+  example passes `streamFn: streamSimple` explicitly.
+- `tsconfig.build.json` gained `allowImportingTsExtensions` +
+  `rewriteRelativeImportExtensions`: the source references `.ts`, the emit is `.js`.
+- Constructor parameter properties replaced by explicit fields (`erasableSyntaxOnly`).
+- **`packages/web-ui/example` was dropped from the npm workspaces by the merge**
+  (upstream's list no longer had it), so its dependencies were never installed and
+  `vite build` failed on a missing `@tailwindcss/vite`. Restored.
+- **The "test API key" button reported a valid key as invalid** for xAI and Z.ai: it
+  probed a hardcoded model id, and both lost theirs in the 0.84 catalogue. The probe
+  model is now resolved from the catalogue — preferred ids first, then the provider's
+  cheapest listed model — so a catalogue refresh cannot silently break key validation
+  again.
+
+Nothing published changed: web-ui is private and no published package was touched.
+
 ## [0.98.1] - 2026-08-17
 
 ### Fixed — configs written before 0.98.0 are repaired at startup

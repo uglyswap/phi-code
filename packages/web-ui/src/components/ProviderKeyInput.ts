@@ -3,23 +3,48 @@ import { Badge } from "@mariozechner/mini-lit/dist/Badge.js";
 import { Button } from "@mariozechner/mini-lit/dist/Button.js";
 import { html, LitElement } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { type Context, complete, getModel } from "phi-code-ai";
+import type { Api, Context, Model } from "phi-code-ai";
+import { complete, getModel, getModels } from "phi-code-ai/compat";
 import { getAppStorage } from "../storage/app-storage.ts";
 import { applyProxyIfNeeded } from "../utils/proxy-utils.ts";
 import { Input } from "./Input.ts";
 
-// Test models for each provider
-const TEST_MODELS: Record<string, string> = {
-	anthropic: "claude-haiku-4-5",
-	openai: "gpt-4o-mini",
-	google: "gemini-2.5-flash",
-	groq: "openai/gpt-oss-20b",
-	openrouter: "z-ai/glm-4.6",
-	"vercel-ai-gateway": "anthropic/claude-opus-4.5",
-	cerebras: "gpt-oss-120b",
-	xai: "grok-4-fast-non-reasoning",
-	zai: "glm-4.5-air",
+/**
+ * Preferred models for the "test key" round-trip, cheapest-first.
+ *
+ * These are preferences, not requirements: the catalogue is regenerated from the
+ * live provider APIs at every release, so pinned ids rot. When none of them is
+ * still listed, resolveTestModel falls back to the provider's cheapest model —
+ * a missing id used to report a perfectly valid key as invalid (xAI and Z.ai
+ * both lost their pinned model in the pi 0.84 catalogue).
+ *
+ * A provider absent from this map is not tested at all (Ollama and friends:
+ * the local model set is unknown).
+ */
+const PREFERRED_TEST_MODELS: Record<string, string[]> = {
+	anthropic: ["claude-haiku-4-5"],
+	openai: ["gpt-4o-mini"],
+	google: ["gemini-2.5-flash"],
+	groq: ["openai/gpt-oss-20b"],
+	openrouter: ["z-ai/glm-4.6"],
+	"vercel-ai-gateway": ["anthropic/claude-opus-4.5"],
+	cerebras: ["gpt-oss-120b"],
+	xai: ["grok-4-fast-non-reasoning", "grok-build-0.1"],
+	zai: ["glm-4.5-air", "glm-5-turbo"],
 };
+
+/** Resolve a model to probe a key with, or undefined when the provider has none. */
+export function resolveTestModel(provider: string, preferred: readonly string[]): Model<Api> | undefined {
+	for (const id of preferred) {
+		const model = getModel(provider, id);
+		if (model) return model;
+	}
+	const models = getModels(provider);
+	if (models.length === 0) return undefined;
+	return [...models].sort(
+		(a, b) => (a.cost?.input ?? Number.POSITIVE_INFINITY) - (b.cost?.input ?? Number.POSITIVE_INFINITY),
+	)[0];
+}
 
 @customElement("provider-key-input")
 export class ProviderKeyInput extends LitElement {
@@ -50,11 +75,11 @@ export class ProviderKeyInput extends LitElement {
 
 	private async testApiKey(provider: string, apiKey: string): Promise<boolean> {
 		try {
-			const modelId = TEST_MODELS[provider];
+			const preferred = PREFERRED_TEST_MODELS[provider];
 			// Returning true here for Ollama and friends. Can' know which model to use for testing
-			if (!modelId) return true;
+			if (!preferred) return true;
 
-			let model = getModel(provider as any, modelId);
+			let model = resolveTestModel(provider, preferred);
 			if (!model) return false;
 
 			// Get proxy URL from settings (if available)

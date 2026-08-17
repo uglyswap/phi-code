@@ -7,7 +7,14 @@ import type { IndexedDBConfig, StorageBackend, StorageTransaction } from "../typ
 export class IndexedDBStorageBackend implements StorageBackend {
 	private dbPromise: Promise<IDBDatabase> | null = null;
 
-	constructor(private config: IndexedDBConfig) {}
+	// Champs explicites : `erasableSyntaxOnly` (tsconfig.base) interdit les parametres
+	// de constructeur avec modificateur, qui n'emettent rien sous un runtime qui se
+	// contente de retirer les types.
+	private config: IndexedDBConfig;
+
+	constructor(config: IndexedDBConfig) {
+		this.config = config;
+	}
 
 	private async getDB(): Promise<IDBDatabase> {
 		if (!this.dbPromise) {

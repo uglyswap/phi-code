@@ -2,22 +2,45 @@
 	"compilerOptions": {
 		"target": "ES2022",
 		"module": "ES2022",
-		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"lib": [
+			"ES2022",
+			"DOM",
+			"DOM.Iterable"
+		],
 		"moduleResolution": "bundler",
 		"paths": {
-			"*": ["./*"],
-			"phi-code-agent": ["../../agent/dist/index.d.ts"],
-			"phi-code-ai": ["../../ai/dist/index.d.ts"],
-			"phi-code-tui": ["../../tui/dist/index.d.ts"],
-			"@mariozechner/pi-web-ui": ["../dist/index.d.ts"]
+			"*": [
+				"./*"
+			],
+			"phi-code-agent": [
+				"../../agent/dist/index.d.ts"
+			],
+			"phi-code-ai": [
+				"../../ai/dist/index.d.ts"
+			],
+			"phi-code-tui": [
+				"../../tui/dist/index.d.ts"
+			],
+			"@mariozechner/pi-web-ui": [
+				"../dist/index.d.ts"
+			],
+			"phi-code-ai/compat": [
+				"../../ai/dist/compat.d.ts"
+			]
 		},
 		"strict": true,
 		"skipLibCheck": true,
 		"esModuleInterop": true,
 		"allowSyntheticDefaultImports": true,
 		"experimentalDecorators": true,
-		"useDefineForClassFields": false
+		"useDefineForClassFields": false,
+		"allowImportingTsExtensions": true,
+		"noEmit": true
 	},
-	"include": ["src/**/*"],
-	"exclude": ["../src"]
+	"include": [
+		"src/**/*"
+	],
+	"exclude": [
+		"../src"
+	]
 }

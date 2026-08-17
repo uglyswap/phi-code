@@ -1,6 +1,7 @@
 import { html, LitElement } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
-import { streamSimple, type ToolResultMessage, type Usage } from "phi-code-ai";
+import type { ToolResultMessage, Usage } from "phi-code-ai";
+import { streamSimple } from "phi-code-ai/compat";
 import { ModelSelector } from "../dialogs/ModelSelector.ts";
 import type { MessageEditor } from "./MessageEditor.ts";
 import "./MessageEditor.ts";
@@ -134,9 +135,12 @@ export class AgentInterface extends LitElement {
 		}
 		if (!this.session) return;
 
-		// Set default streamFn with proxy support if not already set
-		if (this.session.streamFn === streamSimple) {
-			this.session.streamFn = createStreamFn(async () => {
+		// Upgrade the plain stream function to the proxy-aware one. pi 0.84 renamed the
+		// property to `streamFunction` and made `streamFn` a required constructor option,
+		// so a consumer that wants the default passes `streamSimple` explicitly and this
+		// identity check still means "nobody installed a custom stream function".
+		if (this.session.streamFunction === streamSimple) {
+			this.session.streamFunction = createStreamFn(async () => {
 				const enabled = await getAppStorage().settings.get<boolean>("proxy.enabled");
 				return enabled ? (await getAppStorage().settings.get<string>("proxy.url")) || undefined : undefined;
 			});
