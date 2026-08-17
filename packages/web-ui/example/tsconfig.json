@@ -21,7 +21,7 @@
 			"phi-code-tui": [
 				"../../tui/dist/index.d.ts"
 			],
-			"@mariozechner/pi-web-ui": [
+			"@phi-code-admin/web-ui": [
 				"../dist/index.d.ts"
 			],
 			"phi-code-ai/compat": [

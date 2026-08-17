@@ -1,6 +1,6 @@
 import { Alert } from "@mariozechner/mini-lit/dist/Alert.js";
-import type { AgentMessage, MessageRenderer } from "@mariozechner/pi-web-ui";
-import { defaultConvertToLlm, registerMessageRenderer } from "@mariozechner/pi-web-ui";
+import type { AgentMessage, MessageRenderer } from "@phi-code-admin/web-ui";
+import { defaultConvertToLlm, registerMessageRenderer } from "@phi-code-admin/web-ui";
 import { html } from "lit";
 import type { Message } from "phi-code-ai";
 
