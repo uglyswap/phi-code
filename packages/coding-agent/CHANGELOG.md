@@ -25,6 +25,9 @@ the typecheck after the merge. It is now back in the quality gates
   cheapest listed model — so a catalogue refresh cannot silently break key validation
   again.
 
+The package is also renamed `@mariozechner/pi-web-ui` → `@phi-code-admin/web-ui`,
+so the whole workspace now lives under the fork's own names.
+
 Nothing published changed: web-ui is private and no published package was touched.
 
 ## [0.98.1] - 2026-08-17

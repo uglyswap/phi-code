@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed to `@phi-code-admin/web-ui`. Entries below 0.74.0 refer to the package by
+  its former name, `@mariozechner/pi-web-ui`, and link to upstream issues — that
+  history is left as written rather than rewritten.
+- Compiles and builds against the pi 0.84.2 APIs again (see the coding-agent
+  changelog for the details of the upstream merge).
+
 ## [0.74.0] - 2026-05-07
 
 ## [0.73.1] - 2026-05-07

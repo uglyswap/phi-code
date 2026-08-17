@@ -34,8 +34,8 @@
 			"typebox": ["./node_modules/typebox"],
 			"phi-code-tui": ["./packages/tui/src/index.ts"],
 			"phi-code-tui/*": ["./packages/tui/src/*"],
-			"@mariozechner/pi-web-ui": ["./packages/web-ui/src/index.ts"],
-			"@mariozechner/pi-web-ui/*": ["./packages/web-ui/src/*"]
+			"@phi-code-admin/web-ui": ["./packages/web-ui/src/index.ts"],
+			"@phi-code-admin/web-ui/*": ["./packages/web-ui/src/*"]
 		}
 	},
 	"include": [

@@ -16,7 +16,7 @@ import {
 	SettingsDialog,
 	SettingsStore,
 	setAppStorage,
-} from "@mariozechner/pi-web-ui";
+} from "@phi-code-admin/web-ui";
 import { html, render } from "lit";
 import { Bell, History, Plus, Settings } from "lucide";
 import { Agent, type AgentMessage } from "phi-code-agent";
