@@ -7,8 +7,9 @@
  * on `process.exit` and can be triggered explicitly with `closeAll()`.
  *
  * Design constraints (per phi-code vendoring spec):
- *   - Zero external network calls. The Camoufox binary is provided by
- *     `@phi-code-admin/camoufox-bin-*` via npm optionalDependencies.
+ *   - No network call at runtime. The Camoufox binary is fetched once, at
+ *     install time, by `@phi-code-admin/camoufox-js`'s postinstall, from the
+ *     `uglyswap/phi-code` GitHub Release into a versioned cache.
  *   - The Express server is an implementation detail; consumers only see
  *     ES module exports. The server can still be launched independently
  *     via `npx @phi-code-admin/camofox-browser` for users who want REST.

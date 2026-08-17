@@ -51,7 +51,6 @@
 		"packages/pods/**/*",
 		"packages/camoufox-js/**/*",
 		"packages/camofox-browser/**/*",
-		"packages/camoufox-bin-*/**/*",
 		"packages/browser/**/*",
 		"packages/coding-agent/examples/extensions/gondolin/**",
 		"**/dist/**"
