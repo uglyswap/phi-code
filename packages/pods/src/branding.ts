@@ -11,3 +11,6 @@ export const CLI_COMMAND = "phi-pods";
 
 /** The coding agent this package delegates prompting to. */
 export const AGENT_COMMAND = "phi";
+
+/** npm name of that agent, used to find its entry point behind a Windows shim. */
+export const AGENT_PACKAGE = "@phi-code-admin/phi-code";
