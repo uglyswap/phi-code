@@ -13,9 +13,9 @@ const postinstallPath = join(__dirname, 'postinstall.js');
  *
  * Upstream's postinstall downloaded the Camoufox binary from a third-party
  * GitHub release at install time. phi-code vendors it instead: the binary is
- * provided by @phi-code-admin/camoufox-bin-<platform>-<arch> through
- * @phi-code-admin/camoufox-js, so this script must stay a no-op — no network,
- * no third-party host, and never a non-zero exit that breaks the install of a
+ * fetched by @phi-code-admin/camoufox-js's own postinstall, from the
+ * uglyswap/phi-code release, so THIS script must stay a no-op — no network, no
+ * third-party host, and never a non-zero exit that breaks the install of a
  * package that merely depends on this one.
  *
  * (The previous version of this file tested `externalExecutableFromEnv`, a

@@ -49,7 +49,6 @@
 			"!packages/coding-agent/extensions/**/browser-extension/**/*",
 			"!packages/camoufox-js/**/*",
 			"!packages/camofox-browser/**/*",
-			"!packages/camoufox-bin-*/**/*",
 			"!packages/browser/**/*",
 			"!!**/node_modules"
 		]
