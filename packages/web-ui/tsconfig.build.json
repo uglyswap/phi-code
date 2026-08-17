@@ -2,7 +2,11 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "moduleResolution": "bundler",
     "declaration": true,
     "declarationMap": true,
@@ -14,7 +18,11 @@
     "experimentalDecorators": true,
     "useDefineForClassFields": false,
     "rootDir": "./src",
-    "outDir": "./dist"
+    "outDir": "./dist",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true
   },
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*"
+  ]
 }

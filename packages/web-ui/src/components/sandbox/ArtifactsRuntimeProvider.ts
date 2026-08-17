@@ -25,11 +25,18 @@ interface AgentLike {
  * Supports both online (extension) and offline (downloaded HTML) modes.
  */
 export class ArtifactsRuntimeProvider implements SandboxRuntimeProvider {
-	constructor(
-		private artifactsPanel: ArtifactsPanelLike,
-		private agent?: AgentLike,
-		private readWrite: boolean = true,
-	) {}
+	// Champs explicites : `erasableSyntaxOnly` (tsconfig.base) interdit les parametres
+	// de constructeur avec modificateur, qui n'emettent rien sous un runtime qui se
+	// contente de retirer les types.
+	private artifactsPanel: ArtifactsPanelLike;
+	private agent?: AgentLike;
+	private readWrite: boolean;
+
+	constructor(artifactsPanel: ArtifactsPanelLike, agent?: AgentLike, readWrite = true) {
+		this.artifactsPanel = artifactsPanel;
+		this.agent = agent;
+		this.readWrite = readWrite;
+	}
 
 	getData(): Record<string, any> {
 		// Inject artifact snapshot for offline mode

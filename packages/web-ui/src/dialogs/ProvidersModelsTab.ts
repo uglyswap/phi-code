@@ -2,7 +2,7 @@ import { i18n } from "@mariozechner/mini-lit";
 import { Select } from "@mariozechner/mini-lit/dist/Select.js";
 import { html, type TemplateResult } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import { getProviders } from "phi-code-ai";
+import { getProviders } from "phi-code-ai/compat";
 import "../components/CustomProviderCard.ts";
 import "../components/ProviderKeyInput.ts";
 import { getAppStorage } from "../storage/app-storage.ts";

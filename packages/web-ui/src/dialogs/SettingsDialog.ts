@@ -5,7 +5,7 @@ import { Label } from "@mariozechner/mini-lit/dist/Label.js";
 import { Switch } from "@mariozechner/mini-lit/dist/Switch.js";
 import { html, LitElement, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { getProviders } from "phi-code-ai";
+import { getProviders } from "phi-code-ai/compat";
 import "../components/ProviderKeyInput.ts";
 import { getAppStorage } from "../storage/app-storage.ts";
 
