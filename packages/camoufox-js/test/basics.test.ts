@@ -11,6 +11,21 @@ const TEST_CASES = [
 	{ os: "macos" as const, userAgentRegex: /Mac OS/i },
 ];
 
+/**
+ * Timeouts.
+ *
+ * Measured on a Windows host: launching Camoufox (a Firefox fork) takes ~4 s and
+ * opening the first page ~5 s more — 9 s before any navigation happens. The
+ * original 10 s budget therefore expired during setup on every case, which read
+ * as "Camoufox is broken" when it launches and drives pages perfectly.
+ *
+ * Budgets are named after what the test actually does so a slower machine (or a
+ * cold binary cache) does not turn the suite flaky again.
+ */
+const ONE_BROWSER_MS = 45_000;
+const TWO_BROWSERS_MS = 90_000;
+
+
 describe.skipIf(process.platform !== "linux")("virtual display", () => {
 	test("should launch", async () => {
 		const browser = await Camoufox({
@@ -23,7 +38,7 @@ describe.skipIf(process.platform !== "linux")("virtual display", () => {
 		const userAgent = await page.evaluate(() => navigator.userAgent.toString());
 		expect(userAgent).toMatch(/Linux/i);
 		await browser.close();
-	}, 10e3);
+	}, ONE_BROWSER_MS);
 
 	test("multiple browsers spawn own virtual displays", async () => {
 		const browser1 = await Camoufox({
@@ -43,7 +58,7 @@ describe.skipIf(process.platform !== "linux")("virtual display", () => {
 		const page = await browser2.newPage();
 		await page.goto("https://api.apify.com/v2/browser-info");
 		await browser2.close();
-	}, 10e3);
+	}, ONE_BROWSER_MS);
 
 	test("should support combining headless virtual with other launch options", async () => {
 		// This test validates the fix for the type signature issue
@@ -61,7 +76,7 @@ describe.skipIf(process.platform !== "linux")("virtual display", () => {
 		const userAgent = await page.evaluate(() => navigator.userAgent.toString());
 		expect(userAgent).toMatch(/Linux/i);
 		await browser.close();
-	}, 10e3);
+	}, ONE_BROWSER_MS);
 });
 
 describe("Fingerprint consistency", () => {
@@ -94,7 +109,7 @@ describe("Fingerprint consistency", () => {
 		});
 
 		await browser.close();
-	}, 10e3);
+	}, ONE_BROWSER_MS);
 });
 
 test("Playwright connects to Camoufox server", async () => {
@@ -111,7 +126,7 @@ test("Playwright connects to Camoufox server", async () => {
 	await browser.close();
 
 	await server.close();
-}, 30e3);
+}, TWO_BROWSERS_MS);
 
 test("Persistent context works", async () => {
 	const userDataDir = await mkdtemp(join(tmpdir(), "user_data_"));
@@ -160,7 +175,7 @@ test("Persistent context works", async () => {
 	}
 
 	expect(readCookies).toEqual({ name: "value" });
-}, 30e3);
+}, TWO_BROWSERS_MS);
 
 describe("Fingerprint injection", () => {
 	test("custom window size is applied", async () => {
@@ -180,7 +195,7 @@ describe("Fingerprint injection", () => {
 		expect(dimensions.outerHeight).toBe(720);
 
 		await browser.close();
-	}, 10e3);
+	}, ONE_BROWSER_MS);
 
 	test("fingerprint differs between launches", async () => {
 		const getFingerprint = async () => {
@@ -206,7 +221,7 @@ describe("Fingerprint injection", () => {
 			(k) => fp1[k as keyof typeof fp1] === fp2[k as keyof typeof fp2],
 		);
 		expect(identical).toBe(false);
-	}, 15e3);
+	}, TWO_BROWSERS_MS);
 
 	test("screen dimensions are spoofed", async () => {
 		const browser = await Camoufox({
@@ -227,7 +242,7 @@ describe("Fingerprint injection", () => {
 		expect(screen.height).toBeLessThanOrEqual(1080);
 
 		await browser.close();
-	}, 10e3);
+	}, ONE_BROWSER_MS);
 
 	test("hardwareConcurrency is spoofed", async () => {
 		const browser = await Camoufox({
@@ -240,7 +255,7 @@ describe("Fingerprint injection", () => {
 		expect(Number.isInteger(cores)).toBe(true);
 
 		await browser.close();
-	}, 10e3);
+	}, ONE_BROWSER_MS);
 
 	test("locale option overrides Intl locale", async () => {
 		const browser = await Camoufox({
@@ -260,7 +275,7 @@ describe("Fingerprint injection", () => {
 		expect(language).toMatch(/^fr/);
 
 		await browser.close();
-	}, 10e3);
+	}, ONE_BROWSER_MS);
 
 	test("WebGL is blocked when block_webgl is true", async () => {
 		const browser = await Camoufox({
@@ -279,7 +294,7 @@ describe("Fingerprint injection", () => {
 		expect(hasWebGL).toBe(false);
 
 		await browser.close();
-	}, 10e3);
+	}, ONE_BROWSER_MS);
 
 	test("WebRTC is blocked when block_webrtc is true", async () => {
 		const browser = await Camoufox({
@@ -295,5 +310,5 @@ describe("Fingerprint injection", () => {
 		expect(hasWebRTC).toBe("undefined");
 
 		await browser.close();
-	}, 10e3);
+	}, ONE_BROWSER_MS);
 });

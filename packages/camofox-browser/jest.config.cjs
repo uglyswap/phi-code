@@ -15,8 +15,18 @@ module.exports = {
   ],
   
   // Ignore patterns
+  //
+  // The e2e suite has its own config (jest.config.e2e.cjs) because it needs a
+  // globalSetup that boots ONE shared camofox server and writes its URLs to a temp
+  // file. testMatch above sweeps in '**/tests/**', so without this exclusion every
+  // e2e file ran here WITHOUT that setup and failed on the missing env file — 100
+  // failures that looked like a broken browser and were a misrouted suite.
+  //
+  // The live suite talks to real third-party sites and is opt-in (npm run test:live).
   testPathIgnorePatterns: [
-    '/node_modules/'
+    '/node_modules/',
+    '/tests/e2e/',
+    '/tests/live/'
   ],
   
   // Setup and teardown

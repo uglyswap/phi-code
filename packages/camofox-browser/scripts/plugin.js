@@ -96,9 +96,34 @@ function removeFromConfig(name) {
 
 // -- Source parsing ----------------------------------------------------------
 
+/**
+ * Does this source name a directory on disk rather than a remote to clone?
+ *
+ * The check used to accept only POSIX shapes ('/', './', '../'). A Windows
+ * absolute path starts with a drive letter, so `plugin install C:\path\to\dir`
+ * fell through to the git branch, which appended '.git' and ran
+ * `git clone C:\path\to\dir.git` — the install was impossible on Windows.
+ *
+ * Backslash-relative ('.\', '..\') and UNC ('\\server\share') paths are accepted
+ * for the same reason. Git remotes are unaffected: 'git@host:user/repo' also
+ * contains a colon but does not match a single-letter drive followed by a
+ * separator, and 'https://' / 'ssh://' / 'git:' keep their own branch below.
+ */
+function isLocalPathSource(source) {
+  return (
+    source.startsWith('/') ||
+    source.startsWith('./') ||
+    source.startsWith('../') ||
+    source.startsWith('.\\') ||
+    source.startsWith('..\\') ||
+    /^[a-zA-Z]:[\\/]/.test(source) ||
+    source.startsWith('\\\\')
+  );
+}
+
 function parseSource(source) {
   // Local path
-  if (source.startsWith('/') || source.startsWith('./') || source.startsWith('../')) {
+  if (isLocalPathSource(source)) {
     const resolved = path.resolve(source);
     if (!fs.existsSync(resolved)) {
       fatal(`Local path not found: ${resolved}`);

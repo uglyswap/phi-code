@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { launchServer } from '../../lib/launcher.js';
 import { loadConfig } from '../../lib/config.js';
 import { DISPLAY } from '../helpers/test-env.js';
+import { reserveFreePort } from '../helpers/freePort.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -28,7 +29,7 @@ async function waitForServer(port, maxRetries = 30, interval = 1000) {
 
 export default async function globalSetup() {
   // --- Start camofox server ---
-  const serverPort = Math.floor(3100 + Math.random() * 900);
+  const serverPort = await reserveFreePort();
   const cfg = loadConfig();
   const pluginDir = path.resolve(__dirname, '../..');
 
@@ -40,7 +41,9 @@ export default async function globalSetup() {
   const serverProcess = launchServer({
     pluginDir,
     port: serverPort,
-    env: { ...cfg.serverEnv, DEBUG_RESPONSES: 'false', DISPLAY },
+    // Same opt-in as tests/helpers/startServer.js: the e2e fixture site is served
+    // on localhost, which the SSRF guard blocks unless explicitly allowed.
+    env: { ...cfg.serverEnv, DEBUG_RESPONSES: 'false', DISPLAY, CAMOFOX_ALLOW_PRIVATE_HOSTS: '1' },
     log,
   });
 

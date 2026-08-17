@@ -2,6 +2,7 @@ import path from 'path';
 import { fileURLToPath } from 'node:url';
 import { launchServer } from '../../lib/launcher.js';
 import { loadConfig } from '../../lib/config.js';
+import { reserveFreePort } from './freePort.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -24,7 +25,7 @@ async function waitForServer(port, maxRetries = 30, interval = 1000) {
 }
 
 async function startServer(port = 0, extraEnv = {}) {
-  const usePort = port || Math.floor(3100 + Math.random() * 900);
+  const usePort = port || (await reserveFreePort());
   const cfg = loadConfig();
   const pluginDir = path.join(__dirname, '../..');
 
@@ -36,7 +37,15 @@ async function startServer(port = 0, extraEnv = {}) {
   serverProcess = launchServer({
     pluginDir,
     port: usePort,
-    env: { ...cfg.serverEnv, DEBUG_RESPONSES: 'false', ...extraEnv },
+    // The suites drive a fixture site on localhost, which the server's SSRF guard
+    // blocks by default (and rightly so). Opting in here — rather than weakening
+    // the guard — keeps the shipped default secure.
+    env: {
+      ...cfg.serverEnv,
+      DEBUG_RESPONSES: 'false',
+      CAMOFOX_ALLOW_PRIVATE_HOSTS: '1',
+      ...extraEnv,
+    },
     log,
   });
 
@@ -52,22 +61,32 @@ async function startServer(port = 0, extraEnv = {}) {
   return usePort;
 }
 
+/**
+ * Stop the running server.
+ *
+ * The SIGKILL fallback used to be a timer that was never cleared and that read the
+ * SHARED `serverProcess` binding. When the process closed quickly the timer stayed
+ * pending, the next describe block started its own server into that same binding,
+ * and ~5 s later the stale timer killed THAT server — the block's requests then
+ * died on ECONNRESET. The timer now targets the process it was created for and is
+ * cleared as soon as it closes.
+ */
 async function stopServer() {
   if (serverProcess) {
     return new Promise((resolve) => {
-      serverProcess.on('close', () => {
-        serverProcess = null;
-        serverPort = null;
+      const child = serverProcess;
+      const forceKill = setTimeout(() => child.kill('SIGKILL'), 5000);
+
+      child.on('close', () => {
+        clearTimeout(forceKill);
+        if (serverProcess === child) {
+          serverProcess = null;
+          serverPort = null;
+        }
         resolve();
       });
 
-      serverProcess.kill('SIGTERM');
-
-      setTimeout(() => {
-        if (serverProcess) {
-          serverProcess.kill('SIGKILL');
-        }
-      }, 5000);
+      child.kill('SIGTERM');
     });
   }
 }
