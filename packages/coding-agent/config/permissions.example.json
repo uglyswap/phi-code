@@ -1,0 +1,12 @@
+{
+	"$schema": "Permission policy for Phi Code. Copy to ~/.phi/agent/permissions.json (user) or .phi/permissions.json (project). When no config exists anywhere, everything is allowed (legacy behavior).",
+	"read": "allow",
+	"write": "prompt",
+	"exec": "prompt",
+	"rules": [
+		{ "tool": "bash", "pattern": "git *", "decision": "allow" },
+		{ "tool": "bash", "pattern": "npm *", "decision": "allow" },
+		{ "tool": "bash", "pattern": "rm -rf /*", "decision": "deny" },
+		{ "tool": "*", "pattern": "*secret*", "decision": "prompt" }
+	]
+}

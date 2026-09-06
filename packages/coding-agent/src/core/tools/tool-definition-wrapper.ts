@@ -1,5 +1,10 @@
 import type { AgentTool } from "phi-code-agent";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
+import { decide, loadPolicy } from "../permissions/policy.ts";
+
+function deniedResult<TDetails>(text: string): { content: Array<{ type: "text"; text: string }>; details: TDetails; isError: boolean } {
+	return { content: [{ type: "text", text }], details: undefined as TDetails, isError: true };
+}
 
 /** Wrap a ToolDefinition into an AgentTool for the core runtime. */
 export function wrapToolDefinition<TDetails = unknown>(
@@ -14,8 +19,41 @@ export function wrapToolDefinition<TDetails = unknown>(
 		constrainedSampling: definition.constrainedSampling,
 		prepareArguments: definition.prepareArguments,
 		executionMode: definition.executionMode,
-		execute: (toolCallId, params, signal, onUpdate, ctx?: ExtensionContext) =>
-			definition.execute(toolCallId, params, signal, onUpdate, ctx ?? (ctxFactory?.() as ExtensionContext)),
+		execute: async (toolCallId, params, signal, onUpdate, ctx?: ExtensionContext) => {
+			const context = ctx ?? ctxFactory?.();
+			// Permission gate: default (no config anywhere) is allow-everything,
+			// preserving pre-permissions behavior.
+			const policy = loadPolicy(context?.cwd ?? process.cwd());
+			if (!policy.legacyAllowAll) {
+				const { decision, tier, matchedRule } = decide(policy, definition.name, params, definition.permissionTier);
+				if (decision === "deny") {
+					const why = matchedRule ? ` by rule "${matchedRule.tool}${matchedRule.pattern ? ` ${matchedRule.pattern}` : ""}"` : "";
+					return deniedResult<TDetails>(
+						`Permission denied: tool "${definition.name}" (tier: ${tier}) is denied${why}. Adjust permissions.json to allow it.`,
+					);
+				}
+				if (decision === "prompt") {
+					if (context?.hasUI) {
+						const subject =
+							params && typeof params === "object" && typeof (params as any).command === "string"
+								? `: ${(params as any).command.slice(0, 120)}`
+								: "";
+						const choice = await context.ui.select(
+							`Allow ${definition.name} (${tier})${subject}?`,
+							["Allow", "Deny"],
+						);
+						if (choice !== "Allow") {
+							return deniedResult<TDetails>(`Permission denied by user: tool "${definition.name}".`);
+						}
+					} else {
+						return deniedResult<TDetails>(
+							`Permission required: tool "${definition.name}" (tier: ${tier}) needs approval, but no interactive UI is available. Set it to "allow" in permissions.json or run interactively.`,
+						);
+					}
+				}
+			}
+			return definition.execute(toolCallId, params, signal, onUpdate, context as ExtensionContext);
+		},
 	};
 }
 
