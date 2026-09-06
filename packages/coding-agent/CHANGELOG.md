@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.99.0]
+
+### Added
+- **Hashline anchor recovery** in `edit`: when exact and fuzzy matching fail because the file drifted, edits recover via per-line content anchors (unambiguous windows only) instead of erroring out
+- **`ast_grep` tool**: structural code search by syntax-tree pattern (TypeScript, JavaScript, Python, Go, Rust)
+- **`lsp` tool**: language-server diagnostics, definition, references, hover (typescript-language-server, pyright, gopls, rust-analyzer); wired into the `/debug` playbook
+- **Permission system**: read/write/exec tiers with allow/deny/prompt policies and pattern rules (`~/.phi/agent/permissions.json`, `.phi/permissions.json`), `/permissions` command. No config = legacy allow-everything behavior
+- **Segmented status line**: configurable footer segments (model, git branch + dirty marker, tokens, cache, session cost in USD, context %) via `statusLine.segments`
+- **Theme pack**: 10 additional built-in themes (gruvbox, tokyo-night, solarized dark/light, github dark/light, monokai, nord, catppuccin-mocha, high-contrast) + `/theme` selector
+- **First-run setup**: the `/setup` wizard is offered automatically on a fresh install
+- **Parallel sub-agents**: bounded fan-out executor with per-agent git worktree isolation, explicit merge-conflict reports, live `/agents` view with kill; `/plan --fanout` runs on it
+- **Skills**: multi-source discovery (.claude/.agents/.codex/.github skills dirs), `ignoredSkills` filter, `learn` tool with managed-skill promotion
+- **MCP**: `/mcp:import` (imports Claude Code, Codex, Gemini, Cursor, VS Code configs), `/mcp add` wizard, `/mcp:prompt`
+- **`ontology_batch_add`** tool: batch knowledge-graph writes in a single locked append
+- **Shell completions**: `phi completions bash|zsh|fish`
+- **Standalone installer**: `scripts/install.sh` / `install.ps1` with sha256 verification
+
+### Fixed
+- Build break: explicit `TApi` generic in the Cloudflare AI Gateway provider (TS2353)
+- Release pipeline rebranded to phi (`local-release.mjs`, `phi-*` assets, missing `pi-test.ps1` created)
+- `publish.mjs` no longer throws on independent package version lines
+- `mom` agent model configurable via `MOM_MODEL`
+
 ## [0.98.2]
 
 ### Fixed — a stale link in ~/.phi made the package impossible to install

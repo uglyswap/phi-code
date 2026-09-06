@@ -69,7 +69,10 @@ const packageVersions = new Map(packages.map((pkg) => [pkg.name, pkg.version]));
 
 const versions = [...new Set(packageVersions.values())];
 if (versions.length !== 1) {
-	throw new Error(`Publish packages are not lockstep versioned: ${versions.join(", ")}`);
+	// Packages ship on independent version lines by design (see
+	// scripts/sync-versions.js). Publishing proceeds per-package; already
+	// published versions are skipped below.
+	console.log(`Independent version lines detected: ${versions.join(", ")}`);
 }
 
 console.log(`Publishing pi packages at ${versions[0]}${dryRun ? " (dry run)" : ""}\n`);
