@@ -2,7 +2,11 @@ import type { AgentTool } from "phi-code-agent";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
 import { decide, loadPolicy } from "../permissions/policy.ts";
 
-function deniedResult<TDetails>(text: string): { content: Array<{ type: "text"; text: string }>; details: TDetails; isError: boolean } {
+function deniedResult<TDetails>(text: string): {
+	content: Array<{ type: "text"; text: string }>;
+	details: TDetails;
+	isError: boolean;
+} {
 	return { content: [{ type: "text", text }], details: undefined as TDetails, isError: true };
 }
 
@@ -27,7 +31,9 @@ export function wrapToolDefinition<TDetails = unknown>(
 			if (!policy.legacyAllowAll) {
 				const { decision, tier, matchedRule } = decide(policy, definition.name, params, definition.permissionTier);
 				if (decision === "deny") {
-					const why = matchedRule ? ` by rule "${matchedRule.tool}${matchedRule.pattern ? ` ${matchedRule.pattern}` : ""}"` : "";
+					const why = matchedRule
+						? ` by rule "${matchedRule.tool}${matchedRule.pattern ? ` ${matchedRule.pattern}` : ""}"`
+						: "";
 					return deniedResult<TDetails>(
 						`Permission denied: tool "${definition.name}" (tier: ${tier}) is denied${why}. Adjust permissions.json to allow it.`,
 					);
@@ -38,10 +44,10 @@ export function wrapToolDefinition<TDetails = unknown>(
 							params && typeof params === "object" && typeof (params as any).command === "string"
 								? `: ${(params as any).command.slice(0, 120)}`
 								: "";
-						const choice = await context.ui.select(
-							`Allow ${definition.name} (${tier})${subject}?`,
-							["Allow", "Deny"],
-						);
+						const choice = await context.ui.select(`Allow ${definition.name} (${tier})${subject}?`, [
+							"Allow",
+							"Deny",
+						]);
 						if (choice !== "Allow") {
 							return deniedResult<TDetails>(`Permission denied by user: tool "${definition.name}".`);
 						}

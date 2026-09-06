@@ -13,6 +13,9 @@
  */
 
 import { exec } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "phi-code";
@@ -20,14 +23,11 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "ph
 import { cancelCallback, ensureCallbackServer, stopCallbackServer, waitForCallback } from "./callback-server.ts";
 import { loadConfig } from "./config.ts";
 import { McpError } from "./errors.ts";
+import { importExternalMcpConfigs } from "./import-configs.ts";
 import { McpOAuthProvider, setCallbackPort } from "./oauth-provider.ts";
 import type { TransportAuthCallbacks } from "./server-manager.ts";
 import { ServerManager } from "./server-manager.ts";
 import { ToolBridge } from "./tool-bridge.ts";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { importExternalMcpConfigs } from "./import-configs.ts";
 
 /**
  * Open a URL in the user's default browser.
@@ -213,7 +213,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		},
 	});
 
-		// ── 4b. /mcp:import — import server configs from other agent tools ─────
+	// ── 4b. /mcp:import — import server configs from other agent tools ─────
 	pi.registerCommand("mcp:import", {
 		description: "Import MCP servers from Claude/Codex/Gemini/Cursor/VS Code configs into ~/.phi/agent/mcp.json",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
@@ -234,7 +234,10 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 			const spec = args.trim();
 			const getClient = (name: string) => {
 				const server = manager.getServer(name);
-				if (!server?.client) throw new Error(`Server "${name}" is not connected (state: ${server?.state ?? "unknown"}). Try /mcp:start ${name}.`);
+				if (!server?.client)
+					throw new Error(
+						`Server "${name}" is not connected (state: ${server?.state ?? "unknown"}). Try /mcp:start ${name}.`,
+					);
 				return server.client;
 			};
 			try {
@@ -245,13 +248,18 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 						try {
 							const list = await server.client.listPrompts();
 							for (const prompt of list.prompts ?? []) {
-								lines.push(`${server.name}:${prompt.name}${prompt.description ? ` — ${prompt.description}` : ""}`);
+								lines.push(
+									`${server.name}:${prompt.name}${prompt.description ? ` — ${prompt.description}` : ""}`,
+								);
 							}
 						} catch {
 							// server without prompts support: skip
 						}
 					}
-					ctx.ui.notify(lines.length ? lines.join("\n") : "No MCP prompts available (servers may not support prompts).", "info");
+					ctx.ui.notify(
+						lines.length ? lines.join("\n") : "No MCP prompts available (servers may not support prompts).",
+						"info",
+					);
 					return;
 				}
 				const sep = spec.indexOf(":");
@@ -276,7 +284,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		},
 	});
 
-// ── 5. /mcp:stop — stop a server ─────────────────────────────────────────
+	// ── 5. /mcp:stop — stop a server ─────────────────────────────────────────
 	pi.registerCommand("mcp:stop", {
 		description: "Stop an MCP server. Usage: /mcp:stop <server-name>",
 		handler: async (args: string, ctx: ExtensionCommandContext) => {

@@ -46,8 +46,7 @@ export function debugPhaseInstructions(state: FailingState): DebugInstructions {
 	const repro = state.failingTest?.trim() || state.reproCommand?.trim() || "(the reproduction command)";
 
 	return {
-		reproduce:
-			`You are the REPRODUCE agent (phase 1 of /debug). Your only job is to CONFIRM the failure is real.
+		reproduce: `You are the REPRODUCE agent (phase 1 of /debug). Your only job is to CONFIRM the failure is real.
 
 **The reported failing state:**
 ${failing}
@@ -65,7 +64,7 @@ ${failing}
 6. **Last action:** call \`phase_result\` — \`verdict: PASS\` if it reproduced (proceed to LOCALIZE), or \`verdict: BLOCKED\` with the reason if you stopped. Your handoff MUST contain a line with the EXACT command that reproduces the failure, in this machine-readable form (the orchestrator re-runs it to arbitrate candidate fixes):
 \`\`\`
 REPRO-CMD: <the exact command, e.g. python /testbed/repro_issue.py>
-\`\`\`` + DEBUG_RULES,
+\`\`\`${DEBUG_RULES}`,
 
 		localize: `You are the LOCALIZE agent (phase 2 of /debug). Drive from the REAL symptom the previous phase captured.
 
@@ -79,8 +78,7 @@ ${failing}
 4. Name the fault site precisely — file:line and the wrong assumption. Localization, not more review, is the lever here.
 5. Hand off a crisp fault description; do NOT fix yet. Call \`memory_write\` with the fault site so future runs on this project start ahead.${DEBUG_RULES}`,
 
-		fix:
-			`You are the FIX agent (phase 3 of /debug). Produce the MINIMAL change that addresses the located root cause.
+		fix: `You are the FIX agent (phase 3 of /debug). Produce the MINIMAL change that addresses the located root cause.
 
 **The failing state:**
 ${failing}
@@ -88,8 +86,7 @@ ${failing}
 **Do exactly this:**
 1. Write the smallest patch that fixes the root cause at the fault site LOCALIZE named.
 2. If two approaches are plausible, prefer the one that adds the least surface (fewest new branches/guards).
-3. Do NOT run the suite to "confirm" here by eye — VERIFY re-runs everything. Just make the change and state precisely what you changed and why it addresses the cause.` +
-			DEBUG_RULES,
+3. Do NOT run the suite to "confirm" here by eye — VERIFY re-runs everything. Just make the change and state precisely what you changed and why it addresses the cause.${DEBUG_RULES}`,
 
 		verify: `You are the VERIFY agent (phase 4 of /debug) — the oracle. A green verdict requires TWO real runs.
 

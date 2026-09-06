@@ -541,7 +541,6 @@ describe("CombinedAutocompleteProvider", () => {
 	});
 });
 
-
 describe("slash command fuzzy suggestions (phase 4.4)", () => {
 	it("suggests /plan, /plan-models, /plans when typing /pla", async () => {
 		const commands = [

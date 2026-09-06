@@ -115,7 +115,13 @@ export function recoverByAnchors(content: string, oldText: string): AnchorRecove
 		return { ...NOT_FOUND, ambiguous: true, score };
 	}
 
-	return { found: true, startLine: best.start, endLine: Math.min(best.start + span, contentLines.length), score, ambiguous: false };
+	return {
+		found: true,
+		startLine: best.start,
+		endLine: Math.min(best.start + span, contentLines.length),
+		score,
+		ambiguous: false,
+	};
 }
 
 /**

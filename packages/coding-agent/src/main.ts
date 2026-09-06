@@ -8,7 +8,6 @@
 import { createInterface } from "node:readline";
 import chalk from "chalk";
 import { type ImageContent, modelsAreEqual } from "phi-code-ai";
-import { handleCompletionsCommand } from "./cli/completions-command.ts";
 import { type Args, type Mode, parseArgs, printHelp } from "./cli/args.ts";
 import {
 	type AuthCheckResult,
@@ -26,6 +25,7 @@ import {
 	printAuthCommandHelp,
 	validateAuthCommandArgs,
 } from "./cli/auth-command.ts";
+import { handleCompletionsCommand } from "./cli/completions-command.ts";
 import { resolveCredentialForPrint } from "./cli/credential-print.ts";
 import { processFileArguments } from "./cli/file-processor.ts";
 import { buildInitialMessage } from "./cli/initial-message.ts";

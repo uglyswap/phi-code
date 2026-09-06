@@ -91,7 +91,7 @@ function fishCompletions(): string {
 	for (const c of BUILTIN_SLASH_COMMANDS) {
 		lines.push(`complete -c phi -a "/${c.name}" -d "${c.description.replace(/"/g, "'")}"`);
 	}
-	return lines.join("\n") + "\n";
+	return `${lines.join("\n")}\n`;
 }
 
 /** Handle `phi completions <shell>`. Returns true when the args were consumed. */

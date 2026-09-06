@@ -18,7 +18,9 @@ describe("hashline anchors", () => {
 			"}",
 			"greet('world');",
 		].join("\n");
-		const oldText = ['function greet(name) {', "  const msg = 'Hello, ' + name;", "  console.log(msg);", "}"].join("\n");
+		const oldText = ["function greet(name) {", "  const msg = 'Hello, ' + name;", "  console.log(msg);", "}"].join(
+			"\n",
+		);
 		const recovery = recoverByAnchors(content, oldText);
 		expect(recovery.found).toBe(true);
 		expect(recovery.startLine).toBe(0);
@@ -27,7 +29,7 @@ describe("hashline anchors", () => {
 
 	it("rejects ambiguous recovery", () => {
 		const block = "if (x) {\n  doThing();\n}\n";
-		const content = block + "\n" + block;
+		const content = `${block}\n${block}`;
 		const recovery = recoverByAnchors(content, "if (x) {\n  doThing();\n}");
 		expect(recovery.found).toBe(false);
 		expect(recovery.ambiguous).toBe(true);
@@ -52,19 +54,25 @@ describe("edit tool anchor recovery integration", () => {
 			content,
 			[
 				{
-					oldText: ["function greet(name) {", "  const msg = 'Hello, ' + name;", "  console.log(msg);", "}"].join("\n"),
-					newText: ["function greet(name) {", "  console.log(`Hi, ${name}`);", "}"].join("\n"),
+					oldText: ["function greet(name) {", "  const msg = 'Hello, ' + name;", "  console.log(msg);", "}"].join(
+						"\n",
+					),
+					newText: ["function greet(name) {", "  console.log('Hi, ' + name);", "}"].join("\n"),
 				},
 			],
 			"test.ts",
 		);
-		expect(result.newContent).toContain("console.log(`Hi, ${name}`);");
+		expect(result.newContent).toContain("console.log('Hi, ' + name);");
 		expect(result.newContent).toContain("greet('world');");
 	});
 
 	it("still throws a not-found error when nothing anchors", () => {
 		expect(() =>
-			applyEditsToNormalizedContent("const a = 1;\n", [{ oldText: "completely\ndifferent\nblock", newText: "x" }], "test.ts"),
+			applyEditsToNormalizedContent(
+				"const a = 1;\n",
+				[{ oldText: "completely\ndifferent\nblock", newText: "x" }],
+				"test.ts",
+			),
 		).toThrow(/Could not find/);
 	});
 
@@ -73,7 +81,7 @@ describe("edit tool anchor recovery integration", () => {
 		// renamed), so exact/duplicate handling does not trigger first and both
 		// windows score equally at recovery.
 		const block = "if (x) {\n  doThing();\n}\n";
-		const content = block + "\n" + block;
+		const content = `${block}\n${block}`;
 		expect(() =>
 			applyEditsToNormalizedContent(
 				content,
@@ -85,7 +93,11 @@ describe("edit tool anchor recovery integration", () => {
 
 	it("exact matching keeps working untouched", () => {
 		const content = "const a = 1;\nconst b = 2;";
-		const result = applyEditsToNormalizedContent(content, [{ oldText: "const b = 2;", newText: "const b = 3;" }], "test.ts");
+		const result = applyEditsToNormalizedContent(
+			content,
+			[{ oldText: "const b = 2;", newText: "const b = 3;" }],
+			"test.ts",
+		);
 		expect(result.newContent).toBe("const a = 1;\nconst b = 3;");
 	});
 });

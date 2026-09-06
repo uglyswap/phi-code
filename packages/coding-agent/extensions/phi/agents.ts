@@ -42,7 +42,10 @@ export default function agentsExtension(pi: ExtensionAPI) {
 			if (killMatch) {
 				const id = killMatch[1];
 				const killed = killAgent(id);
-				ctx.ui.notify(killed ? `🔴 Agent "${id}" killed.` : `Cannot kill "${id}": not running (or unknown).`, killed ? "info" : "warning");
+				ctx.ui.notify(
+					killed ? `🔴 Agent "${id}" killed.` : `Cannot kill "${id}": not running (or unknown).`,
+					killed ? "info" : "warning",
+				);
 				return;
 			}
 

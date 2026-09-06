@@ -71,12 +71,15 @@ export function resetPolicyCache(): void {
 }
 
 function globToRegex(glob: string): RegExp {
-	const escaped = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+	const escaped = glob
+		.replace(/[.+^${}()|[\]\\]/g, "\\$&")
+		.replace(/\*/g, ".*")
+		.replace(/\?/g, ".");
 	return new RegExp(`^${escaped}$`, "i");
 }
 
 /** Extract the string a rule pattern matches against (bash: the command). */
-function subjectForTool(toolName: string, params: unknown): string {
+function subjectForTool(_toolName: string, params: unknown): string {
 	if (params && typeof params === "object") {
 		const p = params as Record<string, unknown>;
 		if (typeof p.command === "string") return p.command;

@@ -58,7 +58,11 @@ export default function (pi: ExtensionAPI) {
 					}
 					const dir = join(MANAGED_SKILLS_DIR, slug);
 					mkdirSync(dir, { recursive: true });
-					const description = p.lesson.split("\n").find((l) => l.trim())?.slice(0, 200) ?? p.name;
+					const description =
+						p.lesson
+							.split("\n")
+							.find((l) => l.trim())
+							?.slice(0, 200) ?? p.name;
 					writeFileSync(
 						join(dir, "SKILL.md"),
 						`---\nname: ${slug}\ndescription: ${description.replace(/"/g, "'")}\n---\n\n# ${p.name}\n\n${p.lesson}\n`,

@@ -13,7 +13,7 @@
  * are skipped and reported.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -72,25 +72,32 @@ function parseCodexToml(path: string): Record<string, ServerEntry> {
 	return out;
 }
 
-export function importExternalMcpConfigs(cwd: string, targetPath = join(homedir(), ".phi", "agent", "mcp.json")): ImportResult {
+export function importExternalMcpConfigs(
+	cwd: string,
+	targetPath = join(homedir(), ".phi", "agent", "mcp.json"),
+): ImportResult {
 	const result: ImportResult = { imported: [], skipped: [], sources: [], errors: [] };
 
 	const candidates: Array<{ label: string; servers: Record<string, ServerEntry> }> = [];
 
 	const claudeProject = readJson(join(cwd, ".mcp.json"));
-	if (claudeProject?.mcpServers) candidates.push({ label: ".mcp.json", servers: claudeProject.mcpServers as Record<string, ServerEntry> });
+	if (claudeProject?.mcpServers)
+		candidates.push({ label: ".mcp.json", servers: claudeProject.mcpServers as Record<string, ServerEntry> });
 
 	const claudeUser = readJson(join(homedir(), ".claude.json"));
-	if (claudeUser?.mcpServers) candidates.push({ label: "~/.claude.json", servers: claudeUser.mcpServers as Record<string, ServerEntry> });
+	if (claudeUser?.mcpServers)
+		candidates.push({ label: "~/.claude.json", servers: claudeUser.mcpServers as Record<string, ServerEntry> });
 
 	const codex = parseCodexToml(join(homedir(), ".codex", "config.toml"));
 	if (Object.keys(codex).length > 0) candidates.push({ label: "~/.codex/config.toml", servers: codex });
 
 	const gemini = readJson(join(homedir(), ".gemini", "settings.json"));
-	if (gemini?.mcpServers) candidates.push({ label: "~/.gemini/settings.json", servers: gemini.mcpServers as Record<string, ServerEntry> });
+	if (gemini?.mcpServers)
+		candidates.push({ label: "~/.gemini/settings.json", servers: gemini.mcpServers as Record<string, ServerEntry> });
 
 	const cursor = readJson(join(cwd, ".cursor", "mcp.json"));
-	if (cursor?.mcpServers) candidates.push({ label: ".cursor/mcp.json", servers: cursor.mcpServers as Record<string, ServerEntry> });
+	if (cursor?.mcpServers)
+		candidates.push({ label: ".cursor/mcp.json", servers: cursor.mcpServers as Record<string, ServerEntry> });
 
 	const vscode = readJson(join(cwd, ".vscode", "mcp.json"));
 	const vscodeServers = (vscode?.mcpServers ?? vscode?.servers) as Record<string, ServerEntry> | undefined;

@@ -59,7 +59,7 @@ export class SkillScanner {
 		for (const pattern of this.config.ignoredSkills ?? []) {
 			if (pattern === name) return true;
 			if (pattern.includes("*")) {
-				const regex = new RegExp("^" + pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$", "i");
+				const regex = new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`, "i");
 				if (regex.test(name)) return true;
 			}
 		}

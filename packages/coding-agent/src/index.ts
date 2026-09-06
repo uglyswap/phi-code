@@ -58,18 +58,6 @@ export {
 } from "./core/compaction/index.ts";
 export { ConfigWatcher, getConfigWatcher } from "./core/config-watcher.ts";
 export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.ts";
-export {
-	type AgentInfo,
-	type AgentResult,
-	clearFinishedAgents,
-	finishAgent,
-	killAgent,
-	listAgents,
-	type ParallelTask,
-	registerAgent,
-	runParallel,
-	type RunParallelOptions,
-} from "./core/parallel-agents.ts";
 // Extension system
 export type {
 	AgentEndEvent,
@@ -214,6 +202,18 @@ export type {
 	ResolvedResource,
 } from "./core/package-manager.ts";
 export { DefaultPackageManager } from "./core/package-manager.ts";
+export {
+	type AgentInfo,
+	type AgentResult,
+	clearFinishedAgents,
+	finishAgent,
+	killAgent,
+	listAgents,
+	type ParallelTask,
+	type RunParallelOptions,
+	registerAgent,
+	runParallel,
+} from "./core/parallel-agents.ts";
 export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.ts";
 export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-loader.ts";
 // SDK for programmatic usage
