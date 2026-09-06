@@ -5,6 +5,13 @@ import { areExperimentalFeaturesEnabled } from "../../../core/experimental.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
 import { addUsageToTotals, createUsageTotals } from "../../../core/usage-totals.ts";
 import { theme } from "../theme/theme.ts";
+import {
+	computeSessionCostUsd,
+	formatCostUsd,
+	formatGitSegment,
+	resolveStatusLineSegments,
+	type StatusLineSegmentId,
+} from "./status-segments.ts";
 
 /**
  * Sanitize text for display in a single-line status.
@@ -52,10 +59,16 @@ export class FooterComponent implements Component {
 	private mode: "act" | "plan" = "act";
 	private session: AgentSession;
 	private footerData: ReadonlyFooterDataProvider;
+	private getSegments: (() => string[] | undefined) | undefined;
 
-	constructor(session: AgentSession, footerData: ReadonlyFooterDataProvider) {
+	constructor(
+		session: AgentSession,
+		footerData: ReadonlyFooterDataProvider,
+		getSegments?: () => string[] | undefined,
+	) {
 		this.session = session;
 		this.footerData = footerData;
+		this.getSegments = getSegments;
 	}
 
 	setSession(session: AgentSession): void {
@@ -103,6 +116,8 @@ export class FooterComponent implements Component {
 
 	render(width: number): string[] {
 		const state = this.session.state;
+		const segments = resolveStatusLineSegments(this.getSegments?.());
+		const hasSegment = (id: StatusLineSegmentId) => segments.includes(id);
 
 		// Calculate cumulative usage from ALL session entries (not just post-compaction messages)
 		const usageTotals = createUsageTotals();
@@ -131,28 +146,37 @@ export class FooterComponent implements Component {
 		const contextPercent = contextUsage?.percent !== null ? contextPercentValue.toFixed(1) : "?";
 
 		// Replace home directory with ~
-		let pwd = formatCwdForFooter(this.session.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE);
+		let pwd = hasSegment("cwd")
+			? formatCwdForFooter(this.session.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE)
+			: "";
 
-		// Add git branch if available
-		const branch = this.footerData.getGitBranch();
-		if (branch) {
-			pwd = `${pwd} (${branch})`;
+		// Add git branch if available (with dirty marker from `git status --porcelain`)
+		if (hasSegment("git")) {
+			const gitStatus = this.footerData.getGitStatus();
+			const gitSegment = formatGitSegment(gitStatus.branch, gitStatus.dirty);
+			if (gitSegment) {
+				pwd = pwd ? `${pwd} (${gitSegment})` : `(${gitSegment})`;
+			}
 		}
 
 		// Add session name if set
 		const sessionName = this.session.sessionManager.getSessionName();
 		if (sessionName) {
-			pwd = `${pwd} • ${sessionName}`;
+			pwd = pwd ? `${pwd} • ${sessionName}` : sessionName;
 		}
 
 		// Build stats line
 		const statsParts = [];
-		if (usageTotals.input) statsParts.push(`↑${formatTokens(usageTotals.input)}`);
-		if (usageTotals.output) statsParts.push(`↓${formatTokens(usageTotals.output)}`);
-		if (usageTotals.cacheRead) statsParts.push(`R${formatTokens(usageTotals.cacheRead)}`);
-		if (usageTotals.cacheWrite) statsParts.push(`W${formatTokens(usageTotals.cacheWrite)}`);
-		if ((usageTotals.cacheRead > 0 || usageTotals.cacheWrite > 0) && latestCacheHitRate !== undefined) {
-			statsParts.push(`CH${latestCacheHitRate.toFixed(1)}%`);
+		if (hasSegment("tokens")) {
+			if (usageTotals.input) statsParts.push(`↑${formatTokens(usageTotals.input)}`);
+			if (usageTotals.output) statsParts.push(`↓${formatTokens(usageTotals.output)}`);
+		}
+		if (hasSegment("cache")) {
+			if (usageTotals.cacheRead) statsParts.push(`R${formatTokens(usageTotals.cacheRead)}`);
+			if (usageTotals.cacheWrite) statsParts.push(`W${formatTokens(usageTotals.cacheWrite)}`);
+			if ((usageTotals.cacheRead > 0 || usageTotals.cacheWrite > 0) && latestCacheHitRate !== undefined) {
+				statsParts.push(`CH${latestCacheHitRate.toFixed(1)}%`);
+			}
 		}
 
 		// Kimi Coding is subscription-backed despite using API-key authentication.
@@ -162,9 +186,14 @@ export class FooterComponent implements Component {
 			? state.model.provider === "kimi-coding" ||
 				(this.session.modelRuntime?.isUsingSubscription(state.model.provider) ?? false)
 			: false;
-		if (usageTotals.cost || usingSubscription) {
-			const costStr = `$${usageTotals.cost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`;
-			statsParts.push(costStr);
+		if (hasSegment("cost")) {
+			// Prefer the provider-reported cost; fall back to tokens x catalogue
+			// price so subscription/flat-rate providers still show an estimate.
+			const sessionCost = computeSessionCostUsd(usageTotals, state.model?.cost);
+			if (sessionCost > 0 || usingSubscription) {
+				const costStr = `${formatCostUsd(sessionCost)}${usingSubscription ? " (sub)" : ""}`;
+				statsParts.push(costStr);
+			}
 		}
 
 		// Colorize context percentage based on usage.
@@ -185,7 +214,9 @@ export class FooterComponent implements Component {
 		} else {
 			contextPercentStr = contextPercentDisplay;
 		}
-		statsParts.push(contextPercentStr);
+		if (hasSegment("context")) {
+			statsParts.push(contextPercentStr);
+		}
 		if (areExperimentalFeaturesEnabled()) {
 			statsParts.push(`${theme.fg("dim", "•")} ${theme.bold(theme.fg("warning", "xp"))}`);
 		}
@@ -223,6 +254,9 @@ export class FooterComponent implements Component {
 				rightSide = rightSideWithoutProvider;
 			}
 		}
+		if (!hasSegment("model")) {
+			rightSide = "";
+		}
 
 		const rightSideWidth = visibleWidth(rightSide);
 		const totalNeeded = statsLeftWidth + minPadding + rightSideWidth;
@@ -254,7 +288,7 @@ export class FooterComponent implements Component {
 		const dimRemainder = theme.fg("dim", remainder);
 
 		const pwdLine = truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "..."));
-		const lines = [pwdLine, dimStatsLeft + dimRemainder];
+		const lines = pwd ? [pwdLine, dimStatsLeft + dimRemainder] : [dimStatsLeft + dimRemainder];
 
 		// Add extension statuses on a single line, sorted by key alphabetically
 		const extensionStatuses = this.footerData.getExtensionStatuses();

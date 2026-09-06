@@ -69,6 +69,11 @@ export interface WarningSettings {
 
 export type DefaultProjectTrust = "ask" | "always" | "never";
 
+export interface StatusLineSettings {
+	/** Ordered footer segment ids (see status-segments.ts). Default: full composition. */
+	segments?: string[];
+}
+
 export type TransportSetting = Transport;
 
 /**
@@ -97,6 +102,7 @@ export interface Settings {
 	steeringMode?: "all" | "one-at-a-time";
 	followUpMode?: "all" | "one-at-a-time";
 	theme?: string;
+	statusLine?: StatusLineSettings;
 	compaction?: CompactionSettings;
 	branchSummary?: BranchSummarySettings;
 	retry?: RetrySettings;
@@ -743,6 +749,13 @@ export class SettingsManager {
 		this.globalSettings.theme = theme;
 		this.markModified("theme");
 		this.save();
+	}
+
+	/** Configured footer status line segment ids, undefined when unset. */
+	getStatusLineSegments(): string[] | undefined {
+		const segments = this.settings.statusLine?.segments;
+		if (!Array.isArray(segments)) return undefined;
+		return segments.filter((entry): entry is string => typeof entry === "string");
 	}
 
 	getDefaultThinkingLevel(): ThinkingLevel | undefined {

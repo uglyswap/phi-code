@@ -592,7 +592,9 @@ export class InteractiveMode {
 		this.editorContainer = new Container();
 		this.editorContainer.addChild(this.editor as Component);
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
-		this.footer = new FooterComponent(this.session, this.footerDataProvider);
+		this.footer = new FooterComponent(this.session, this.footerDataProvider, () =>
+			this.settingsManager.getStatusLineSegments(),
+		);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
 		this.footer.setMode(this.inputMode);
 		this.footerContainer = new Container();

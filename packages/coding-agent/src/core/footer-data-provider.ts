@@ -1,6 +1,7 @@
 import { type ExecFileException, execFile, spawnSync } from "child_process";
 import { existsSync, type FSWatcher, readFileSync, type Stats, statSync, unwatchFile, watchFile } from "fs";
 import { dirname, join, resolve } from "path";
+import { GitDirtyCache } from "../modes/interactive/components/status-segments.ts";
 import { closeWatcher, FS_WATCH_RETRY_DELAY_MS, watchWithErrorHandler } from "../utils/fs-watch.ts";
 
 export type GitPaths = {
@@ -116,6 +117,7 @@ export class FooterDataProvider {
 	private refreshInFlight = false;
 	private refreshPending = false;
 	private disposed = false;
+	private gitDirtyCache = new GitDirtyCache();
 
 	constructor(cwd: string) {
 		this.cwd = cwd;
@@ -129,6 +131,19 @@ export class FooterDataProvider {
 			this.cachedBranch = this.resolveGitBranchSync();
 		}
 		return this.cachedBranch;
+	}
+
+	/**
+	 * Current git branch plus dirty state (working tree or index changes).
+	 * Dirty lookups run `git status --porcelain` behind a 2 second cache.
+	 */
+	getGitStatus(): { branch: string | null; dirty: boolean } {
+		const branch = this.getGitBranch();
+		if (!branch || !this.gitPaths) {
+			return { branch, dirty: false };
+		}
+		const dirty = this.gitDirtyCache.isDirty(this.gitPaths.repoDir);
+		return { branch, dirty: dirty ?? false };
 	}
 
 	/** Extension status texts set via ctx.ui.setStatus() */
@@ -178,6 +193,7 @@ export class FooterDataProvider {
 		}
 		this.clearGitWatchers();
 		this.cachedBranch = undefined;
+		this.gitDirtyCache.invalidate();
 		this.gitPaths = findGitPaths(cwd);
 		this.setupGitWatcher();
 		this.notifyBranchChange();
@@ -384,5 +400,5 @@ export class FooterDataProvider {
 /** Read-only view for extensions - excludes setExtensionStatus, setAvailableProviderCount and dispose */
 export type ReadonlyFooterDataProvider = Pick<
 	FooterDataProvider,
-	"getGitBranch" | "getExtensionStatuses" | "getAvailableProviderCount" | "onBranchChange"
+	"getGitBranch" | "getGitStatus" | "getExtensionStatuses" | "getAvailableProviderCount" | "onBranchChange"
 >;
