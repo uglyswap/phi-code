@@ -84,14 +84,13 @@ const packageStates = packages.map((pkg) => ({
 }));
 
 for (const pkg of packageStates) {
-	assertBuildOutputExists(pkg.directory);
 	pkg.published = isPublished(pkg.name, pkg.version);
-
 	if (pkg.published) {
-		console.log(`${pkg.name}@${pkg.version} is already published; validating package contents only.`);
-	} else {
-		console.log(`${pkg.name}@${pkg.version} is not published; validating package contents before publish.`);
+		console.log(`${pkg.name}@${pkg.version} is already published; skipping.\n`);
+		continue;
 	}
+	console.log(`${pkg.name}@${pkg.version} is not published; validating package contents before publish.`);
+	assertBuildOutputExists(pkg.directory);
 	validatePack(pkg.directory);
 	console.log();
 }
