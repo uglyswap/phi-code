@@ -27,6 +27,11 @@ jobs:
       - name: Lint & format
         run: npx biome ci .
 
+      # routing-config.test.ts imports sigma-agents types, which live in dist/.
+      # Build the sigma packages so the root typecheck can resolve them.
+      - name: Build sigma packages for typecheck
+        run: npm run build --workspace sigma-memory --workspace sigma-agents --workspace sigma-skills
+
       - name: Typecheck
         run: npx tsgo --noEmit
 
