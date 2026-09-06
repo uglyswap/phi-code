@@ -477,6 +477,20 @@ function getBuiltinThemes(): Record<string, ThemeJson> {
 			dark: JSON.parse(fs.readFileSync(darkPath, "utf-8")) as ThemeJson,
 			light: JSON.parse(fs.readFileSync(lightPath, "utf-8")) as ThemeJson,
 		};
+		// Extended built-in pack (theme/defaults/*.json). Load failures on a
+		// single file never block the rest of the pack.
+		const defaultsDir = path.join(themesDir, "defaults");
+		try {
+			for (const file of fs.readdirSync(defaultsDir)) {
+				if (!file.endsWith(".json")) continue;
+				try {
+					const themeJson = JSON.parse(fs.readFileSync(path.join(defaultsDir, file), "utf-8")) as ThemeJson;
+					if (themeJson.name && !(themeJson.name in BUILTIN_THEMES)) {
+						BUILTIN_THEMES[themeJson.name] = themeJson;
+					}
+				} catch {}
+			}
+		} catch {}
 	}
 	return BUILTIN_THEMES;
 }
