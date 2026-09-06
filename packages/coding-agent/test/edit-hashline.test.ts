@@ -80,7 +80,7 @@ describe("edit tool anchor recovery integration", () => {
 				[{ oldText: "if (x) {\n  doThingBefore();\n}", newText: "if (y) {}" }],
 				"test.ts",
 			),
-		).toThrow(/ambiguous/i);
+		).toThrow(/multiple drifted/i);
 	});
 
 	it("exact matching keeps working untouched", () => {
