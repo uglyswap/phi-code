@@ -165,7 +165,11 @@ describe("openai-completions empty tools handling", () => {
 		process.env.CLOUDFLARE_ACCOUNT_ID = "account-id";
 		process.env.CLOUDFLARE_GATEWAY_ID = "gateway-id";
 		const { compat: _gatewayCompat, ...gatewayBase } = getModel("cloudflare-ai-gateway", "claude-haiku-4.5")!;
-		const model = { ...gatewayBase, api: "openai-completions", baseUrl: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/compat" } as const;
+		const model = {
+			...gatewayBase,
+			api: "openai-completions",
+			baseUrl: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/compat",
+		} as const;
 
 		await streamSimple(
 			model,
@@ -203,7 +207,11 @@ describe("openai-completions empty tools handling", () => {
 		process.env.CLOUDFLARE_ACCOUNT_ID = "account-id";
 		process.env.CLOUDFLARE_GATEWAY_ID = "gateway-id";
 		const { compat: _gatewayCompat, ...gatewayBase } = getModel("cloudflare-ai-gateway", "claude-haiku-4.5")!;
-		const model = { ...gatewayBase, api: "openai-completions", baseUrl: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/compat" } as const;
+		const model = {
+			...gatewayBase,
+			api: "openai-completions",
+			baseUrl: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/compat",
+		} as const;
 
 		await streamSimple(model, {
 			messages: [{ role: "user", content: "hi", timestamp: Date.now() }],
@@ -237,7 +245,11 @@ describe("openai-completions empty tools handling", () => {
 		process.env.CLOUDFLARE_ACCOUNT_ID = "account-id";
 		process.env.CLOUDFLARE_GATEWAY_ID = "gateway-id";
 		const { compat: _workersCompat, ...workersBase } = getModel("cloudflare-ai-gateway", "claude-haiku-4.5")!;
-		const workersModel = { ...workersBase, api: "openai-completions", baseUrl: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/compat" } as const;
+		const workersModel = {
+			...workersBase,
+			api: "openai-completions",
+			baseUrl: "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/compat",
+		} as const;
 
 		await streamSimple(
 			workersModel,
