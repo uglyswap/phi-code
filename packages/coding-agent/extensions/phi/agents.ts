@@ -10,7 +10,22 @@
  */
 
 import type { ExtensionAPI } from "phi-code";
+import { killAgent, listAgents } from "phi-code";
 import { type AgentDef, discoverAgents } from "./providers/agent-def.ts";
+
+/** Render the live view of running/finished parallel sub-agents (registry). */
+function renderLiveAgents(): string {
+	const live = listAgents();
+	if (live.length === 0) return "";
+	let out = `\n\n**⚡ Live Agents (${live.filter((a) => a.status === "running").length} running)**\n`;
+	for (const a of live) {
+		const elapsed = ((a.finishedAt ?? Date.now()) - a.startedAt) / 1000;
+		const icon = a.status === "running" ? "🟢" : a.status === "killed" ? "🔴" : a.status === "error" ? "🟠" : "✅";
+		out += `  ${icon} **${a.id}** — ${a.status}${a.verdict ? ` (${a.verdict})` : ""} · ${elapsed.toFixed(1)}s\n`;
+	}
+	out += `Use \`/agents kill <id>\` to stop a running agent.`;
+	return out;
+}
 
 export default function agentsExtension(pi: ExtensionAPI) {
 	/**
@@ -22,9 +37,26 @@ export default function agentsExtension(pi: ExtensionAPI) {
 			const agents = discoverAgents();
 			const arg = args.trim().toLowerCase();
 
+			// /agents kill <id> — stop a running parallel sub-agent
+			const killMatch = arg.match(/^kill\s+(\S+)$/);
+			if (killMatch) {
+				const id = killMatch[1];
+				const killed = killAgent(id);
+				ctx.ui.notify(killed ? `🔴 Agent "${id}" killed.` : `Cannot kill "${id}": not running (or unknown).`, killed ? "info" : "warning");
+				return;
+			}
+
+			// /agents live — only the live view of parallel sub-agents
+			if (arg === "live") {
+				const live = renderLiveAgents();
+				ctx.ui.notify(live.trim() ? live.trimStart() : "No parallel agents have run yet in this session.", "info");
+				return;
+			}
+
 			if (agents.length === 0) {
+				const live = renderLiveAgents();
 				ctx.ui.notify(
-					"No agent definitions found.\n\nCreate agent files in:\n- `.phi/agents/` (project)\n- `~/.phi/agent/agents/` (global)\n\nFormat: Markdown with YAML frontmatter (name, description, tools, model).",
+					`No agent definitions found.\n\nCreate agent files in:\n- \`.phi/agents/\` (project)\n- \`~/.phi/agent/agents/\` (global)\n\nFormat: Markdown with YAML frontmatter (name, description, tools, model).${live}`,
 					"info",
 				);
 				return;
@@ -82,6 +114,7 @@ ${agent.systemPrompt.substring(0, 800)}${agent.systemPrompt.length > 800 ? "\n..
 			}
 
 			output += `Use \`/agents <name>\` for detailed info on a specific agent.`;
+			output += renderLiveAgents();
 
 			ctx.ui.notify(output, "info");
 		},

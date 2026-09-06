@@ -58,6 +58,18 @@ export {
 } from "./core/compaction/index.ts";
 export { ConfigWatcher, getConfigWatcher } from "./core/config-watcher.ts";
 export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.ts";
+export {
+	type AgentInfo,
+	type AgentResult,
+	clearFinishedAgents,
+	finishAgent,
+	killAgent,
+	listAgents,
+	type ParallelTask,
+	registerAgent,
+	runParallel,
+	type RunParallelOptions,
+} from "./core/parallel-agents.ts";
 // Extension system
 export type {
 	AgentEndEvent,
