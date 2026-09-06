@@ -22,6 +22,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "phi-code";
+import { runParallel } from "phi-code";
 import { type AgentDef, loadAgentDef } from "./providers/agent-def.ts";
 import { runCandidateFanout } from "./providers/candidate-fanout.ts";
 import { diffChangedLines } from "./providers/candidate-select.ts";
@@ -45,7 +46,7 @@ import {
 	shotBudgetMs,
 } from "./providers/escalation.ts";
 import { passed, runCommand, tail } from "./providers/execution.ts";
-import { defaultExplorerSpecs, READONLY_EXPLORER_TOOLS, runExploreFanout } from "./providers/explore-fanout.ts";
+import { defaultExplorerSpecs, type ExplorerResult, mergeExplorerResults, READONLY_EXPLORER_TOOLS, runExplorer } from "./providers/explore-fanout.ts";
 import {
 	analyzePhaseMessages,
 	buildNextBrief,
@@ -2275,23 +2276,40 @@ Tag the note with relevant keywords for vector search.
 						`\n🔭 **Parallel exploration** (read-only, up to 2 concurrent) — building a fuller map before phase 1...`,
 						"info",
 					);
-					const fan = await runExploreFanout(defaultExplorerSpecs(description), {
-						model: exploreModelId,
-						tools: READONLY_EXPLORER_TOOLS,
-						cwd: ctx.cwd || process.cwd(),
-						concurrency: 2,
-						timeoutMs: 4 * 60 * 1000,
-					});
-					const okCount = fan.results.filter((r) => r.ok).length;
-					if (fan.merged.trim()) {
-						firstPhase.instruction = `## Parallel exploration findings (${okCount} read-only sub-explorer(s))\nUse these as a starting map; verify and synthesize them into your brief, do not trust them blindly.\n\n${fan.merged}\n\n---\n${firstPhase.instruction}`;
+					// --fanout is wired on the parallel-agents executor (phase 5): each
+					// explorer spec becomes a registry-visible task (live in /agents,
+					// killable via /agents kill). Read-only: no worktree isolation.
+					const specs = defaultExplorerSpecs(description);
+					const explorerResults: ExplorerResult[] = [];
+					const parallelResults = await runParallel(
+						specs.map((spec, i) => ({
+							id: `explorer-${i + 1}:${spec.focus.slice(0, 24)}`,
+							run: async () => {
+								const r = await runExplorer(spec, {
+									model: exploreModelId,
+									tools: READONLY_EXPLORER_TOOLS,
+									cwd: ctx.cwd || process.cwd(),
+									timeoutMs: 4 * 60 * 1000,
+								});
+								explorerResults[i] = r;
+								return r.text;
+							},
+						})),
+						{ maxConcurrency: 2, useWorktrees: false },
+					);
+					const present = explorerResults.filter(Boolean);
+					const merged = mergeExplorerResults(present);
+					const rateLimited = present.some((r) => r.rateLimited);
+					const okCount = parallelResults.filter((r) => r.verdict === "success").length;
+					if (merged.trim()) {
+						firstPhase.instruction = `## Parallel exploration findings (${okCount} read-only sub-explorer(s))\nUse these as a starting map; verify and synthesize them into your brief, do not trust them blindly.\n\n${merged}\n\n---\n${firstPhase.instruction}`;
 						ctx.ui.notify(
-							`\n🔭 ${okCount} sub-exploration(s) merged into EXPLORE${fan.rateLimited ? " (rate limit hit — ran the rest sequentially)" : ""}.`,
+							`\n🔭 ${okCount} sub-exploration(s) merged into EXPLORE${rateLimited ? " (rate limit hit)" : ""}.`,
 							"info",
 						);
 					} else {
 						ctx.ui.notify(
-							`\n🔭 Parallel exploration returned nothing usable${fan.rateLimited ? " (rate-limited)" : ""} — running the normal single-agent EXPLORE.`,
+							`\n🔭 Parallel exploration returned nothing usable${rateLimited ? " (rate-limited)" : ""} — running the normal single-agent EXPLORE.`,
 							"warning",
 						);
 					}
