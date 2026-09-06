@@ -21,6 +21,7 @@
  *  - Storage chmod 0600 garantit la sécurité au repos
  */
 
+import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -714,5 +715,26 @@ export default function setupExtension(pi: ExtensionAPI) {
 		handler: async (_args, ctx) => {
 			await runSetupWizard(ctx.ui);
 		},
+	});
+
+	// First-run detection: no settings.json and no stored API keys means this
+	// is a fresh install. Offer the wizard once, only in interactive TUI mode.
+	pi.on("session_start", async (_event, ctx) => {
+		try {
+			if (!ctx.hasUI) return;
+			const settingsPath = join(homedir(), ".phi", "agent", "settings.json");
+			if (existsSync(settingsPath)) return;
+			const store = getApiKeyStore();
+			if (store.listProviders().length > 0) return;
+			const answer = await ctx.ui.confirm(
+				"Bienvenue dans Phi Code",
+				"Aucune configuration détectée. Lancer l'assistant de configuration maintenant ? (sinon: /setup plus tard)",
+			);
+			if (answer) {
+				await runSetupWizard(ctx.ui);
+			}
+		} catch {
+			// First-run prompt must never break session start.
+		}
 	});
 }

@@ -540,3 +540,21 @@ describe("CombinedAutocompleteProvider", () => {
 		});
 	});
 });
+
+
+describe("slash command fuzzy suggestions (phase 4.4)", () => {
+	it("suggests /plan, /plan-models, /plans when typing /pla", async () => {
+		const commands = [
+			{ name: "plan", description: "Plan mode" },
+			{ name: "plan-models", description: "Configure plan models" },
+			{ name: "plans", description: "List plans" },
+			{ name: "quit", description: "Quit" },
+		];
+		const provider = new CombinedAutocompleteProvider(commands as never, "/tmp");
+		const lines = ["/pla"];
+		const result = await provider.getSuggestions(lines, 0, 4, { signal: new AbortController().signal });
+		assert.notEqual(result, null, "should suggest commands for /pla");
+		const names = (result?.items ?? []).map((i: { value?: string; label?: string }) => i.value ?? i.label);
+		assert.ok(names.includes("plan"), `expected /plan in suggestions, got ${JSON.stringify(names)}`);
+	});
+});

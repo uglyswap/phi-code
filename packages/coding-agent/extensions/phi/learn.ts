@@ -13,7 +13,9 @@ import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "phi-code";
 
-const MANAGED_SKILLS_DIR = join(homedir(), ".phi", "agent", "managed-skills");
+// Write to the global skills dir so both the core skill system (/skill:<name>)
+// and the sigma-skills hint engine pick it up.
+const MANAGED_SKILLS_DIR = join(homedir(), ".phi", "agent", "skills");
 
 function slugify(name: string): string {
 	return name
@@ -65,7 +67,7 @@ export default function (pi: ExtensionAPI) {
 						content: [
 							{
 								type: "text",
-								text: `Skill learned: **${slug}** written to ${dir}/SKILL.md. It loads from the next session (or after /reload).`,
+								text: `Skill learned: **${slug}** written to ${dir}/SKILL.md. It loads from the next session (or after /reload) and is invocable via /skill:${slug}.`,
 							},
 						],
 						details: { promoted: true, slug, path: dir },
