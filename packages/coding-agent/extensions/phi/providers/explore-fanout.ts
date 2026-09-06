@@ -75,7 +75,7 @@ export function stripThinking(text: string): string {
 }
 
 /** Run one sub-explorer. Never throws; always resolves to an ExplorerResult. */
-function runOneExplorer(spec: ExplorerSpec, opts: FanoutOptions): Promise<ExplorerResult> {
+export function runExplorer(spec: ExplorerSpec, opts: FanoutOptions): Promise<ExplorerResult> {
 	return new Promise((resolve) => {
 		const args = ["--mode", "json", "-p", "--no-session"];
 		if (opts.model) args.push("--model", opts.model);
@@ -167,6 +167,15 @@ function runOneExplorer(spec: ExplorerSpec, opts: FanoutOptions): Promise<Explor
  * plus the raw results. Best-effort: callers should fall back to the normal
  * single-agent EXPLORE when `merged` is empty.
  */
+/** Merge successful explorer results into the EXPLORE-phase brief (markdown). */
+export function mergeExplorerResults(results: ExplorerResult[]): string {
+	return results
+		.filter((r) => r.ok && r.text.trim())
+		.map((r) => `### Exploration — ${r.focus}\n${stripThinking(r.text)}`)
+		.filter((block) => block.trim().length > 0)
+		.join("\n\n");
+}
+
 export async function runExploreFanout(
 	specs: ExplorerSpec[],
 	opts: FanoutOptions,
@@ -176,18 +185,14 @@ export async function runExploreFanout(
 	let i = 0;
 	while (i < specs.length) {
 		const batch = specs.slice(i, i + concurrency);
-		const batchResults = await Promise.all(batch.map((s) => runOneExplorer(s, opts)));
+		const batchResults = await Promise.all(batch.map((s) => runExplorer(s, opts)));
 		results.push(...batchResults);
 		i += batch.length;
 		// Adaptive backoff: a rate limit means the single key is saturated, so
 		// serialize whatever is left rather than push harder.
 		if (batchResults.some((r) => r.rateLimited)) concurrency = 1;
 	}
-	const ok = results.filter((r) => r.ok && r.text.trim());
-	const merged = ok
-		.map((r) => `### Exploration — ${r.focus}\n${stripThinking(r.text)}`)
-		.filter((block) => block.trim().length > 0)
-		.join("\n\n");
+	const merged = mergeExplorerResults(results);
 	return { results, merged, rateLimited: results.some((r) => r.rateLimited) };
 }
 
