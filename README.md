@@ -1076,12 +1076,12 @@ GitHub releases include a versioned source archive covered by the release's `SHA
 
 ```bash
 VERSION="<release-version>"
-tar -xzf "pi-${VERSION}-source.tar.gz"
-cd "pi-${VERSION}"
+tar -xzf "phi-${VERSION}-source.tar.gz"
+cd "phi-${VERSION}"
 ./scripts/build-binaries.sh --offline-model-data --platform linux-x64 --out "$PWD/out"
 ```
 
-The archive keeps the inherited `pi-` prefix: `scripts/create-source-archive.sh` builds the tree under `pi-${VERSION}/` and `.github/workflows/build-binaries.yml` uploads it as `pi-${VERSION}-source.tar.gz`. Rename both if you rebrand the release assets.
+The archive uses the `phi-` prefix: `scripts/create-source-archive.sh` builds the tree under `phi-${VERSION}/` and `.github/workflows/build-binaries.yml` uploads it as `phi-${VERSION}-source.tar.gz`.
 
 The source archive includes the generated provider model data used for the release. `--offline-model-data` builds with that snapshot instead of refreshing it from live provider catalogs. The script still installs dependencies, builds the monorepo, compiles the Bun executable, and stages its runtime assets. Package maintainers who provide dependencies separately can pass `--skip-install --skip-deps`.
 
