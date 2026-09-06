@@ -36,6 +36,7 @@ const DEBUG_RULES = `
 - **Use the \`sandbox_run\` tool for every oracle run** (reproduction, suite, acceptance). It runs in the project's guaranteed environment and returns the REAL exit code — a PASS means \`sandbox_run\` returned exit 0, nothing less.
 - **No fabricated PASS.** If \`sandbox_run\` reports \`SANDBOX UNAVAILABLE\` (or you otherwise cannot run the reproduction), emit \`BLOCKED: no executable environment\` — do NOT reconstruct a mock and grade your own reconstruction.
 - **Minimal fix wins.** Prefer the smallest change; every added guard/condition is a liability that can hide the bug (an over-clever guard is exactly how these fixes go wrong).
+- **Use the \`lsp\` tool when available.** \`lsp diagnostics\` on the implicated file gives the language server's errors/warnings without a build; \`lsp definition\`/\`references\` navigate precisely. If it reports no server installed, ignore and move on.
 - **Root cause, not workaround.** No skipped tests, no \`--no-verify\`, no mock that hides the failure.
 - The user does NOT answer during these phases. Act autonomously; do not end with a question.`;
 
