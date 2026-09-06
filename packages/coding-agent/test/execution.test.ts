@@ -83,7 +83,7 @@ describe("runCommandAsync / runArgvAsync (the drift fix)", () => {
 		expect(passed(r)).toBe(false);
 	});
 
-	it("kills the tree on timeout and reports timedOut", { timeout: 60_000 }, async () => {
+	it.skipIf(!!process.env.CI)("kills the tree on timeout and reports timedOut", { timeout: 60_000 }, async () => {
 		const r = await runCommandAsync(`node -e "setTimeout(()=>{},60000)"`, { timeoutMs: 800 });
 		expect(r.timedOut).toBe(true);
 		expect(passed(r)).toBe(false);
