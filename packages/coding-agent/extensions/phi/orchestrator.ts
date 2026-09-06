@@ -22,7 +22,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "phi-code";
-import { runParallel } from "phi-code";
+import { runParallel } from "../../src/core/parallel-agents.ts";
 import { type AgentDef, loadAgentDef } from "./providers/agent-def.ts";
 import { runCandidateFanout } from "./providers/candidate-fanout.ts";
 import { diffChangedLines } from "./providers/candidate-select.ts";

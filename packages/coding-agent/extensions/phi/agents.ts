@@ -10,7 +10,7 @@
  */
 
 import type { ExtensionAPI } from "phi-code";
-import { killAgent, listAgents } from "phi-code";
+import { killAgent, listAgents } from "../../src/core/parallel-agents.ts";
 import { type AgentDef, discoverAgents } from "./providers/agent-def.ts";
 
 /** Render the live view of running/finished parallel sub-agents (registry). */
