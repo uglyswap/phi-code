@@ -18,4 +18,10 @@ export interface SkillsConfig {
 	projectDir: string; // .phi/skills/
 	bundledDir: string; // Chemin vers skills/ dans le repo
 	autoInject: boolean; // Auto-inject matched skill context
+	/** Sources supplémentaires scannées entre projectDir et globalDir (ordre = priorité, first-wins). Ex: .claude/skills, .agents/skills, .codex/skills, .github/skills. */
+	extraDirs?: string[];
+	/** Répertoire des skills auto-appris (~/.phi/agent/managed-skills/), priorité minimale. */
+	managedDir?: string;
+	/** Noms de skills à ignorer (match exact ou glob simple avec *). */
+	ignoredSkills?: string[];
 }

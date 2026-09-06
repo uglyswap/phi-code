@@ -24,6 +24,10 @@ import { McpOAuthProvider, setCallbackPort } from "./oauth-provider.ts";
 import type { TransportAuthCallbacks } from "./server-manager.ts";
 import { ServerManager } from "./server-manager.ts";
 import { ToolBridge } from "./tool-bridge.ts";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { importExternalMcpConfigs } from "./import-configs.ts";
 
 /**
  * Open a URL in the user's default browser.
@@ -141,6 +145,40 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		description: "Show MCP server status. Usage: /mcp [server-name] for detail.",
 		handler: async (args: string, ctx: ExtensionCommandContext) => {
 			const serverName = args.trim();
+			if (serverName === "add" || serverName.startsWith("add ")) {
+				// Interactive wizard: /mcp add (omp-style mcp-add-wizard)
+				if (!ctx.hasUI) {
+					ctx.ui.notify("pi-mcp: /mcp add requires interactive UI. Edit ~/.phi/agent/mcp.json directly.", "error");
+					return;
+				}
+				const name = serverName.slice(4).trim() || (await ctx.ui.input("Server name", "my-server"));
+				if (!name) return;
+				const transport = await ctx.ui.select("Transport", ["stdio (local command)", "http (remote URL)"]);
+				if (!transport) return;
+				let entry: Record<string, unknown>;
+				if (transport.startsWith("stdio")) {
+					const command = await ctx.ui.input("Command", "npx -y @modelcontextprotocol/server-filesystem .");
+					if (!command) return;
+					const [cmd, ...rest] = command.split(/\s+/);
+					entry = { command: cmd, args: rest, lifecycle: "lazy" };
+				} else {
+					const url = await ctx.ui.input("Server URL", "https://example.com/mcp");
+					if (!url) return;
+					entry = { url, lifecycle: "lazy" };
+				}
+				const configPath = join(homedir(), ".phi", "agent", "mcp.json");
+				const config = existsSync(configPath) ? JSON.parse(readFileSync(configPath, "utf8")) : { mcpServers: {} };
+				config.mcpServers = config.mcpServers ?? {};
+				if (config.mcpServers[name]) {
+					ctx.ui.notify(`pi-mcp: "${name}" already exists in ${configPath}`, "error");
+					return;
+				}
+				config.mcpServers[name] = entry;
+				mkdirSync(dirname(configPath), { recursive: true });
+				writeFileSync(configPath, JSON.stringify(config, null, 2));
+				ctx.ui.notify(`pi-mcp: Added "${name}" to ${configPath}. /reload to connect.`, "info");
+				return;
+			}
 			if (serverName) {
 				// Detailed view: status + recent stderr
 				const server = manager.getServer(serverName);
@@ -175,7 +213,70 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		},
 	});
 
-	// ── 5. /mcp:stop — stop a server ─────────────────────────────────────────
+		// ── 4b. /mcp:import — import server configs from other agent tools ─────
+	pi.registerCommand("mcp:import", {
+		description: "Import MCP servers from Claude/Codex/Gemini/Cursor/VS Code configs into ~/.phi/agent/mcp.json",
+		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+			const result = importExternalMcpConfigs(ctx.cwd);
+			const lines = [
+				result.imported.length ? `Imported: ${result.imported.join(", ")}` : "Nothing new to import.",
+				result.skipped.length ? `Skipped (already configured): ${result.skipped.join(", ")}` : null,
+				result.imported.length ? "Restart or /reload to start the new servers." : null,
+			].filter(Boolean);
+			ctx.ui.notify(lines.join("\n"), result.imported.length ? "info" : "warning");
+		},
+	});
+
+	// ── 4c. /mcp:prompt — list or invoke MCP server prompts ──────────────
+	pi.registerCommand("mcp:prompt", {
+		description: "List MCP prompts or invoke one. Usage: /mcp:prompt [<server>:<prompt>]",
+		handler: async (args: string, ctx: ExtensionCommandContext) => {
+			const spec = args.trim();
+			const getClient = (name: string) => {
+				const server = manager.getServer(name);
+				if (!server?.client) throw new Error(`Server "${name}" is not connected (state: ${server?.state ?? "unknown"}). Try /mcp:start ${name}.`);
+				return server.client;
+			};
+			try {
+				if (!spec) {
+					const lines: string[] = [];
+					for (const server of manager.getAllServers()) {
+						if (!server.client) continue;
+						try {
+							const list = await server.client.listPrompts();
+							for (const prompt of list.prompts ?? []) {
+								lines.push(`${server.name}:${prompt.name}${prompt.description ? ` — ${prompt.description}` : ""}`);
+							}
+						} catch {
+							// server without prompts support: skip
+						}
+					}
+					ctx.ui.notify(lines.length ? lines.join("\n") : "No MCP prompts available (servers may not support prompts).", "info");
+					return;
+				}
+				const sep = spec.indexOf(":");
+				if (sep === -1) {
+					ctx.ui.notify("Usage: /mcp:prompt <server>:<prompt>", "error");
+					return;
+				}
+				const client = getClient(spec.slice(0, sep));
+				const result = await client.getPrompt({ name: spec.slice(sep + 1), arguments: {} });
+				const text = (result.messages ?? [])
+					.map((m) => (m.content?.type === "text" ? m.content.text : ""))
+					.filter(Boolean)
+					.join("\n\n");
+				if (!text) {
+					ctx.ui.notify(`pi-mcp: prompt returned no text.`, "warning");
+					return;
+				}
+				pi.sendUserMessage(text);
+			} catch (error) {
+				ctx.ui.notify(`pi-mcp prompt error: ${error instanceof Error ? error.message : String(error)}`, "error");
+			}
+		},
+	});
+
+// ── 5. /mcp:stop — stop a server ─────────────────────────────────────────
 	pi.registerCommand("mcp:stop", {
 		description: "Stop an MCP server. Usage: /mcp:stop <server-name>",
 		handler: async (args: string, ctx: ExtensionCommandContext) => {
