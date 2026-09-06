@@ -104,6 +104,24 @@ export function clearFinishedAgents(): void {
 	}
 }
 
+/**
+ * Build the explicit conflict report appended to an agent's output when its
+ * merge fails: lists the conflicting files and BOTH diffs (incoming vs current
+ * main tree) so the director can decide. Nothing is overwritten silently.
+ */
+export function formatConflictReport(conflict: MergeConflictInfo): string {
+	return [
+		"## MERGE CONFLICT",
+		`Files: ${conflict.files.join(", ")}`,
+		"",
+		"### Incoming diff (this agent)",
+		conflict.incomingDiff || "(empty)",
+		"",
+		"### Current diff (main tree)",
+		conflict.currentDiff || "(empty)",
+	].join("\n");
+}
+
 function agentSignal(id: string): AbortSignal {
 	const entry = registry.get(id);
 	return entry ? entry.controller.signal : new AbortController().signal;
@@ -134,7 +152,7 @@ async function runOne(task: ParallelTask, opts: Required<Pick<RunParallelOptions
 			} else {
 				verdict = "conflict";
 				conflicts = merge.conflict;
-				output += `\n\n## MERGE CONFLICT\nFiles: ${conflicts?.files.join(", ")}\n\n### Incoming diff (this agent)\n${conflicts?.incomingDiff}\n\n### Current diff (main tree)\n${conflicts?.currentDiff}`;
+				if (conflicts) output += `\n\n${formatConflictReport(conflicts)}`;
 			}
 		} else {
 			verdict = "success";
