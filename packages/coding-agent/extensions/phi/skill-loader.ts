@@ -96,23 +96,6 @@ export default function skillLoaderExtension(pi: ExtensionAPI) {
 		};
 	});
 
-	// ─── /skill:<name> commands (one per discovered skill, omp-style) ──────
-	for (const skill of loader.listSkills()) {
-		pi.registerCommand(`skill:${skill.name}`, {
-			description: `Load the "${skill.name}" skill: ${skill.description}`.slice(0, 200),
-			handler: async (_args, ctx) => {
-				const content = loader.getSkillContext(skill.name);
-				if (!content) {
-					ctx.ui.notify(`Skill "${skill.name}" could not be loaded.`, "error");
-					return;
-				}
-				pi.sendUserMessage(
-					`Load and follow this skill for the rest of the session:\n\n${content}`,
-				);
-			},
-		});
-	}
-
 	// ─── /skills Command ─────────────────────────────────────────────
 
 	pi.registerCommand("skills", {
