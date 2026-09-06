@@ -114,7 +114,7 @@ describe.skipIf(!camoufoxInstalled)("Fingerprint consistency", () => {
 	}, ONE_BROWSER_MS);
 });
 
-test("Playwright connects to Camoufox server", async () => {
+test.skipIf(!camoufoxInstalled)("Playwright connects to Camoufox server", async () => {
 	const server = await launchServer({
 		headless: true,
 	});
@@ -130,7 +130,7 @@ test("Playwright connects to Camoufox server", async () => {
 	await server.close();
 }, TWO_BROWSERS_MS);
 
-test("Persistent context works", async () => {
+test.skipIf(!camoufoxInstalled)("Persistent context works", async () => {
 	const userDataDir = await mkdtemp(join(tmpdir(), "user_data_"));
 
 	{
