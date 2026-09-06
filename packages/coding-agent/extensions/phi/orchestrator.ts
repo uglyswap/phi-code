@@ -730,8 +730,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 **LAST ACTION (MANDATORY):** Call \`memory_write\` to save your exploration findings for downstream agents.
 
 **Knowledge Graph:**
-// TODO: ontology_batch_add for reducing API calls (currently single-item only)
-After your analysis, use \`ontology_add\` to save key project entities AND their relations:
+After your analysis, use \`ontology_batch_add\` to save ALL key project entities AND their relations in ONE call:
 - Add entities for: the project, each major library, each module/directory
 - Add relations between them: "uses", "contains", "depends_on", "implements"
 - Example: entity "finance-tracker" (type: Project) → relation "uses" → entity "ink" (type: Library)

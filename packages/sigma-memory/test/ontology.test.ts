@@ -49,6 +49,46 @@ describe("OntologyManager", () => {
 		assert.equal(entities[0].properties.email, "john@example.com");
 	});
 
+
+	test("addBatch should add entities and relations in a single locked append", () => {
+		const result = ontologyManager.addBatch({
+			entities: [
+				{ type: "Project", name: "finance-tracker", properties: {} },
+				{ type: "Library", name: "ink", properties: {} },
+				{ type: "Library", name: "react", properties: {} },
+			],
+			relations: [
+				{ fromName: "finance-tracker", toName: "ink", type: "uses" },
+				{ fromName: "ink", toName: "react", type: "depends_on" },
+			],
+		});
+
+		assert.equal(result.entityIds.length, 3);
+		assert.equal(result.relationIds.length, 2);
+
+		const ink = ontologyManager.findEntity({ name: "ink" });
+		assert.equal(ink.length, 1);
+		const graph = ontologyManager.getGraph();
+		assert.equal(graph.relations.length, 2);
+
+		// pathfinding across batch-added nodes (BFS)
+		const from = result.entityIds[0];
+		const to = result.entityIds[2];
+		const path = ontologyManager.queryPath(from, to);
+		assert(path !== null, "path should exist between batch-added entities");
+	});
+
+	test("addBatch should reject a relation referencing an unknown entity name", () => {
+		assert.throws(() =>
+			ontologyManager.addBatch({
+				entities: [{ type: "Project", name: "solo", properties: {} }],
+				relations: [{ fromName: "solo", toName: "ghost", type: "uses" }],
+			}),
+		);
+		// nothing persisted on failure
+		assert.equal(ontologyManager.findEntity({ name: "solo" }).length, 0);
+	});
+
 	test("addRelation should create a relation between entities", () => {
 		// Create two entities
 		const personId = ontologyManager.addEntity({

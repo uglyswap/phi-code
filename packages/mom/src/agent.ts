@@ -24,8 +24,25 @@ import type { ChannelInfo, SlackContext, UserInfo } from "./slack.ts";
 import type { ChannelStore } from "./store.ts";
 import { createMomTools, setUploadFunction, setWorkspaceRoot } from "./tools/index.ts";
 
-// Hardcoded model for now - TODO: make configurable (issue #63)
-const model = getModel("anthropic", "claude-sonnet-4-5");
+// Model is configurable via MOM_MODEL="provider/model-id" (issue #63).
+// Falls back to the previous default when unset or malformed.
+function resolveMomModel() {
+	const spec = process.env.MOM_MODEL;
+	if (spec) {
+		const slash = spec.indexOf("/");
+		if (slash > 0) {
+			const provider = spec.slice(0, slash);
+			const modelId = spec.slice(slash + 1);
+			const resolved = getModel(provider as never, modelId as never);
+			if (resolved) return resolved;
+			log.logWarning(`MOM_MODEL "${spec}" did not resolve, falling back to default`);
+		} else {
+			log.logWarning(`MOM_MODEL "${spec}" is malformed (expected "provider/model-id"), falling back to default`);
+		}
+	}
+	return getModel("anthropic", "claude-sonnet-4-5");
+}
+const model = resolveMomModel();
 
 export interface PendingMessage {
 	userName: string;
