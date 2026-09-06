@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	clearFinishedAgents,
+	formatConflictReport,
 	killAgent,
 	listAgents,
 	MAX_SPAWN_DEPTH,
@@ -177,6 +178,18 @@ describe("parallel-agents", () => {
 		expect(results[0].verdict).toBe("killed");
 		expect(killAgent("long-runner")).toBe(false); // already finished
 		expect(killAgent("unknown")).toBe(false);
+	});
+
+	it("formats an explicit conflict report listing both diffs", () => {
+		const report = formatConflictReport({
+			files: ["shared.txt"],
+			incomingDiff: "+from agent A",
+			currentDiff: "+from agent B",
+		});
+		expect(report).toContain("MERGE CONFLICT");
+		expect(report).toContain("shared.txt");
+		expect(report).toContain("+from agent A");
+		expect(report).toContain("+from agent B");
 	});
 
 	it("registers and finishes manual registry entries", () => {
