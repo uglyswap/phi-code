@@ -41,7 +41,10 @@ export default function (pi: ExtensionAPI) {
 				config[tier] = decision;
 				mkdirSync(join(homedir(), ".phi", "agent"), { recursive: true });
 				writeFileSync(USER_CONFIG, JSON.stringify(config, null, 2));
-				ctx.ui.notify(`Permission tier "${tier}" set to "${decision}" (user config). New sessions pick it up.`, "info");
+				ctx.ui.notify(
+					`Permission tier "${tier}" set to "${decision}" (user config). New sessions pick it up.`,
+					"info",
+				);
 				return;
 			}
 
@@ -55,7 +58,7 @@ export default function (pi: ExtensionAPI) {
 				existsSync(USER_CONFIG) || existsSync(join(ctx.cwd, ".phi", "permissions.json"))
 					? "Custom policy active"
 					: "Legacy allow-everything mode (no permissions.json found)",
-				"tiers: " + TIERS.map((t) => `${t}=${(user[t] as string) ?? "prompt"}`).join(" "),
+				`tiers: ${TIERS.map((t) => `${t}=${(user[t] as string) ?? "prompt"}`).join(" ")}`,
 				`user rules: ${Array.isArray(user.rules) ? user.rules.length : 0}`,
 				"toggle: /permissions <read|write|exec> <allow|deny|prompt>",
 			].join(" | ");

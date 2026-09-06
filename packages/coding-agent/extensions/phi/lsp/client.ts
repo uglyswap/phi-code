@@ -19,13 +19,20 @@ export interface LspServerSpec {
 
 /** Default server registry. Missing binaries are skipped silently. */
 export const DEFAULT_SERVERS: Record<string, LspServerSpec> = {
-	typescript: { command: "typescript-language-server", args: ["--stdio"], extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"] },
+	typescript: {
+		command: "typescript-language-server",
+		args: ["--stdio"],
+		extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"],
+	},
 	python: { command: "pyright-langserver", args: ["--stdio"], extensions: [".py"] },
 	go: { command: "gopls", args: ["serve"], extensions: [".go"] },
 	rust: { command: "rust-analyzer", args: [], extensions: [".rs"] },
 };
 
-export function serverForFile(file: string, registry: Record<string, LspServerSpec> = DEFAULT_SERVERS): LspServerSpec | undefined {
+export function serverForFile(
+	file: string,
+	registry: Record<string, LspServerSpec> = DEFAULT_SERVERS,
+): LspServerSpec | undefined {
 	const dot = file.lastIndexOf(".");
 	if (dot === -1) return undefined;
 	const ext = file.slice(dot);
@@ -51,12 +58,10 @@ export class LspClient extends EventEmitter {
 	private diagnostics = new Map<string, unknown[]>();
 	private initialized = false;
 
-	private spec: LspServerSpec;
 	private rootUri: string;
 
 	constructor(spec: LspServerSpec, rootUri: string) {
 		super();
-		this.spec = spec;
 		this.rootUri = rootUri;
 		this.proc = spawn(spec.command, spec.args, { stdio: ["pipe", "pipe", "pipe"] });
 		this.proc.stdout!.on("data", (chunk: Buffer) => this.onData(chunk));

@@ -35,6 +35,9 @@ const installPackageName = "@phi-code-admin/phi-code-install";
 const allowedInstallScriptPackages = new Map([
 	["@google/genai@1.52.0", "preinstall is a no-op in the published package"],
 	["protobufjs@7.6.5", "postinstall only warns about protobufjs version scheme mismatches"],
+	["better-sqlite3@12.11.1", "builds the native SQLite binding (prebuilds downloaded when available)"],
+	["onnxruntime-node@1.21.0", "downloads the platform ONNX runtime binary for local embeddings"],
+	["sharp@0.34.5", "installs prebuilt libvips binaries for image processing"],
 ]);
 
 const args = new Set(process.argv.slice(2));

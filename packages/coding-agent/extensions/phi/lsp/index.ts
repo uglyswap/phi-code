@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "phi-code";
-import { DEFAULT_SERVERS, LspClient, serverForFile } from "./client.ts";
+import { LspClient, serverForFile } from "./client.ts";
 
 const clients = new Map<string, LspClient>();
 
@@ -54,10 +54,13 @@ function formatLocation(loc: unknown): string {
 }
 
 export default function (pi: ExtensionAPI) {
-	pi.on("session_shutdown" as never, (() => {
-		for (const client of clients.values()) client.dispose();
-		clients.clear();
-	}) as never);
+	pi.on(
+		"session_shutdown" as never,
+		(() => {
+			for (const client of clients.values()) client.dispose();
+			clients.clear();
+		}) as never,
+	);
 
 	pi.registerTool({
 		name: "lsp",
@@ -71,7 +74,12 @@ export default function (pi: ExtensionAPI) {
 		],
 		parameters: Type.Object({
 			action: Type.Union(
-				[Type.Literal("diagnostics"), Type.Literal("definition"), Type.Literal("references"), Type.Literal("hover")],
+				[
+					Type.Literal("diagnostics"),
+					Type.Literal("definition"),
+					Type.Literal("references"),
+					Type.Literal("hover"),
+				],
 				{ description: "LSP operation" },
 			),
 			path: Type.String({ description: "File path (relative or absolute)" }),
@@ -130,7 +138,10 @@ export default function (pi: ExtensionAPI) {
 						const locs = Array.isArray(result) ? result : result ? [result] : [];
 						return {
 							content: [
-								{ type: "text", text: locs.length ? locs.map(formatLocation).join("\n") : "No definition found." },
+								{
+									type: "text",
+									text: locs.length ? locs.map(formatLocation).join("\n") : "No definition found.",
+								},
 							],
 							details: { action: p.action, count: locs.length },
 						};
@@ -155,7 +166,8 @@ export default function (pi: ExtensionAPI) {
 					if (result?.contents) {
 						const c = result.contents as { value?: string } | Array<{ value?: string } | string> | string;
 						if (typeof c === "string") text = c;
-						else if (Array.isArray(c)) text = c.map((x) => (typeof x === "string" ? x : x.value ?? "")).join("\n");
+						else if (Array.isArray(c))
+							text = c.map((x) => (typeof x === "string" ? x : (x.value ?? ""))).join("\n");
 						else text = c.value ?? text;
 					}
 					return { content: [{ type: "text", text }], details: { action: p.action } };
@@ -163,7 +175,11 @@ export default function (pi: ExtensionAPI) {
 					client.closeDocument(uri);
 				}
 			} catch (error) {
-				return { content: [{ type: "text", text: `lsp error: ${error}` }], details: { action: p.action }, isError: true };
+				return {
+					content: [{ type: "text", text: `lsp error: ${error}` }],
+					details: { action: p.action },
+					isError: true,
+				};
 			}
 		},
 	});

@@ -46,7 +46,13 @@ import {
 	shotBudgetMs,
 } from "./providers/escalation.ts";
 import { passed, runCommand, tail } from "./providers/execution.ts";
-import { defaultExplorerSpecs, type ExplorerResult, mergeExplorerResults, READONLY_EXPLORER_TOOLS, runExplorer } from "./providers/explore-fanout.ts";
+import {
+	defaultExplorerSpecs,
+	type ExplorerResult,
+	mergeExplorerResults,
+	READONLY_EXPLORER_TOOLS,
+	runExplorer,
+} from "./providers/explore-fanout.ts";
 import {
 	analyzePhaseMessages,
 	buildNextBrief,

@@ -49,7 +49,6 @@ describe("OntologyManager", () => {
 		assert.equal(entities[0].properties.email, "john@example.com");
 	});
 
-
 	test("addBatch should add entities and relations in a single locked append", () => {
 		const result = ontologyManager.addBatch({
 			entities: [

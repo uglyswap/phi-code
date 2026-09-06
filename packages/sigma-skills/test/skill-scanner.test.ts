@@ -382,7 +382,10 @@ Use when testing the ${name} functionality.
 		const shared = skills.find((s) => s.name === "shared-skill");
 		assert(shared, "shared-skill should be found");
 		assert.equal(shared.description, "From claude source");
-		assert(skills.find((s) => s.name === "claude-only"), "claude-only should be found");
+		assert(
+			skills.find((s) => s.name === "claude-only"),
+			"claude-only should be found",
+		);
 	});
 
 	test("scan should include managedDir with lowest precedence", () => {
@@ -400,7 +403,10 @@ Use when testing the ${name} functionality.
 			managedDir,
 		};
 		const skills = new SkillScanner(configWithManaged).scan();
-		assert(skills.find((s) => s.name === "learned-skill"), "learned-skill should be found");
+		assert(
+			skills.find((s) => s.name === "learned-skill"),
+			"learned-skill should be found",
+		);
 		const bundled = skills.find((s) => s.name === "bundled-skill");
 		assert.equal(bundled?.description, "Bundled original");
 	});

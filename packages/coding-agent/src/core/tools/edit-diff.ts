@@ -3,9 +3,9 @@
  */
 
 import * as Diff from "diff";
-import { recoverByAnchors } from "./edit-hashline.ts";
 import { constants } from "fs";
 import { access, readFile } from "fs/promises";
+import { recoverByAnchors } from "./edit-hashline.ts";
 import { resolveToCwd } from "./path-utils.ts";
 
 export function detectLineEnding(content: string): "\r\n" | "\n" {

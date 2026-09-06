@@ -9,11 +9,14 @@ const repoRoot = resolve(scriptDir, "..");
 const codingAgentDir = join(repoRoot, "packages/coding-agent");
 const rootLockfilePath = join(repoRoot, "package-lock.json");
 const shrinkwrapPath = join(codingAgentDir, "npm-shrinkwrap.json");
-const internalPackagePrefixes = ["phi-code-", "@phi-code-admin/"];
+const internalPackagePrefixes = ["phi-code-", "@phi-code-admin/", "sigma-"];
 const isInternalPackage = (name) => internalPackagePrefixes.some((prefix) => name.startsWith(prefix));
 const allowedInstallScriptPackages = new Map([
 	["@google/genai@1.52.0", "preinstall is a no-op in the published package"],
 	["protobufjs@7.6.5", "postinstall only warns about protobufjs version scheme mismatches"],
+	["better-sqlite3@12.11.1", "builds the native SQLite binding (prebuilds downloaded when available)"],
+	["onnxruntime-node@1.21.0", "downloads the platform ONNX runtime binary for local embeddings"],
+	["sharp@0.34.5", "installs prebuilt libvips binaries for image processing"],
 ]);
 
 const args = new Set(process.argv.slice(2));
@@ -134,16 +137,24 @@ function getInternalWorkspaces(lockPackages) {
 	const workspaces = new Map();
 
 	for (const [lockPath, entry] of Object.entries(lockPackages)) {
-		if (!lockPath.startsWith("packages/") || lockPath.includes("/node_modules/") || !entry.name || !entry.version) {
+		if (!lockPath.startsWith("packages/") || lockPath.includes("/node_modules/")) {
 			continue;
 		}
-		if (!isInternalPackage(entry.name)) {
+		// npm may omit `name` on workspace entries; read it from the workspace
+		// package.json (source of truth) instead.
+		const packageJson = readJson(join(repoRoot, lockPath, "package.json"));
+		const name = entry.name ?? packageJson.name;
+		const version = entry.version ?? packageJson.version;
+		if (!name || !version) {
+			continue;
+		}
+		if (!isInternalPackage(name)) {
 			continue;
 		}
 
-		workspaces.set(entry.name, {
+		workspaces.set(name, {
 			lockPath,
-			packageJson: readJson(join(repoRoot, lockPath, "package.json")),
+			packageJson,
 		});
 	}
 

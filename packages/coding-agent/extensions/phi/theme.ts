@@ -13,7 +13,7 @@ export default function (pi: ExtensionAPI) {
 		description: "Select the UI theme (built-in pack, custom, or extension themes)",
 		handler: async (args, ctx) => {
 			if (!ctx.hasUI) {
-				ctx.ui.notify("Usage interactif uniquement. Sinon: définir \"theme\" dans settings.json.", "error");
+				ctx.ui.notify('Usage interactif uniquement. Sinon: définir "theme" dans settings.json.', "error");
 				return;
 			}
 			const themes = ctx.ui.getAllThemes();
@@ -21,11 +21,17 @@ export default function (pi: ExtensionAPI) {
 			if (direct) {
 				const found = themes.find((t) => t.name === direct);
 				if (!found) {
-					ctx.ui.notify(`Theme "${direct}" not found. Available: ${themes.map((t) => t.name).join(", ")}`, "error");
+					ctx.ui.notify(
+						`Theme "${direct}" not found. Available: ${themes.map((t) => t.name).join(", ")}`,
+						"error",
+					);
 					return;
 				}
 				const result = ctx.ui.setTheme(found.name);
-				ctx.ui.notify(result.success ? `Theme applied: ${found.name}` : `Theme error: ${result.error}`, result.success ? "info" : "error");
+				ctx.ui.notify(
+					result.success ? `Theme applied: ${found.name}` : `Theme error: ${result.error}`,
+					result.success ? "info" : "error",
+				);
 				return;
 			}
 			const choice = await ctx.ui.select(
@@ -34,7 +40,10 @@ export default function (pi: ExtensionAPI) {
 			);
 			if (!choice) return;
 			const result = ctx.ui.setTheme(choice);
-			ctx.ui.notify(result.success ? `Theme applied: ${choice}` : `Theme error: ${result.error}`, result.success ? "info" : "error");
+			ctx.ui.notify(
+				result.success ? `Theme applied: ${choice}` : `Theme error: ${result.error}`,
+				result.success ? "info" : "error",
+			);
 		},
 	});
 }

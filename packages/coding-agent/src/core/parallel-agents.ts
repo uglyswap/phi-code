@@ -129,7 +129,10 @@ function agentSignal(id: string): AbortSignal {
 
 // ─── Executor ────────────────────────────────────────────────────
 
-async function runOne(task: ParallelTask, opts: Required<Pick<RunParallelOptions, "depth" | "useWorktrees">> & RunParallelOptions): Promise<AgentResult> {
+async function runOne(
+	task: ParallelTask,
+	opts: Required<Pick<RunParallelOptions, "depth" | "useWorktrees">> & RunParallelOptions,
+): Promise<AgentResult> {
 	registerAgent(task.id);
 	let output = "";
 	let verdict: Verdict = "error";

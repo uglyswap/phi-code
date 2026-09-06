@@ -20,7 +20,17 @@ export interface VectorSearchResult {
 
 export interface OntologyEntity {
 	id: string;
-	type: "Person" | "Project" | "Device" | "Account" | "Document" | "Service" | "Concept";
+	type:
+		| "Person"
+		| "Project"
+		| "Device"
+		| "Account"
+		| "Document"
+		| "Service"
+		| "Concept"
+		| "Library"
+		| "Module"
+		| "Tool";
 	name: string;
 	properties: Record<string, string>;
 	createdAt: string;
@@ -72,7 +82,17 @@ export interface MemoryStatus {
 export interface OntologyEntityEntry {
 	kind: "entity";
 	id: string;
-	type: "Person" | "Project" | "Device" | "Account" | "Document" | "Service" | "Concept";
+	type:
+		| "Person"
+		| "Project"
+		| "Device"
+		| "Account"
+		| "Document"
+		| "Service"
+		| "Concept"
+		| "Library"
+		| "Module"
+		| "Tool";
 	name: string;
 	properties: Record<string, string>;
 	createdAt: string;

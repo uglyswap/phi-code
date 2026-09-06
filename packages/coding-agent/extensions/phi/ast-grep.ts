@@ -79,7 +79,9 @@ export default function (pi: ExtensionAPI) {
 			"Use $VAR for single-node wildcards and $$$ for multi-node wildcards in patterns.",
 		],
 		parameters: Type.Object({
-			pattern: Type.String({ description: "Structural pattern, e.g. 'fetch($URL)' or 'function $NAME($$$) { $$$ }'" }),
+			pattern: Type.String({
+				description: "Structural pattern, e.g. 'fetch($URL)' or 'function $NAME($$$) { $$$ }'",
+			}),
 			path: Type.Optional(Type.String({ description: "File or directory to search (default: current directory)" })),
 			lang: Type.Optional(
 				Type.String({ description: "Language override: ts, tsx, js, py, go, rs (default: inferred per file)" }),
@@ -96,13 +98,13 @@ export default function (pi: ExtensionAPI) {
 				for (const file of files) {
 					const lang = langForFile(file, p.lang);
 					if (!lang) continue;
-					let root;
+					let root: ReturnType<typeof parse>;
 					try {
 						root = parse(lang, readFileSync(file, "utf8"));
 					} catch {
 						continue; // unparseable file: skip
 					}
-					let nodes;
+					let nodes: ReturnType<ReturnType<typeof parse>["root"]["findAll"]>;
 					try {
 						nodes = root.root().findAll(p.pattern);
 					} catch {
@@ -121,9 +123,9 @@ export default function (pi: ExtensionAPI) {
 				}
 				if (matches.length === 0) {
 					return {
-					content: [{ type: "text", text: `No structural matches for pattern: ${p.pattern}` }],
-					details: { matchCount: 0, filesScanned: files.length },
-				};
+						content: [{ type: "text", text: `No structural matches for pattern: ${p.pattern}` }],
+						details: { matchCount: 0, filesScanned: files.length },
+					};
 				}
 				return {
 					content: [{ type: "text", text: matches.join("\n") }],
