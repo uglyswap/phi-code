@@ -24,8 +24,15 @@ export class SkillScanner {
 		const skills: Skill[] = [];
 		const seen = new Set<string>();
 
-		// Scan in precedence order: project > global > bundled (keep-first wins)
-		const dirs = [this.config.projectDir, this.config.globalDir, this.config.bundledDir];
+		// Scan in precedence order (keep-first wins):
+		// project > extra sources (claude/agents/codex/github) > global > bundled > managed
+		const dirs = [
+			this.config.projectDir,
+			...(this.config.extraDirs ?? []),
+			this.config.globalDir,
+			this.config.bundledDir,
+			...(this.config.managedDir ? [this.config.managedDir] : []),
+		];
 
 		for (const dir of dirs) {
 			if (!fs.existsSync(dir)) continue;
@@ -36,7 +43,7 @@ export class SkillScanner {
 				if (entry.isDirectory()) {
 					const skillPath = path.join(dir, entry.name);
 					const skill = this.loadSkill(skillPath);
-					if (skill && !seen.has(skill.name)) {
+					if (skill && !seen.has(skill.name) && !this.isIgnored(skill.name)) {
 						seen.add(skill.name);
 						skills.push(skill);
 					}
@@ -45,6 +52,18 @@ export class SkillScanner {
 		}
 
 		return skills;
+	}
+
+	/** Vrai si le skill est ignoré via config.ignoredSkills (exact ou glob *). */
+	private isIgnored(name: string): boolean {
+		for (const pattern of this.config.ignoredSkills ?? []) {
+			if (pattern === name) return true;
+			if (pattern.includes("*")) {
+				const regex = new RegExp("^" + pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$", "i");
+				if (regex.test(name)) return true;
+			}
+		}
+		return false;
 	}
 
 	/**

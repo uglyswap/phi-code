@@ -33,11 +33,21 @@ export default function skillLoaderExtension(pi: ExtensionAPI) {
 	// (== globalDir) in the installed layout. Probe both (the scanner dedupes
 	// by skill name).
 	const bundledCandidates = [join(__dirname, "..", "..", "skills"), join(homedir(), ".phi", "agent", "skills")];
+	const cwd = process.cwd();
 	const config: SkillsConfig = {
 		globalDir: join(homedir(), ".phi", "agent", "skills"),
-		projectDir: join(process.cwd(), ".phi", "skills"),
+		projectDir: join(cwd, ".phi", "skills"),
 		bundledDir: bundledCandidates.find((dir) => existsSync(dir)) ?? bundledCandidates[0],
 		autoInject: true,
+		// Ecosystem sources (omp-style discovery): reuse skills written for
+		// other agents. Ordered by precedence, first-wins on name dedup.
+		extraDirs: [
+			join(cwd, ".claude", "skills"),
+			join(cwd, ".agents", "skills"),
+			join(cwd, ".codex", "skills"),
+			join(cwd, ".github", "skills"),
+		],
+		managedDir: join(homedir(), ".phi", "agent", "managed-skills"),
 	};
 
 	const scanner = new SkillScanner(config);
@@ -85,6 +95,23 @@ export default function skillLoaderExtension(pi: ExtensionAPI) {
 			images: event.images,
 		};
 	});
+
+	// ─── /skill:<name> commands (one per discovered skill, omp-style) ──────
+	for (const skill of loader.listSkills()) {
+		pi.registerCommand(`skill:${skill.name}`, {
+			description: `Load the "${skill.name}" skill: ${skill.description}`.slice(0, 200),
+			handler: async (_args, ctx) => {
+				const content = loader.getSkillContext(skill.name);
+				if (!content) {
+					ctx.ui.notify(`Skill "${skill.name}" could not be loaded.`, "error");
+					return;
+				}
+				pi.sendUserMessage(
+					`Load and follow this skill for the rest of the session:\n\n${content}`,
+				);
+			},
+		});
+	}
 
 	// ─── /skills Command ─────────────────────────────────────────────
 

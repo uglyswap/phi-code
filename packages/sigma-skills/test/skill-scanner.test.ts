@@ -362,4 +362,64 @@ Use when testing the ${name} functionality.
 		mkdirSync(skillDir, { recursive: true });
 		writeFileSync(join(skillDir, "SKILL.md"), content);
 	}
+
+	test("scan should include extraDirs between project and global, first-wins on name", () => {
+		const claudeDir = join(tempDir, "claude");
+		mkdirSync(claudeDir, { recursive: true });
+		createTestSkill(claudeDir, "shared-skill", "From claude source");
+		createTestSkill(globalDir, "shared-skill", "From global (should lose)");
+		createTestSkill(claudeDir, "claude-only", "Only in claude");
+
+		const configWithExtra: SkillsConfig = {
+			globalDir,
+			projectDir,
+			bundledDir,
+			autoInject: false,
+			extraDirs: [claudeDir],
+		};
+		const multi = new SkillScanner(configWithExtra);
+		const skills = multi.scan();
+		const shared = skills.find((s) => s.name === "shared-skill");
+		assert(shared, "shared-skill should be found");
+		assert.equal(shared.description, "From claude source");
+		assert(skills.find((s) => s.name === "claude-only"), "claude-only should be found");
+	});
+
+	test("scan should include managedDir with lowest precedence", () => {
+		const managedDir = join(tempDir, "managed");
+		mkdirSync(managedDir, { recursive: true });
+		createTestSkill(managedDir, "learned-skill", "Auto-learned");
+		createTestSkill(managedDir, "bundled-skill", "Managed copy (should lose)");
+		createTestSkill(bundledDir, "bundled-skill", "Bundled original");
+
+		const configWithManaged: SkillsConfig = {
+			globalDir,
+			projectDir,
+			bundledDir,
+			autoInject: false,
+			managedDir,
+		};
+		const skills = new SkillScanner(configWithManaged).scan();
+		assert(skills.find((s) => s.name === "learned-skill"), "learned-skill should be found");
+		const bundled = skills.find((s) => s.name === "bundled-skill");
+		assert.equal(bundled?.description, "Bundled original");
+	});
+
+	test("scan should skip ignoredSkills (exact and glob)", () => {
+		createTestSkill(bundledDir, "secret-skill", "Should be hidden");
+		createTestSkill(bundledDir, "experimental-foo", "Should be hidden too");
+		createTestSkill(bundledDir, "normal-skill", "Visible");
+
+		const configIgnored: SkillsConfig = {
+			globalDir,
+			projectDir,
+			bundledDir,
+			autoInject: false,
+			ignoredSkills: ["secret-skill", "experimental-*"],
+		};
+		const skills = new SkillScanner(configIgnored).scan();
+		assert(!skills.find((s) => s.name === "secret-skill"));
+		assert(!skills.find((s) => s.name === "experimental-foo"));
+		assert(skills.find((s) => s.name === "normal-skill"));
+	});
 });
