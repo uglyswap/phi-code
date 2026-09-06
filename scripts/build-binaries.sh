@@ -16,12 +16,12 @@
 #
 # Output:
 #   packages/coding-agent/binaries/
-#     pi-darwin-arm64.tar.gz
-#     pi-darwin-x64.tar.gz
-#     pi-linux-x64.tar.gz
-#     pi-linux-arm64.tar.gz
-#     pi-windows-x64.zip
-#     pi-windows-arm64.zip
+#     phi-darwin-arm64.tar.gz
+#     phi-darwin-x64.tar.gz
+#     phi-linux-x64.tar.gz
+#     phi-linux-arm64.tar.gz
+#     phi-windows-x64.zip
+#     phi-windows-arm64.zip
 
 set -euo pipefail
 

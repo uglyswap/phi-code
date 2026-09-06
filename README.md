@@ -103,7 +103,7 @@ The setup wizard lets you:
 
 ## Architecture
 
-Phi Code is a monorepo with 7 packages:
+Phi Code is a monorepo with 19 packages:
 
 ```
 phi-code/
@@ -127,7 +127,7 @@ phi-code/
 1. **Extensions**: The loader scans 3 locations in order:
    - `.phi/extensions/` in the current project directory
    - `~/.phi/agent/extensions/` (global user extensions)
-   - Bundled extensions shipped with the package (8 extensions)
+   - Bundled extensions shipped with the package (17 extensions/modules under extensions/phi/, including memory, smart-router, orchestrator, web-search, benchmark, browser, MCP, goal, todo, btw, chrome)
    
 2. **Skills**: Listed in the system prompt as name + description only. The model reads the full skill content via the `read` tool only when relevant. Zero context overhead for unused skills.
 
@@ -151,7 +151,7 @@ Persistent memory with three automatic layers — zero configuration needed.
 | **Ontology** | JSONL graph in `~/.phi/memory/ontology/graph.jsonl` | ✅ via prompt guidelines | Entities, relations, project architecture mapping |
 | **Vectors** | SQLite + local embeddings in `~/.phi/memory/vectors.db` | ✅ auto-indexed on write | Semantic search across all documents |
 
-**8 tools registered:**
+**Tools registered:**
 
 | Tool | Description |
 |------|-------------|

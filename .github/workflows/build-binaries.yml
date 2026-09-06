@@ -61,7 +61,7 @@ jobs:
           ./scripts/create-source-archive.sh \
             --version "${VERSION}" \
             --ref HEAD \
-            --out "release-assets/pi-${VERSION}-source.tar.gz"
+            --out "release-assets/phi-${VERSION}-source.tar.gz"
 
       - name: Build binaries from source archive
         run: |
@@ -70,8 +70,8 @@ jobs:
           VERSION="${RELEASE_TAG#v}"
           build_root="$(mktemp -d)"
           trap 'rm -rf "${build_root}"' EXIT
-          tar -xzf "release-assets/pi-${VERSION}-source.tar.gz" -C "${build_root}"
-          "${build_root}/pi-${VERSION}/scripts/build-binaries.sh" \
+          tar -xzf "release-assets/phi-${VERSION}-source.tar.gz" -C "${build_root}"
+          "${build_root}/phi-${VERSION}/scripts/build-binaries.sh" \
             --offline-model-data \
             --out "${GITHUB_WORKSPACE}/packages/coding-agent/binaries"
 
@@ -85,18 +85,18 @@ jobs:
           VERSION="${VERSION#v}"  # Remove 'v' prefix
           node scripts/release-notes.mjs extract --version "${VERSION}" --tag "${RELEASE_TAG}" --out release-assets/RELEASE_NOTES.md
           node scripts/generate-coding-agent-install-lock.mjs --check
-          cp packages/coding-agent/install-lock/package.json release-assets/pi-coding-agent-install-package.json
-          cp packages/coding-agent/install-lock/package-lock.json release-assets/pi-coding-agent-install-package-lock.json
+          cp packages/coding-agent/install-lock/package.json release-assets/phi-coding-agent-install-package.json
+          cp packages/coding-agent/install-lock/package-lock.json release-assets/phi-coding-agent-install-package-lock.json
 
           cd packages/coding-agent/binaries
 
           binary_assets=(
-            pi-darwin-arm64.tar.gz
-            pi-darwin-x64.tar.gz
-            pi-linux-x64.tar.gz
-            pi-linux-arm64.tar.gz
-            pi-windows-x64.zip
-            pi-windows-arm64.zip
+            phi-darwin-arm64.tar.gz
+            phi-darwin-x64.tar.gz
+            phi-linux-x64.tar.gz
+            phi-linux-arm64.tar.gz
+            phi-windows-x64.zip
+            phi-windows-arm64.zip
           )
 
           for asset in "${binary_assets[@]}"; do
@@ -106,17 +106,17 @@ jobs:
           cp "${binary_assets[@]}" "${GITHUB_WORKSPACE}/release-assets/"
 
           cd "${GITHUB_WORKSPACE}/release-assets"
-          source_asset="pi-${VERSION}-source.tar.gz"
+          source_asset="phi-${VERSION}-source.tar.gz"
           release_assets=(
             "${source_asset}"
-            pi-darwin-arm64.tar.gz
-            pi-darwin-x64.tar.gz
-            pi-linux-x64.tar.gz
-            pi-linux-arm64.tar.gz
-            pi-windows-x64.zip
-            pi-windows-arm64.zip
-            pi-coding-agent-install-package.json
-            pi-coding-agent-install-package-lock.json
+            phi-darwin-arm64.tar.gz
+            phi-darwin-x64.tar.gz
+            phi-linux-x64.tar.gz
+            phi-linux-arm64.tar.gz
+            phi-windows-x64.zip
+            phi-windows-arm64.zip
+            phi-coding-agent-install-package.json
+            phi-coding-agent-install-package-lock.json
           )
           sha256sum "${release_assets[@]}" > SHA256SUMS
 
@@ -151,17 +151,17 @@ jobs:
           cd release-assets
 
           VERSION="${RELEASE_TAG#v}"
-          source_asset="pi-${VERSION}-source.tar.gz"
+          source_asset="phi-${VERSION}-source.tar.gz"
           expected_assets=(
             "${source_asset}"
-            pi-darwin-arm64.tar.gz
-            pi-darwin-x64.tar.gz
-            pi-linux-x64.tar.gz
-            pi-linux-arm64.tar.gz
-            pi-windows-x64.zip
-            pi-windows-arm64.zip
-            pi-coding-agent-install-package.json
-            pi-coding-agent-install-package-lock.json
+            phi-darwin-arm64.tar.gz
+            phi-darwin-x64.tar.gz
+            phi-linux-x64.tar.gz
+            phi-linux-arm64.tar.gz
+            phi-windows-x64.zip
+            phi-windows-arm64.zip
+            phi-coding-agent-install-package.json
+            phi-coding-agent-install-package-lock.json
             SHA256SUMS
             RELEASE_NOTES.md
           )
@@ -181,17 +181,17 @@ jobs:
           cd release-assets
 
           VERSION="${RELEASE_TAG#v}"
-          source_asset="pi-${VERSION}-source.tar.gz"
+          source_asset="phi-${VERSION}-source.tar.gz"
           release_assets=(
             "${source_asset}"
-            pi-darwin-arm64.tar.gz
-            pi-darwin-x64.tar.gz
-            pi-linux-x64.tar.gz
-            pi-linux-arm64.tar.gz
-            pi-windows-x64.zip
-            pi-windows-arm64.zip
-            pi-coding-agent-install-package.json
-            pi-coding-agent-install-package-lock.json
+            phi-darwin-arm64.tar.gz
+            phi-darwin-x64.tar.gz
+            phi-linux-x64.tar.gz
+            phi-linux-arm64.tar.gz
+            phi-windows-x64.zip
+            phi-windows-arm64.zip
+            phi-coding-agent-install-package.json
+            phi-coding-agent-install-package-lock.json
             SHA256SUMS
           )
 

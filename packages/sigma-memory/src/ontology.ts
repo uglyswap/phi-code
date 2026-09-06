@@ -197,6 +197,110 @@ export class OntologyManager {
 	}
 
 	/**
+	 * Ajoute un lot d'entités et de relations en une seule écriture verrouillée.
+	 * Les relations peuvent référencer les entités par nom (existantes ou du lot).
+	 * Validation complète avant écriture : si une relation ne résout pas, rien n'est persisté.
+	 */
+	addBatch(input: {
+		entities: Array<Omit<OntologyEntity, "id" | "createdAt" | "updatedAt">>;
+		relations?: Array<{
+			from?: string;
+			to?: string;
+			fromName?: string;
+			toName?: string;
+			type: string;
+			properties?: Record<string, string>;
+		}>;
+	}): { entityIds: string[]; relationIds: string[] } {
+		this.loadGraph();
+
+		const now = new Date().toISOString();
+		const entries: OntologyJSONLEntry[] = [];
+		const entityIds: string[] = [];
+		const relationIds: string[] = [];
+		const byName = new Map<string, string>();
+		for (const entity of this.entities.values()) {
+			byName.set(entity.name.toLowerCase(), entity.id);
+		}
+
+		for (const entity of input.entities) {
+			const id = this.generateId();
+			const newEntity: OntologyEntity = { ...entity, id, createdAt: now, updatedAt: now };
+			entityIds.push(id);
+			byName.set(newEntity.name.toLowerCase(), id);
+			entries.push({ kind: "entity", ...newEntity });
+		}
+
+		const resolveRef = (ref: string | undefined, name: string | undefined, label: string): string => {
+			if (ref) {
+				if (byName.get(ref.toLowerCase()) === ref || this.entities.has(ref) || entityIds.includes(ref)) return ref;
+				const byLower = byName.get(ref.toLowerCase());
+				if (byLower) return byLower;
+				throw new Error(`${label} entity not found: ${ref}`);
+			}
+			if (name) {
+				const id = byName.get(name.toLowerCase());
+				if (!id) throw new Error(`${label} entity not found: ${name}`);
+				return id;
+			}
+			throw new Error(`${label} entity reference missing (from/to or fromName/toName required)`);
+		};
+
+		for (const relation of input.relations ?? []) {
+			const from = resolveRef(relation.from, relation.fromName, "Source");
+			const to = resolveRef(relation.to, relation.toName, "Target");
+			const id = this.generateId();
+			const newRelation: OntologyRelation = {
+				from,
+				to,
+				type: relation.type,
+				properties: relation.properties ?? {},
+				id,
+				createdAt: now,
+			};
+			relationIds.push(id);
+			entries.push({ kind: "relation", ...newRelation });
+		}
+
+		// Single locked append for the whole batch
+		this.ensureDirectories();
+		const payload = entries.map((entry) => `${JSON.stringify(entry)}\n`).join("");
+		this.withGraphLock(() => {
+			appendFileSync(this.graphPath, payload, "utf8");
+		});
+		try {
+			this.lastMtimeMs = statSync(this.graphPath).mtimeMs;
+		} catch {
+			// best-effort
+		}
+
+		// Update in-memory state
+		for (const entry of entries) {
+			if (entry.kind === "entity") {
+				this.entities.set(entry.id, {
+					id: entry.id,
+					type: entry.type,
+					name: entry.name,
+					properties: entry.properties,
+					createdAt: entry.createdAt,
+					updatedAt: entry.updatedAt,
+				});
+			} else if (entry.kind === "relation") {
+				this.relations.set(entry.id, {
+					id: entry.id,
+					from: entry.from,
+					to: entry.to,
+					type: entry.type,
+					properties: entry.properties,
+					createdAt: entry.createdAt,
+				});
+			}
+		}
+
+		return { entityIds, relationIds };
+	}
+
+	/**
 	 * Ajoute une relation
 	 */
 	addRelation(relation: Omit<OntologyRelation, "id" | "createdAt">): string {

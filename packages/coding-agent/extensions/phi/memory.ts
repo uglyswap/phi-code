@@ -490,6 +490,63 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	pi.registerTool({
+		name: "ontology_batch_add",
+		label: "Ontology Batch Add",
+		description:
+			"Add multiple entities and relations to the project knowledge graph in a single call. Relations can reference entities by name (existing or from this batch). Prefer this over repeated ontology_add calls.",
+		promptGuidelines: [
+			"When mapping a project architecture, add ALL entities and relations in one ontology_batch_add call instead of many ontology_add calls.",
+		],
+		parameters: Type.Object({
+			entities: Type.Array(
+				Type.Object({
+					entityType: Type.String({ description: "Entity type (e.g. Project, Service, Library, Module)" }),
+					name: Type.String({ description: "Entity name" }),
+					properties: Type.Optional(Type.Record(Type.String(), Type.String())),
+				}),
+			),
+			relations: Type.Optional(
+				Type.Array(
+					Type.Object({
+						fromName: Type.String({ description: "Source entity name (existing or from this batch)" }),
+						toName: Type.String({ description: "Target entity name (existing or from this batch)" }),
+						relationType: Type.String({ description: "Relation type (e.g. 'uses', 'depends_on')" }),
+					}),
+				),
+			),
+		}),
+
+		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+			const p = params as any;
+			try {
+				const result = sigmaMemory.ontology.addBatch({
+					entities: (p.entities || []).map((e: any) => ({
+						type: e.entityType,
+						name: e.name,
+						properties: e.properties || {},
+					})),
+					relations: (p.relations || []).map((r: any) => ({
+						fromName: r.fromName,
+						toName: r.toName,
+						type: r.relationType,
+					})),
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Batch added: ${result.entityIds.length} entities, ${result.relationIds.length} relations.`,
+						},
+					],
+					details: result,
+				};
+			} catch (error) {
+				return { content: [{ type: "text", text: `Ontology batch error: ${error}` }], isError: true };
+			}
+		},
+	});
+
 	/**
 	 * Ontology query tool - Query the knowledge graph
 	 */
