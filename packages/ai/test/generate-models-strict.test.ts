@@ -12,7 +12,7 @@ afterEach(() => {
 	for (const root of temporaryRoots.splice(0)) rmSync(root, { force: true, recursive: true });
 });
 
-describe("strict model generation", () => {
+describe.skipIf(Number(process.versions.node.split(".")[0]) < 22)("strict model generation", () => {
 	it("fails before mutating generated data when an Individual model loses tool support", () => {
 		const fixtureRoot = mkdtempSync(join(tmpdir(), "pi-generate-models-"));
 		temporaryRoots.push(fixtureRoot);

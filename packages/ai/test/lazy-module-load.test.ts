@@ -56,7 +56,7 @@ function runProbe(action: string): ProbeResult {
 	return JSON.parse(lastLine) as ProbeResult;
 }
 
-describe("lazy provider module loading", () => {
+describe.skipIf(Number(process.versions.node.split(".")[0]) < 22)("lazy provider module loading", () => {
 	it("does not load provider SDKs when importing the root barrel", () => {
 		const result = runProbe("");
 		expect(result.loadedSpecifiers).toEqual([]);

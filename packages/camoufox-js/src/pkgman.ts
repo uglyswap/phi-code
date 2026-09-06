@@ -98,7 +98,7 @@ export const OS_ARCH_MATRIX: { [key: string]: string[] } = {
 	lin: ["x86_64", "arm64", "i686"],
 };
 
-const LAUNCH_FILE: { [key: string]: string } = {
+export const LAUNCH_FILE: { [key: string]: string } = {
 	win: "camoufox.exe",
 	mac: "../MacOS/camoufox",
 	lin: "camoufox-bin",

@@ -1,7 +1,10 @@
 import { mkdtempSync } from "node:fs";
 import { arch, platform, release, tmpdir } from "node:os";
 import { join } from "node:path";
-import { zstdDecompressSync } from "node:zlib";
+import * as zlib from "node:zlib";
+
+// Node < 22.15 has no zstd in node:zlib.
+const zstdDecompress = (zlib as { zstdDecompressSync?: (b: Uint8Array) => Uint8Array }).zstdDecompressSync;
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -41,7 +44,7 @@ function decodeCodexRequestBody(body: RequestInit["body"] | undefined): Record<s
 		return JSON.parse(body) as Record<string, unknown>;
 	}
 	if (body instanceof Uint8Array) {
-		return JSON.parse(Buffer.from(zstdDecompressSync(body)).toString("utf8")) as Record<string, unknown>;
+		return JSON.parse(Buffer.from(zstdDecompress?.(body) as Uint8Array).toString("utf8")) as Record<string, unknown>;
 	}
 	return null;
 }
@@ -2471,7 +2474,7 @@ describe("openai-codex streaming", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
-	it("zstd-compresses SSE request bodies", async () => {
+	it.skipIf(!zstdDecompress)("zstd-compresses SSE request bodies", async () => {
 		const token = mockToken();
 		const encoder = new TextEncoder();
 		const sse = buildSSEPayload({ status: "completed" });
@@ -2524,7 +2527,9 @@ describe("openai-codex streaming", () => {
 
 		expect(capturedEncoding).toBe("zstd");
 		expect(capturedBody).toBeInstanceOf(Uint8Array);
-		const decoded = JSON.parse(Buffer.from(zstdDecompressSync(capturedBody as Uint8Array)).toString("utf8")) as {
+		const decoded = JSON.parse(
+			Buffer.from(zstdDecompress?.(capturedBody as Uint8Array) as Uint8Array).toString("utf8"),
+		) as {
 			input: Array<{ content: Array<{ text: string }> }>;
 		};
 		expect(decoded.input[0].content[0].text).toBe(largeText);

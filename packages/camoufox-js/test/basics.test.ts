@@ -4,6 +4,15 @@ import { join } from "node:path";
 import { firefox } from "playwright-core";
 import { describe, expect, test } from "vitest";
 import { Camoufox, launchServer } from "../src";
+import { existsSync } from "node:fs";
+import { getPath, LAUNCH_FILE, OS_NAME } from "../src/pkgman";
+
+let camoufoxInstalled = false;
+try {
+	camoufoxInstalled = existsSync(getPath(LAUNCH_FILE[OS_NAME]));
+} catch {
+	camoufoxInstalled = false;
+}
 
 const TEST_CASES = [
 	{ os: "linux" as const, userAgentRegex: /Linux/i },
@@ -26,7 +35,7 @@ const ONE_BROWSER_MS = 45_000;
 const TWO_BROWSERS_MS = 90_000;
 
 
-describe.skipIf(process.platform !== "linux")("virtual display", () => {
+describe.skipIf(process.platform !== "linux" || !camoufoxInstalled)("virtual display", () => {
 	test("should launch", async () => {
 		const browser = await Camoufox({
 			os: "linux",
@@ -79,7 +88,7 @@ describe.skipIf(process.platform !== "linux")("virtual display", () => {
 	}, ONE_BROWSER_MS);
 });
 
-describe("Fingerprint consistency", () => {
+describe.skipIf(!camoufoxInstalled)("Fingerprint consistency", () => {
 	test.each(TEST_CASES)("User-Agent matches set OS ($os)", async ({
 		os,
 		userAgentRegex,
@@ -177,7 +186,7 @@ test("Persistent context works", async () => {
 	expect(readCookies).toEqual({ name: "value" });
 }, TWO_BROWSERS_MS);
 
-describe("Fingerprint injection", () => {
+describe.skipIf(!camoufoxInstalled)("Fingerprint injection", () => {
 	test("custom window size is applied", async () => {
 		const browser = await Camoufox({
 			headless: true,
