@@ -52,6 +52,7 @@
 		"postinstall": "node scripts/postinstall.cjs"
 	},
 	"dependencies": {
+		"@ast-grep/napi": "0.45.3",
 		"@mariozechner/jiti": "^2.6.5",
 		"@modelcontextprotocol/sdk": "^1.29.0",
 		"@phi-code-admin/browser": "^1.0.4",

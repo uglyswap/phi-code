@@ -3,6 +3,7 @@
  */
 
 import * as Diff from "diff";
+import { recoverByAnchors } from "./edit-hashline.ts";
 import { constants } from "fs";
 import { access, readFile } from "fs/promises";
 import { resolveToCwd } from "./path-utils.ts";
@@ -326,6 +327,26 @@ export function applyEditsToNormalizedContent(
 		const edit = normalizedEdits[i];
 		const matchResult = fuzzyFindText(replacementBaseContent, edit.oldText);
 		if (!matchResult.found) {
+			// Hashline anchor recovery: the file may have drifted since the model
+			// read it (lines edited or shifted). Recover the window by line-content
+			// hashes; only apply when the best window is unambiguous.
+			const recovery = recoverByAnchors(replacementBaseContent, edit.oldText);
+			if (recovery.found) {
+				const lines = replacementBaseContent.split("\n");
+				let matchIndex = 0;
+				for (let l = 0; l < recovery.startLine; l++) matchIndex += lines[l].length + 1;
+				let matchLength = 0;
+				for (let l = recovery.startLine; l < recovery.endLine; l++) {
+					matchLength += lines[l].length + (l < recovery.endLine - 1 ? 1 : 0);
+				}
+				matchedEdits.push({ editIndex: i, matchIndex, matchLength, newText: edit.newText });
+				continue;
+			}
+			if (recovery.ambiguous) {
+				throw new Error(
+					`edits[${i}] matched multiple drifted locations in ${path}. Re-read the file and provide more context.`,
+				);
+			}
 			throw getNotFoundError(path, i, normalizedEdits.length);
 		}
 
