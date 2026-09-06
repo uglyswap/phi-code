@@ -453,6 +453,8 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	label: string;
 	/** Description for LLM */
 	description: string;
+	/** Optional permission tier override ("read" | "write" | "exec"). When absent, the permission engine uses the built-in tier table (unknown tools default to "write"). */
+	permissionTier?: "read" | "write" | "exec";
 	/** Optional one-line snippet for the Available tools section in the default system prompt. Custom tools are omitted from that section when this is not provided. */
 	promptSnippet?: string;
 	/** Optional guideline bullets appended to the default system prompt Guidelines section when this tool is active. */
