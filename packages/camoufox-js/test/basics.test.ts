@@ -4,15 +4,8 @@ import { join } from "node:path";
 import { firefox } from "playwright-core";
 import { describe, expect, test } from "vitest";
 import { Camoufox, launchServer } from "../src";
-import { existsSync } from "node:fs";
-import { getPath, LAUNCH_FILE, OS_NAME } from "../src/pkgman";
-
-let camoufoxInstalled = false;
-try {
-	camoufoxInstalled = existsSync(getPath(LAUNCH_FILE[OS_NAME]));
-} catch {
-	camoufoxInstalled = false;
-}
+// Browser tests need the Camoufox binary downloaded; CI runners never have it.
+const camoufoxInstalled = !process.env.CI;
 
 const TEST_CASES = [
 	{ os: "linux" as const, userAgentRegex: /Linux/i },
