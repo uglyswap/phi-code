@@ -74,6 +74,9 @@ npm install -g @phi-code-admin/phi-code
 
 # Or run directly without installing
 npx @phi-code-admin/phi-code
+
+# Or install the standalone binary (no Node.js required)
+curl -fsSL https://raw.githubusercontent.com/uglyswap/phi-code/main/scripts/install.sh | sh
 ```
 
 ### First Run
@@ -81,10 +84,7 @@ npx @phi-code-admin/phi-code
 ```bash
 # Start Phi Code in the current directory
 phi
-
-# Initialize with the setup wizard (optional)
-phi
-# Then type: /phi-init
+# On a fresh install, the setup wizard is offered automatically (or run /setup anytime)
 ```
 
 The setup wizard lets you:
@@ -794,6 +794,22 @@ Commands are typed in the Phi Code terminal with a `/` prefix.
 | `/skills` | skill-loader | List all discovered skills with sources and descriptions |
 | `/routing` | smart-router | Show current routing configuration and model assignments |
 | `/search <query>` | web-search | Quick web search from the terminal |
+| `/theme` | theme | Pick the UI theme from 12 built-in themes (dark, light, gruvbox, tokyo-night, solarized, github, monokai, nord, catppuccin, high-contrast) |
+| `/permissions` | permissions | Show or adjust tool permission tiers (read/write/exec → allow/deny/prompt) |
+| `/mcp:import` | mcp | Import MCP servers from Claude Code, Codex, Gemini, Cursor and VS Code configs |
+| `/mcp add` | mcp | Interactive wizard to add an MCP server |
+| `/mcp:prompt` | mcp | List or invoke MCP server prompts |
+
+New built-in tools (always available to the agent):
+
+| Tool | Description |
+|------|-------------|
+| `ast_grep` | Structural code search by syntax-tree pattern (TypeScript, JavaScript, Python, Go, Rust) |
+| `lsp` | Language server intelligence: diagnostics, definition, references, hover (typescript-language-server, pyright, gopls, rust-analyzer) |
+| `ontology_batch_add` | Add multiple knowledge-graph entities and relations in one call |
+| `learn` | Capture a durable lesson, optionally promoted to an auto-loaded skill |
+
+Shell completions: `phi completions bash\|zsh\|fish`. User keybinding overrides: `~/.phi/agent/keybindings.json` (`/hotkeys` lists the active ones). Footer status line segments (model, git, tokens, cost, context) configurable via `statusLine.segments` in settings.
 
 Plus all of Pi's built-in commands: `/help`, `/model`, `/models`, `/tree`, `/fork`, `/compact`, `/changelog`, etc.
 
