@@ -26,7 +26,10 @@ module.exports = {
   testPathIgnorePatterns: [
     '/node_modules/',
     '/tests/e2e/',
-    '/tests/live/'
+    '/tests/live/',
+    // These suites boot a real camofox server and need the browser binary,
+    // which CI runners never download (postinstall is skipped). Skip them there.
+    ...(process.env.CI ? ['/tests/unit/cookies.test.js', '/tests/unit/security.test.js', '/tests/unit/tabRecycling.test.js'] : [])
   ],
   
   // Setup and teardown
