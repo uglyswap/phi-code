@@ -8,6 +8,7 @@
 import { createInterface } from "node:readline";
 import chalk from "chalk";
 import { type ImageContent, modelsAreEqual } from "phi-code-ai";
+import { handleCompletionsCommand } from "./cli/completions-command.ts";
 import { type Args, type Mode, parseArgs, printHelp } from "./cli/args.ts";
 import {
 	type AuthCheckResult,
@@ -600,6 +601,10 @@ export async function main(args: string[], options?: MainOptions) {
 			return;
 		}
 		process.exit(exitCode);
+		return;
+	}
+
+	if (handleCompletionsCommand(args)) {
 		return;
 	}
 
