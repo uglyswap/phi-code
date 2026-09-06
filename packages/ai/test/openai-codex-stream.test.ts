@@ -5,6 +5,7 @@ import * as zlib from "node:zlib";
 
 // Node < 22.15 has no zstd in node:zlib.
 const zstdDecompress = (zlib as { zstdDecompressSync?: (b: Uint8Array) => Uint8Array }).zstdDecompressSync;
+
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
