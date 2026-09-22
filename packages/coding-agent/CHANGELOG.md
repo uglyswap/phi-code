@@ -57,6 +57,32 @@ a real directory squatting a link's place.
 
 ## [Unreleased]
 
+### Fixed — the context window shown for a model was often a guess, not upstream's
+
+The footer, `/context`, `--list-models` and auto-compaction all size the window
+from the composed model object, and `applyModelsJson` upserts `models.json`
+entries ON TOP of the provider's catalog by id: a persisted model *replaces*
+the upstream definition instead of adding to it. `models.ts` persisted every
+model its live fetch returned — with a family-inferred window and `maxTokens:
+16384` — so upstream-published models rendered `/200k` while their real window
+was 1M, and compaction fired around 184k (measured on `opencode`/`opencode-go`:
+24 of the 30 persisted entries shadowed the catalog, e.g. `mimo-v2.6-pro` 200k
+vs 1 048 576).
+
+- New `providers/upstream-catalog.ts`: resolves what a provider's catalogs
+  describe — the pi.dev catalog (mirroring the runtime's rule that a remote body
+  older than the bundled snapshot is ignored) merged over the runtime's own
+  persisted overlay, plus a cross-provider lookup by model id for models no
+  provider-specific catalog knows yet.
+- `models.ts` persists only the upstream delta and, on every `session_start`,
+  drops entries upstream now describes and re-aligns the active model so the
+  running session shows the corrected window immediately (offline runs
+  reconcile from the stored overlay; no network is touched).
+- `setup.ts` applies the same filter when the wizard saves a provider catalog.
+- `/context` now reports where the window comes from (`upstream catalog`,
+  `persisted (inferred)`, `manual override`) and reverts to the composed value.
+- `test/upstream-catalog.test.ts` pins the overlay gate and the cross-provider lookup against a models-store fixture (offline, no network).
+
 ### Fixed — packages/web-ui compiles and builds against the 0.84.2 APIs again
 
 Upstream removed `packages/web-ui`; the fork keeps it, so it was left excluded from

@@ -13,9 +13,19 @@
  * /phi-init) in sync with each provider's upstream catalog — for instance
  * when OpenCode Go publishes a new model, a single `/models refresh` makes
  * it appear everywhere without restarting Phi Code.
+ *
+ * Context windows: the footer, `/context`, `--list-models` and auto-compaction
+ * all size the window from the composed model object, and a models.json entry
+ * REPLACES the upstream definition of the same id (see applyModelsJson). So a
+ * persisted model that upstream already publishes silently swaps its real
+ * context window for an inferred guess — the "/200k" on a 1M model. Every
+ * startup therefore reconciles models.json against the upstream catalog and
+ * drops the entries upstream knows, which is what keeps the displayed window
+ * correct for every model of every provider.
  */
 
 import { type ApiKeyStore, type ConfigWatcher, type ExtensionAPI, getApiKeyStore, getConfigWatcher } from "phi-code";
+import type { Model } from "phi-code-ai";
 // Static catalog read: moved to the compat entrypoint in pi 0.84.
 import { getModels } from "phi-code-ai/compat";
 import { formatWindow, inferContextWindow, parseContextWindow } from "./providers/context-window.ts";
@@ -25,6 +35,14 @@ import {
 	buildOpenCodeGoProviderConfig,
 	getOpenCodeGoModels,
 } from "./providers/opencode-go.ts";
+import {
+	offlineMode,
+	readOverlayCatalog,
+	resolveUpstreamById,
+	upstreamKnownIds,
+	type UpstreamModel,
+	type UpstreamOptions,
+} from "./providers/upstream-catalog.ts";
 
 const PROVIDER_DISPLAY: Record<string, string> = {
 	opencode: "OpenCode Zen",
@@ -82,19 +100,84 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
 	"lm-studio": "http://localhost:1234/v1",
 };
 
+/** Persist a provider's model catalog through the store (watcher muted: this is not a user edit). */
+function writeProviderModels(
+	store: ApiKeyStore,
+	watcher: ConfigWatcher,
+	providerId: string,
+	config: { baseUrl?: string; api?: string; apiKey?: string; models: unknown[] },
+): void {
+	watcher.muteForWrite("models_json_changed");
+	store.setKey(providerId, config.apiKey ?? "local", {
+		baseUrl: config.baseUrl,
+		api: config.api,
+		models: config.models,
+	});
+}
+
+function modelIdsOf(models: unknown[]): string[] {
+	return models
+		.map((entry) =>
+			typeof entry === "string" ? entry : ((entry as { id?: unknown } | null)?.id as string | undefined),
+		)
+		.filter((id): id is string => typeof id === "string" && id.length > 0);
+}
+
 /**
- * Built-in (models.generated.ts) model ids for a provider. Persisting only the
- * models NOT in this set keeps the rich built-in definitions (costs, image
- * input, thinking-level maps) authoritative — models.json carries just the
- * delta the static catalog does not know about yet.
+ * Drop models.json entries whose model the runtime already composes upstream.
+ * Kept entries are genuine upstream-unknown models; their windows are refreshed
+ * by the live pass below. Returns the number of entries removed.
  */
-function builtinModelIds(providerId: string): Set<string> {
-	try {
-		const models = getModels(providerId as Parameters<typeof getModels>[0]) as Array<{ id: string }>;
-		return new Set(models.map((m) => m.id));
-	} catch {
-		return new Set();
-	}
+function reconcileShadowedModels(
+	store: ApiKeyStore,
+	watcher: ConfigWatcher,
+	providerId: string,
+	known: ReadonlySet<string>,
+): number {
+	const stored = store.getProvider(providerId);
+	const models = Array.isArray(stored?.models) ? stored.models : [];
+	if (models.length === 0) return 0;
+
+	const survivors = models.filter((entry) => {
+		const id = typeof entry === "string" ? entry : (entry as { id?: unknown } | null)?.id;
+		return typeof id !== "string" || !known.has(id);
+	});
+	if (survivors.length === models.length) return 0;
+
+	writeProviderModels(store, watcher, providerId, {
+		baseUrl: stored?.baseUrl,
+		api: stored?.api,
+		apiKey: stored?.apiKey,
+		models: survivors,
+	});
+	return models.length - survivors.length;
+}
+
+/**
+ * Replace inferred windows/max-out values with metadata another provider's
+ * catalog publishes for the same model id (ids are global). Only consulted for
+ * models no provider-specific catalog describes.
+ */
+async function applyCrossProviderMetadata<T extends { id: string; contextWindow: number; maxTokens: number }>(
+	persisted: T[],
+	providerId: string,
+	options: UpstreamOptions,
+): Promise<T[]> {
+	const unknown = new Set(persisted.map((model) => model.id));
+	if (unknown.size === 0) return persisted;
+
+	const resolved: Map<string, UpstreamModel> = await resolveUpstreamById(unknown, [providerId], options);
+	if (resolved.size === 0) return persisted;
+
+	return persisted.map((model) => {
+		const upstream = resolved.get(model.id);
+		if (!upstream) return model;
+		return {
+			...model,
+			contextWindow: upstream.contextWindow ?? model.contextWindow,
+			maxTokens: upstream.maxTokens ?? model.maxTokens,
+		};
+	});
 }
 
 interface RefreshOutcome {
@@ -102,6 +185,12 @@ interface RefreshOutcome {
 	source: "live" | "cache" | "fallback" | "unsupported" | "skipped";
 	count: number;
 	error?: string;
+}
+
+interface ProviderSyncResult {
+	outcome: RefreshOutcome;
+	/** models.json entries dropped because the runtime composes them upstream. */
+	reconciled: number;
 }
 
 /**
@@ -116,50 +205,61 @@ async function refreshOpenCodeGo(
 	providerId: string,
 	apiKey: string | undefined,
 	stored: ReturnType<ApiKeyStore["getProvider"]>,
+	known: ReadonlySet<string>,
+	options: UpstreamOptions,
 ): Promise<RefreshOutcome> {
 	const { models, source } = await getOpenCodeGoModels({ apiKey, forceRefresh: true });
+	const previouslyPersisted = new Set(modelIdsOf(Array.isArray(stored?.models) ? stored.models : []));
 	const keyForBuild = apiKey ?? stored?.apiKey ?? "local";
 	const config =
 		providerId === "opencode-go-anthropic"
 			? buildOpenCodeGoAnthropicProviderConfig(keyForBuild, models)
 			: buildOpenCodeGoProviderConfig(keyForBuild, models);
 
-	// Persist only models the built-in catalog does not know yet; built-ins stay
-	// authoritative (costs, image input) and models.json carries the delta.
-	const builtin = builtinModelIds(providerId);
-	const newModels = config.models.filter((m) => !builtin.has(m.id));
+	// Persist only models the runtime does not already compose upstream; those
+	// definitions (window, max-out, costs, image input) stay authoritative and
+	// models.json carries just the delta.
+	const delta = config.models.filter((m) => !known.has(m.id));
+	const persisted = await applyCrossProviderMetadata(delta, providerId, options);
 
-	if (newModels.length === 0) {
+	if (persisted.length === 0) {
 		if (stored && Array.isArray(stored.models) && stored.models.length > 0) {
-			// Clean up previously persisted models that have since become built-in.
-			watcher.muteForWrite("models_json_changed");
-			store.setKey(providerId, stored.apiKey ?? apiKey ?? "local", {
+			// Clean up previously persisted models that upstream now describes.
+			writeProviderModels(store, watcher, providerId, {
 				baseUrl: stored.baseUrl ?? config.baseUrl,
 				api: stored.api ?? config.api,
+				apiKey: stored.apiKey ?? apiKey,
 				models: [],
 			});
 		}
 		return { provider: providerId, source: source === "fallback" ? "fallback" : "skipped", count: 0 };
 	}
 
-	watcher.muteForWrite("models_json_changed");
-	store.setKey(providerId, stored?.apiKey ?? apiKey ?? "local", {
+	writeProviderModels(store, watcher, providerId, {
 		baseUrl: stored?.baseUrl ?? config.baseUrl,
 		api: stored?.api ?? config.api,
-		models: newModels,
+		apiKey: stored?.apiKey ?? apiKey,
+		models: persisted,
 	});
 
 	const outcomeSource = source === "live" ? "live" : source === "cache" ? "cache" : "fallback";
-	return { provider: providerId, source: outcomeSource, count: newModels.length };
+	return {
+		provider: providerId,
+		source: outcomeSource,
+		count: persisted.filter((model) => !previouslyPersisted.has(model.id)).length,
+	};
 }
 
 async function refreshOne(
 	store: ApiKeyStore,
 	watcher: ConfigWatcher,
 	providerId: string,
-	resolvedApiKey?: string,
+	resolvedApiKey: string | undefined,
+	known: ReadonlySet<string>,
+	options: UpstreamOptions,
 ): Promise<RefreshOutcome> {
 	const stored = store.getProvider(providerId);
+	const previouslyPersisted = new Set(modelIdsOf(Array.isArray(stored?.models) ? stored.models : []));
 	// Prefer the key stored in models.json (resolved through the store: env-var
 	// names and "!cmd" values yield a usable key, "local" is a sentinel, an
 	// unresolved "$NAME" yields undefined), else the one resolved from
@@ -170,7 +270,7 @@ async function refreshOne(
 	// OpenCode Go is a provider pair the generic fetchLiveModels path can't express
 	// (and never handled the Anthropic side), so refresh it from the shared catalog.
 	if (providerId === "opencode-go" || providerId === "opencode-go-anthropic") {
-		return await refreshOpenCodeGo(store, watcher, providerId, apiKey, stored);
+		return await refreshOpenCodeGo(store, watcher, providerId, apiKey, stored, known, options);
 	}
 
 	resetLiveModelsCache(providerId);
@@ -184,10 +284,10 @@ async function refreshOne(
 		return { provider: providerId, source: "skipped", count: 0, error: result.error };
 	}
 
-	// Persist only the delta the built-in catalog does not know yet (see
-	// builtinModelIds). Built-in definitions keep their costs/capabilities.
-	const builtin = builtinModelIds(providerId);
-	const persisted = result.models.map(toPersistedModel).filter((m) => !builtin.has(m.id));
+	// Persist only the delta the runtime does not compose upstream (see
+	// upstreamKnownIds). Upstream definitions keep their costs/capabilities.
+	const delta = result.models.map(toPersistedModel).filter((m) => !known.has(m.id));
+	const persisted = await applyCrossProviderMetadata(delta, providerId, options);
 
 	// Preserve baseUrl/api/apiKey/headers from existing config; only models change.
 	const baseUrl = stored?.baseUrl ?? DEFAULT_BASE_URLS[providerId];
@@ -197,11 +297,11 @@ async function refreshOne(
 
 	if (persisted.length === 0) {
 		if (stored && Array.isArray(stored.models) && stored.models.length > 0) {
-			// Clean up previously persisted models that have since become built-in.
-			watcher.muteForWrite("models_json_changed");
-			store.setKey(providerId, stored.apiKey ?? "local", {
+			// Clean up previously persisted models that upstream now describes.
+			writeProviderModels(store, watcher, providerId, {
 				baseUrl,
 				api: stored.api,
+				apiKey: stored.apiKey,
 				models: [],
 			});
 		}
@@ -212,14 +312,19 @@ async function refreshOne(
 	// as a models_json_changed event (which would trigger a spurious reload +
 	// "Keys reloaded" notification). Mute per-write because refresh loops can
 	// exceed the ignore window between providers (cf. keys.ts).
-	watcher.muteForWrite("models_json_changed");
-	store.setKey(providerId, stored?.apiKey ?? "local", {
+	writeProviderModels(store, watcher, providerId, {
 		baseUrl,
 		api: stored?.api,
+		apiKey: stored?.apiKey,
 		models: persisted,
 	});
 
-	return { provider: providerId, source: result.source, count: persisted.length, error: result.error };
+	return {
+		provider: providerId,
+		source: result.source,
+		count: persisted.filter((model) => !previouslyPersisted.has(model.id)).length,
+		error: result.error,
+	};
 }
 
 export default function modelsExtension(pi: ExtensionAPI) {
@@ -269,6 +374,34 @@ export default function modelsExtension(pi: ExtensionAPI) {
 				return overrides?.[modelId]?.contextWindow;
 			};
 
+			/** Window of the persisted models.json entry, when the provider has one. */
+			const readPersistedWindow = (): number | undefined => {
+				const models = store.getProvider(provider)?.models as
+					| Array<{ id?: string; contextWindow?: number }>
+					| undefined;
+				const entry = (models ?? []).find((m) => m?.id === modelId);
+				return typeof entry?.contextWindow === "number" ? entry.contextWindow : undefined;
+			};
+
+			/**
+			 * Window the runtime composes for this model today: the pi.dev overlay
+			 * (synced from the runtime's own models-store) wins over the bundled
+			 * catalog, and both outrank any models.json guess.
+			 */
+			const composedWindow = (): number | undefined => {
+				const overlay = readOverlayCatalog(provider, store.configPath).models.find((m) => m.id === modelId);
+				if (overlay?.contextWindow !== undefined) return overlay.contextWindow;
+				try {
+					const bundled = getModels(provider as Parameters<typeof getModels>[0]) as Array<{
+						id: string;
+						contextWindow?: number;
+					}>;
+					return bundled.find((m) => m.id === modelId)?.contextWindow;
+				} catch {
+					return undefined;
+				}
+			};
+
 			const writeOverrides = (overrides: Record<string, unknown>): void => {
 				const stored = store.getProvider(provider) ?? {};
 				watcher.muteForWrite("models_json_changed");
@@ -277,9 +410,15 @@ export default function modelsExtension(pi: ExtensionAPI) {
 
 			try {
 				if (arg === "") {
-					const source = readOverrideWindow() !== undefined ? "manual override" : "provider / inferred";
+					const window = readOverrideWindow() ?? readPersistedWindow() ?? composedWindow();
+					const source =
+						readOverrideWindow() !== undefined
+							? "manual override"
+							: readPersistedWindow() !== undefined
+								? "persisted (upstream does not describe this model; value is inferred)"
+								: "upstream catalog";
 					ctx.ui.notify(
-						`**${modelId}** (\`${provider}\`) context window: \`${formatWindow(model.contextWindow)}\` (${source}).\n` +
+						`**${modelId}** (\`${provider}\`) context window: \`${formatWindow(window ?? model.contextWindow)}\` (${source}).\n` +
 							"Set the real value with `/context 256k`, `/context 1M`, or `/context 200000`. " +
 							"Reset to the detected value with `/context auto`.\n" +
 							"This is what determines when the conversation auto-compacts.",
@@ -300,13 +439,10 @@ export default function modelsExtension(pi: ExtensionAPI) {
 					}
 					writeOverrides(overrides);
 
-					// Revert the active model to the persisted/inferred window.
-					const persistedModels =
-						(store.getProvider(provider)?.models as Array<{ id?: string; contextWindow?: number }> | undefined) ??
-						[];
-					const persisted = persistedModels.find((m) => m?.id === modelId)?.contextWindow;
+					// Revert the active model to the composed window: the persisted delta
+					// when upstream does not describe the model, else the upstream value.
 					const reverted =
-						persisted && persisted > 0 ? persisted : inferContextWindow(modelId, undefined, provider);
+						readPersistedWindow() ?? composedWindow() ?? inferContextWindow(modelId, undefined, provider);
 					await pi.setModel({ ...model, contextWindow: reverted });
 					ctx.ui.notify(
 						`Cleared context override for **${modelId}**. Reverted to \`${formatWindow(reverted)}\`.`,
@@ -365,8 +501,7 @@ export default function modelsExtension(pi: ExtensionAPI) {
 			if (ageMin !== undefined) out += ` (cache age: ${ageMin}m)`;
 			out += "\n";
 			if (models.length > 0) {
-				const ids = models.map((m) => (typeof m === "string" ? m : m?.id)).filter(Boolean);
-				out += `    ${ids.join(", ")}\n`;
+				out += `    ${modelIdsOf(models).join(", ")}\n`;
 			}
 		}
 		out += `\nUse \`/models refresh\` to re-fetch from each provider's API.`;
@@ -412,11 +547,54 @@ export default function modelsExtension(pi: ExtensionAPI) {
 		return [...targets.values()];
 	}
 
-	// Background refresh on session_start so every new Phi Code session reflects
-	// the latest provider catalogs without the user typing `/models refresh`.
-	// Failures are silent — startup must never be blocked by upstream API hiccups.
+	/**
+	 * One provider pass: drop models.json entries the runtime already composes
+	 * upstream — their windows/max-out would shadow the real definition — then
+	 * refresh the remaining delta from the provider's live catalog.
+	 */
+	async function syncProvider(target: RefreshTarget, options: UpstreamOptions): Promise<ProviderSyncResult> {
+		const known = await upstreamKnownIds(target.id, options);
+		const reconciled = reconcileShadowedModels(store, watcher, target.id, known);
+		if (options.offline) {
+			// No network: the stored overlay still decides what upstream knows, so the
+			// context windows get corrected, but the live catalogs cannot be re-fetched.
+			return { outcome: { provider: target.id, source: "skipped", count: 0 }, reconciled };
+		}
+		const outcome = await refreshOne(store, watcher, target.id, target.resolvedApiKey, known, options).catch(
+			(err) => ({
+				provider: target.id,
+				source: "skipped" as const,
+				count: 0,
+				error: err instanceof Error ? err.message : String(err),
+			}),
+		);
+		return { outcome, reconciled };
+	}
+
+	/**
+	 * Re-point the active model at the freshly composed definition so the footer,
+	 * `/context` and auto-compaction use the corrected window in THIS session
+	 * instead of the object captured at startup.
+	 */
+	async function alignActiveModelWindow(
+		current: Model<any> | undefined,
+		find: (provider: string, modelId: string) => Model<any> | undefined,
+	): Promise<void> {
+		if (!current) return;
+		const refreshed = find(current.provider, current.id);
+		if (!refreshed || refreshed.contextWindow === current.contextWindow) return;
+		await pi.setModel(refreshed);
+	}
+
+	function upstreamOptions(): UpstreamOptions {
+		return { modelsJsonPath: store.configPath, offline: offlineMode() };
+	}
+
+	// Reconcile and refresh on session_start so every new Phi Code session shows
+	// the upstream context window for every model of every provider, without the
+	// user typing `/models refresh`. Failures are silent — startup must never be
+	// blocked by upstream API hiccups.
 	pi.on("session_start", async (_event, ctx) => {
-		if (process.env.PI_OFFLINE) return;
 		try {
 			store.load();
 		} catch {
@@ -428,25 +606,37 @@ export default function modelsExtension(pi: ExtensionAPI) {
 		// Fire-and-forget. Hot-reload via models_json_changed event surfaces results.
 		void (async () => {
 			let discovered = 0;
-			let changedProviders = 0;
+			let reconciled = 0;
+			const options = upstreamOptions();
 			for (const target of targets) {
-				const outcome = await refreshOne(store, watcher, target.id, target.resolvedApiKey).catch(() => undefined);
-				if (outcome && outcome.source === "live" && outcome.count > 0) {
-					changedProviders++;
-					discovered += outcome.count;
-				}
+				const { outcome, reconciled: removed } = await syncProvider(target, options);
+				reconciled += removed;
+				discovered += outcome.count;
 			}
-			if (changedProviders > 0) {
+			if (reconciled === 0 && discovered === 0) return;
+
+			if (reconciled > 0) {
+				// models.json no longer shadows upstream, so recompose before aligning:
+				// the active model must pick up the upstream window immediately.
 				try {
-					ctx.ui.notify(
-						`Discovered ${discovered} new model(s) across ${changedProviders} provider(s). See /model.`,
-						"info",
+					await ctx.modelRegistry.refresh({ allowNetwork: false });
+					await alignActiveModelWindow(ctx.model, (provider, modelId) =>
+						ctx.modelRegistry.find(provider, modelId),
 					);
 				} catch {
-					// notify may fail if the TUI is mid-shutdown — ignore
+					// registry unavailable — next startup still composes correctly
 				}
-				pi.events.emit("models_json_changed", { source: "session-start-refresh" });
 			}
+
+			const parts: string[] = [];
+			if (reconciled > 0) parts.push(`restored the upstream context window for ${reconciled} model(s)`);
+			if (discovered > 0) parts.push(`discovered ${discovered} new model(s)`);
+			try {
+				ctx.ui.notify(`Model catalog: ${parts.join(", ")}. See /model.`, "info");
+			} catch {
+				// notify may fail if the TUI is mid-shutdown — ignore
+			}
+			pi.events.emit("models_json_changed", { source: "session-start-refresh" });
 		})();
 	});
 
@@ -457,9 +647,12 @@ export default function modelsExtension(pi: ExtensionAPI) {
 				notify: (m: string, t?: "info" | "warning" | "error") => void;
 				setStatus?: (k: string, v?: string) => void;
 			};
+			model?: Model<any>;
 			modelRegistry: {
 				getAvailable(): Array<{ provider: string }>;
 				getApiKeyForProvider(provider: string): Promise<string | undefined>;
+				find(provider: string, modelId: string): Model<any> | undefined;
+				refresh(options?: { allowNetwork?: boolean }): Promise<unknown>;
 			};
 		},
 	): Promise<void> {
@@ -479,16 +672,25 @@ export default function modelsExtension(pi: ExtensionAPI) {
 		ctx.ui.setStatus?.("models-refresh", "Fetching live model catalogs...");
 
 		const outcomes: RefreshOutcome[] = [];
+		let reconciled = 0;
+		const options: UpstreamOptions = { ...upstreamOptions(), force: true };
 		for (const t of targets) {
-			const outcome = await refreshOne(store, watcher, t.id, t.resolvedApiKey).catch((err) => ({
-				provider: t.id,
-				source: "skipped" as const,
-				count: 0,
-				error: err instanceof Error ? err.message : String(err),
-			}));
+			const { outcome, reconciled: removed } = await syncProvider(t, options);
 			outcomes.push(outcome);
+			reconciled += removed;
 		}
 		ctx.ui.setStatus?.("models-refresh", undefined);
+
+		if (reconciled > 0) {
+			try {
+				await ctx.modelRegistry.refresh({ allowNetwork: false });
+				await alignActiveModelWindow(ctx.model, (provider, modelId) =>
+					ctx.modelRegistry.find(provider, modelId),
+				);
+			} catch {
+				// registry unavailable — the next startup composes correctly
+			}
+		}
 
 		let out = "**Refresh report:**\n";
 		for (const o of outcomes) {
@@ -496,8 +698,12 @@ export default function modelsExtension(pi: ExtensionAPI) {
 				o.source === "live" ? "[ok]" : o.source === "fallback" ? "[fb]" : o.source === "cache" ? "[c]" : "[--]";
 			out += `  ${icon} ${displayName(o.provider)} \`${o.provider}\` — ${o.count} new model(s) (${o.source}${o.error ? `, ${o.error}` : ""})\n`;
 		}
-		out += `\nOnly models missing from the built-in catalog are persisted to \`${store.configPath}\`;\n`;
-		out += `built-in models stay available either way. \`/model\` picker reflects the merged catalog.`;
+		if (reconciled > 0) {
+			out += `  [ctx] dropped ${reconciled} persisted model(s) the upstream catalog describes better ` +
+				"(their real context window now comes from upstream).\n";
+		}
+		out += `\nOnly models the bundled catalog and the pi.dev catalog do not describe are persisted to \`${store.configPath}\`;\n`;
+		out += `every other model keeps its upstream context window. \`/model\` picker reflects the merged catalog.`;
 		ctx.ui.notify(out, "info");
 		pi.events.emit("models_json_changed", { source: "models-refresh" });
 	}

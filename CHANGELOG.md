@@ -22,6 +22,7 @@
 > The authoritative release history lives in `packages/coding-agent/CHANGELOG.md`. This root file summarizes fork-level additions.
 
 ### Fixed
+- Context windows: the footer, `/context` and `--list-models` showed an inferred guess instead of the upstream window whenever the model was also persisted in `models.json` (an entry replaces the provider catalog definition by id). `models.json` now carries only the upstream delta and is reconciled on every `session_start`.
 - Build break on main: explicit `TApi` generic in the Cloudflare AI Gateway provider (TS2353)
 - `scripts/local-release.mjs` rebrand (phi-code-monorepo, `phi` launchers, `phi-*` archives, `npm run test` instead of missing `test.sh`)
 - Missing `pi-test.ps1` invoked by `pi-test.bat` on Windows

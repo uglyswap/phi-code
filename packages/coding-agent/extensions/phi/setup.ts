@@ -36,6 +36,7 @@ import {
 } from "./providers/alibaba.ts";
 import { getProviderCatalog, type ProviderCatalogEntry } from "./providers/catalog.ts";
 import { fetchLiveModels, pingProvider, toPersistedModel } from "./providers/live-models.ts";
+import { offlineMode, upstreamKnownIds } from "./providers/upstream-catalog.ts";
 import {
 	buildOpenCodeGoAnthropicProviderConfig,
 	buildOpenCodeGoProviderConfig,
@@ -316,30 +317,41 @@ async function configureOpenCodeGo(
 	ui.setStatus("setup-fetch", undefined);
 
 	ui.notify(`Fetched ${models.length} OpenCode Go models (source: ${source}).`, "info");
+
+	// Only models no upstream catalog describes are persisted: a models.json entry
+	// replaces the upstream definition (context window, costs, compat) for that id.
+	const known = await upstreamKnownIds("opencode-go", {
+		modelsJsonPath: store.configPath,
+		offline: offlineMode(),
+	});
+
 	const config = buildOpenCodeGoProviderConfig(trimmed, models);
+	const openAiCompat = config.models.filter((model) => !known.has(model.id));
 	store.setKey("opencode-go", trimmed, {
 		baseUrl: config.baseUrl,
 		api: config.api,
-		models: config.models,
+		models: openAiCompat,
 	});
 
 	// Qwen / MiniMax are only served via the Anthropic-compatible endpoint on
 	// OpenCode Go, so they go to a separate provider (the OpenAI shim 401s them).
 	const anthConfig = buildOpenCodeGoAnthropicProviderConfig(trimmed, models);
-	if (anthConfig.models.length > 0) {
+	const anthropicCompat = anthConfig.models.filter((model) => !known.has(model.id));
+	if (anthropicCompat.length > 0) {
 		store.setKey("opencode-go-anthropic", trimmed, {
 			baseUrl: anthConfig.baseUrl,
 			api: anthConfig.api,
-			models: anthConfig.models,
+			models: anthropicCompat,
 		});
 	}
 
 	ui.notify(
 		`OpenCode Go configured: \`${maskKeyForDisplay(trimmed)}\` ` +
-			`(${config.models.length} OpenAI-compat + ${anthConfig.models.length} Anthropic-compat models)`,
+			`(${openAiCompat.length} OpenAI-compat + ${anthropicCompat.length} Anthropic-compat models persisted).\n` +
+			`The other models keep the context windows the built-in and pi.dev catalogs publish.`,
 		"info",
 	);
-	return { providerId: "opencode-go", modelCount: models.length };
+	return { providerId: "opencode-go", modelCount: openAiCompat.length + anthropicCompat.length };
 }
 
 async function configureGenericCloud(
@@ -414,9 +426,20 @@ async function configureGenericCloud(
 	});
 	ui.setStatus("setup-fetch", undefined);
 
+	const known = await upstreamKnownIds(provider.id, {
+		modelsJsonPath: store.configPath,
+		offline: offlineMode(),
+	});
+
 	const models = (
 		live.models.length > 0 ? live.models : provider.staticModels.map((id) => ({ id, name: id, reasoning: true }))
-	).map(toPersistedModel);
+	)
+		.map(toPersistedModel)
+		// Only models no upstream catalog describes are persisted: a models.json
+		// entry replaces the upstream definition (context window, costs, compat)
+		// for that id, so persisting a known model would put a guessed window on
+		// screen and compact the conversation far too early.
+		.filter((model) => !known.has(model.id));
 
 	watcher.muteForWrite("models_json_changed");
 	store.setKey(provider.id, trimmed, {
@@ -426,7 +449,8 @@ async function configureGenericCloud(
 	});
 
 	ui.notify(
-		`${provider.displayName} configured: \`${maskKeyForDisplay(trimmed)}\` (${models.length} models, source: ${live.source}${live.error ? `, ${live.error}` : ""})`,
+		`${provider.displayName} configured: \`${maskKeyForDisplay(trimmed)}\` (${models.length} models persisted, source: ${live.source}${live.error ? `, ${live.error}` : ""}).\n` +
+			`${known.size} further model(s) come from the built-in and pi.dev catalogs with their real context windows.`,
 		"info",
 	);
 	return { providerId: provider.id, modelCount: models.length };

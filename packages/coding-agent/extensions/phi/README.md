@@ -16,7 +16,7 @@
 | **Init** | `init.ts` | — | `/phi-init` | — |
 | **Setup** | `setup.ts` | — | `/setup` | — |
 | **Keys** | `keys.ts` | — | `/keys` | `session_start` (hot-reload watcher) |
-| **Models** | `models.ts` | — | `/models` | `session_start` (background catalog refresh) |
+| **Models** | `models.ts` | — | `/models`, `/context` | `session_start` (catalog + context-window reconcile) |
 | **Browser** | `browser.ts` | `browser_navigate`, `browser_extract`, `browser_screenshot`, `browser_search`, `browser_click`, `browser_type`, `browser_scroll`, `browser_snapshot`, `browser_close_tab`, `browser_list_tabs` | — | `session_shutdown` (kill Firefox) |
 
 ## Bundled browser engine (Camoufox)
@@ -59,6 +59,26 @@ provider publishes a new model:
 
 A static fallback (`providers/live-models.ts`) ships with each release so
 the wizards still work offline.
+
+### models.json holds only the upstream delta
+
+`~/.phi/agent/models.json` persists **only** the models no catalog describes:
+the bundled static catalog (`models.generated.ts`) and the pi.dev catalog
+(`providers/upstream-catalog.ts`) are authoritative. A models.json entry for a
+model upstream already publishes *replaces* that definition at composition time
+(`applyModelsJson` upserts by id), so persisting a known model would swap its
+real context window for an inferred guess — a 1M model rendering `/200k` in the
+footer and auto-compacting five times too early.
+
+  - On every `session_start`, `models.ts` drops the entries upstream describes
+    (live or from the runtime's persisted overlay) and keeps the rest.
+  - Windows for the remaining upstream-unknown models are re-derived on every
+    startup: provider API value first, then a cross-provider catalog lookup for
+    the same model id, then family heuristics.
+  - `/context` prints the effective window *and* where it comes from
+    (`upstream catalog`, `persisted (inferred)`, or `manual override`).
+  - `/context 256k` pins a manual value in `modelOverrides` (topmost layer,
+    survives refreshes); `/context auto` clears it.
 
 ## Benchmark Categories
 

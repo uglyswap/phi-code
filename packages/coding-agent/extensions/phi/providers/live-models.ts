@@ -465,14 +465,16 @@ export async function pingProvider(
  * Map a LiveModel to the persisted models.json model shape (used by ApiKeyStore.setKey).
  * Reasonable defaults are applied when the upstream API omits a field.
  */
-export function toPersistedModel(m: LiveModel): {
+export interface PersistedModel {
 	id: string;
 	name: string;
 	reasoning: boolean;
 	input: readonly ["text"];
 	contextWindow: number;
 	maxTokens: number;
-} {
+}
+
+export function toPersistedModel(m: LiveModel): PersistedModel {
 	return {
 		id: m.id,
 		name: m.name ?? m.id,
