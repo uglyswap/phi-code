@@ -25,8 +25,8 @@
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { getBuiltinModelDataGeneratedAt } from "phi-code-ai/providers/all";
 import { getModels } from "phi-code-ai/compat";
+import { getBuiltinModelDataGeneratedAt } from "phi-code-ai/providers/all";
 
 export const UPSTREAM_CATALOG_BASE_URL = "https://pi.dev";
 
@@ -191,9 +191,7 @@ export async function fetchUpstreamCatalog(
 		if (response.ok) {
 			const lastModified = Date.parse(response.headers.get("last-modified") ?? "");
 			const body = await response.json();
-			result = overlayApplies(Number.isNaN(lastModified) ? undefined : lastModified)
-				? parseCatalog(body)
-				: [];
+			result = overlayApplies(Number.isNaN(lastModified) ? undefined : lastModified) ? parseCatalog(body) : [];
 		}
 	} catch {
 		// offline / timeout / malformed body — callers fall back to the overlay
@@ -209,17 +207,9 @@ export async function fetchUpstreamCatalog(
  * the runtime's revalidation window, otherwise the live pi.dev catalog merged
  * over the overlay, so a stale cache still covers what it knows.
  */
-export async function loadUpstreamCatalog(
-	providerId: string,
-	options: UpstreamOptions,
-): Promise<UpstreamModel[]> {
+export async function loadUpstreamCatalog(providerId: string, options: UpstreamOptions): Promise<UpstreamModel[]> {
 	const overlay = readOverlayCatalog(providerId, options.modelsJsonPath);
-	if (
-		!options.force &&
-		overlay.models.length > 0 &&
-		overlay.ageMs !== undefined &&
-		overlay.ageMs < OVERLAY_FRESH_MS
-	) {
+	if (!options.force && overlay.models.length > 0 && overlay.ageMs !== undefined && overlay.ageMs < OVERLAY_FRESH_MS) {
 		return overlay.models;
 	}
 	if (options.offline) return overlay.models;

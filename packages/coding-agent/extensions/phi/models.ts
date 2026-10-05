@@ -39,9 +39,9 @@ import {
 	offlineMode,
 	readOverlayCatalog,
 	resolveUpstreamById,
-	upstreamKnownIds,
 	type UpstreamModel,
 	type UpstreamOptions,
+	upstreamKnownIds,
 } from "./providers/upstream-catalog.ts";
 
 const PROVIDER_DISPLAY: Record<string, string> = {
@@ -684,9 +684,7 @@ export default function modelsExtension(pi: ExtensionAPI) {
 		if (reconciled > 0) {
 			try {
 				await ctx.modelRegistry.refresh({ allowNetwork: false });
-				await alignActiveModelWindow(ctx.model, (provider, modelId) =>
-					ctx.modelRegistry.find(provider, modelId),
-				);
+				await alignActiveModelWindow(ctx.model, (provider, modelId) => ctx.modelRegistry.find(provider, modelId));
 			} catch {
 				// registry unavailable — the next startup composes correctly
 			}
@@ -699,7 +697,8 @@ export default function modelsExtension(pi: ExtensionAPI) {
 			out += `  ${icon} ${displayName(o.provider)} \`${o.provider}\` — ${o.count} new model(s) (${o.source}${o.error ? `, ${o.error}` : ""})\n`;
 		}
 		if (reconciled > 0) {
-			out += `  [ctx] dropped ${reconciled} persisted model(s) the upstream catalog describes better ` +
+			out +=
+				`  [ctx] dropped ${reconciled} persisted model(s) the upstream catalog describes better ` +
 				"(their real context window now comes from upstream).\n";
 		}
 		out += `\nOnly models the bundled catalog and the pi.dev catalog do not describe are persisted to \`${store.configPath}\`;\n`;

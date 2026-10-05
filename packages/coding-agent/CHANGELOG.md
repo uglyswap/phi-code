@@ -1,119 +1,6 @@
 # Changelog
 
-## [0.99.0]
-
-### Added
-- **Hashline anchor recovery** in `edit`: when exact and fuzzy matching fail because the file drifted, edits recover via per-line content anchors (unambiguous windows only) instead of erroring out
-- **`ast_grep` tool**: structural code search by syntax-tree pattern (TypeScript, JavaScript, Python, Go, Rust)
-- **`lsp` tool**: language-server diagnostics, definition, references, hover (typescript-language-server, pyright, gopls, rust-analyzer); wired into the `/debug` playbook
-- **Permission system**: read/write/exec tiers with allow/deny/prompt policies and pattern rules (`~/.phi/agent/permissions.json`, `.phi/permissions.json`), `/permissions` command. No config = legacy allow-everything behavior
-- **Segmented status line**: configurable footer segments (model, git branch + dirty marker, tokens, cache, session cost in USD, context %) via `statusLine.segments`
-- **Theme pack**: 10 additional built-in themes (gruvbox, tokyo-night, solarized dark/light, github dark/light, monokai, nord, catppuccin-mocha, high-contrast) + `/theme` selector
-- **First-run setup**: the `/setup` wizard is offered automatically on a fresh install
-- **Parallel sub-agents**: bounded fan-out executor with per-agent git worktree isolation, explicit merge-conflict reports, live `/agents` view with kill; `/plan --fanout` runs on it
-- **Skills**: multi-source discovery (.claude/.agents/.codex/.github skills dirs), `ignoredSkills` filter, `learn` tool with managed-skill promotion
-- **MCP**: `/mcp:import` (imports Claude Code, Codex, Gemini, Cursor, VS Code configs), `/mcp add` wizard, `/mcp:prompt`
-- **`ontology_batch_add`** tool: batch knowledge-graph writes in a single locked append
-- **Shell completions**: `phi completions bash|zsh|fish`
-- **Standalone installer**: `scripts/install.sh` / `install.ps1` with sha256 verification
-
-### Fixed
-- Build break: explicit `TApi` generic in the Cloudflare AI Gateway provider (TS2353)
-- Release pipeline rebranded to phi (`local-release.mjs`, `phi-*` assets, missing `pi-test.ps1` created)
-- `publish.mjs` no longer throws on independent package version lines
-- `mom` agent model configurable via `MOM_MODEL`
-
-## [0.98.2]
-
-### Fixed — a stale link in ~/.phi made the package impossible to install
-
-`npm install @phi-code-admin/phi-code` aborted on Windows whenever
-`~/.phi/agent/extensions/node_modules/` still held a link from an earlier install
-whose target had since been deleted. The postinstall exits non-zero, so npm rolled
-the whole package back: the agent could not be installed at all, and neither could
-`@phi-code-admin/mom`, which depends on it. A home directory that had never seen
-phi was unaffected, which is why the release went out green.
-
-The chain, each step verified against the real filesystem:
-
-- `existsSync(dest)` follows the link, so a dangling one reads as absent and the
-  removal step was skipped.
-- `symlinkSync` then failed with `EEXIST` — the link was still there.
-- The copy fallback ran against that dangling link, and `cpSync` does not throw on
-  it: it kills the process (`STATUS_STACK_BUFFER_OVERRUN`, exit `0xC0000409`).
-  No `catch` could run.
-- `rmSync` would not have helped either: with or without `force`, it tries to
-  enumerate the missing target and leaves the link in place — silently, with
-  `force`. `unlinkSync`/`rmdirSync` act on the link itself.
-
-Removal is now driven by `lstatSync` (which does not follow the link) and uses
-`unlinkSync`/`rmdirSync` for a link, `rmSync` for a real directory. The copy
-fallback also dereferences its source, so a workspace-symlinked package is copied
-by content rather than handed to `cpSync` as a link.
-
-Covered by `scripts/coding-agent-postinstall.test.mjs` (3 cases, run by
-`npm test`): a first install, an install over a dangling link, and an install over
-a real directory squatting a link's place.
-
-## [Unreleased]
-
-### Fixed — the context window shown for a model was often a guess, not upstream's
-
-The footer, `/context`, `--list-models` and auto-compaction all size the window
-from the composed model object, and `applyModelsJson` upserts `models.json`
-entries ON TOP of the provider's catalog by id: a persisted model *replaces*
-the upstream definition instead of adding to it. `models.ts` persisted every
-model its live fetch returned — with a family-inferred window and `maxTokens:
-16384` — so upstream-published models rendered `/200k` while their real window
-was 1M, and compaction fired around 184k (measured on `opencode`/`opencode-go`:
-24 of the 30 persisted entries shadowed the catalog, e.g. `mimo-v2.6-pro` 200k
-vs 1 048 576).
-
-- New `providers/upstream-catalog.ts`: resolves what a provider's catalogs
-  describe — the pi.dev catalog (mirroring the runtime's rule that a remote body
-  older than the bundled snapshot is ignored) merged over the runtime's own
-  persisted overlay, plus a cross-provider lookup by model id for models no
-  provider-specific catalog knows yet.
-- `models.ts` persists only the upstream delta and, on every `session_start`,
-  drops entries upstream now describes and re-aligns the active model so the
-  running session shows the corrected window immediately (offline runs
-  reconcile from the stored overlay; no network is touched).
-- `setup.ts` applies the same filter when the wizard saves a provider catalog.
-- `/context` now reports where the window comes from (`upstream catalog`,
-  `persisted (inferred)`, `manual override`) and reverts to the composed value.
-- `test/upstream-catalog.test.ts` pins the overlay gate and the cross-provider lookup against a models-store fixture (offline, no network).
-
-### Fixed — packages/web-ui compiles and builds against the 0.84.2 APIs again
-
-Upstream removed `packages/web-ui`; the fork keeps it, so it was left excluded from
-the typecheck after the merge. It is now back in the quality gates
-(`npm run check:web-ui`, wired into `npm run check`) and in the build chain.
-
-- Symbols moved to the compat entrypoint: `streamSimple`, `complete`, `getModel`,
-  `getModels`, `getProviders` now come from `phi-code-ai/compat`.
-- `Agent.streamFn` became the read/write `streamFunction` and a required constructor
-  option. `AgentInterface` upgrades it to the proxy-aware variant as before, and the
-  example passes `streamFn: streamSimple` explicitly.
-- `tsconfig.build.json` gained `allowImportingTsExtensions` +
-  `rewriteRelativeImportExtensions`: the source references `.ts`, the emit is `.js`.
-- Constructor parameter properties replaced by explicit fields (`erasableSyntaxOnly`).
-- **`packages/web-ui/example` was dropped from the npm workspaces by the merge**
-  (upstream's list no longer had it), so its dependencies were never installed and
-  `vite build` failed on a missing `@tailwindcss/vite`. Restored.
-- **The "test API key" button reported a valid key as invalid** for xAI and Z.ai: it
-  probed a hardcoded model id, and both lost theirs in the 0.84 catalogue. The probe
-  model is now resolved from the catalogue — preferred ids first, then the provider's
-  cheapest listed model — so a catalogue refresh cannot silently break key validation
-  again.
-
-The last three packages sitting under a third party's npm scope are renamed too, so
-the whole workspace now lives under the fork's own names:
-`@mariozechner/pi-web-ui` → `@phi-code-admin/web-ui` (private),
-`@mariozechner/pi-mom` → `@phi-code-admin/mom`, and
-`@mariozechner/pi` → `@phi-code-admin/pods` (binary `pi-pods` → `phi-pods`, which
-collided with the upstream pi tooling).
-
-Nothing published changed: web-ui is private and no published package was touched.
+## [0.99.1] - 2026-10-05
 
 ### Fixed — the published package could not start: two extensions imported a path that only exists in the checkout
 
@@ -178,6 +65,121 @@ Four further defects in the same file were found while verifying that, and are f
   awaits indexing and reports the outcome, with `details.vectorIndexed` / `details.vectorError`.
 
 The last defect is why the tool could report success without indexing anything.
+
+### Fixed — the context window shown for a model was often a guess, not upstream's
+
+The footer, `/context`, `--list-models` and auto-compaction all size the window
+from the composed model object, and `applyModelsJson` upserts `models.json`
+entries ON TOP of the provider's catalog by id: a persisted model *replaces*
+the upstream definition instead of adding to it. `models.ts` persisted every
+model its live fetch returned — with a family-inferred window and `maxTokens:
+16384` — so upstream-published models rendered `/200k` while their real window
+was 1M, and compaction fired around 184k (measured on `opencode`/`opencode-go`:
+24 of the 30 persisted entries shadowed the catalog, e.g. `mimo-v2.6-pro` 200k
+vs 1 048 576).
+
+- New `providers/upstream-catalog.ts`: resolves what a provider's catalogs
+  describe — the pi.dev catalog (mirroring the runtime's rule that a remote body
+  older than the bundled snapshot is ignored) merged over the runtime's own
+  persisted overlay, plus a cross-provider lookup by model id for models no
+  provider-specific catalog knows yet.
+- `models.ts` persists only the upstream delta and, on every `session_start`,
+  drops entries upstream now describes and re-aligns the active model so the
+  running session shows the corrected window immediately (offline runs
+  reconcile from the stored overlay; no network is touched).
+- `setup.ts` applies the same filter when the wizard saves a provider catalog.
+- `/context` now reports where the window comes from (`upstream catalog`,
+  `persisted (inferred)`, `manual override`) and reverts to the composed value.
+- `test/upstream-catalog.test.ts` pins the overlay gate and the cross-provider lookup against a models-store fixture (offline, no network).
+
+## [0.99.0]
+
+### Added
+- **Hashline anchor recovery** in `edit`: when exact and fuzzy matching fail because the file drifted, edits recover via per-line content anchors (unambiguous windows only) instead of erroring out
+- **`ast_grep` tool**: structural code search by syntax-tree pattern (TypeScript, JavaScript, Python, Go, Rust)
+- **`lsp` tool**: language-server diagnostics, definition, references, hover (typescript-language-server, pyright, gopls, rust-analyzer); wired into the `/debug` playbook
+- **Permission system**: read/write/exec tiers with allow/deny/prompt policies and pattern rules (`~/.phi/agent/permissions.json`, `.phi/permissions.json`), `/permissions` command. No config = legacy allow-everything behavior
+- **Segmented status line**: configurable footer segments (model, git branch + dirty marker, tokens, cache, session cost in USD, context %) via `statusLine.segments`
+- **Theme pack**: 10 additional built-in themes (gruvbox, tokyo-night, solarized dark/light, github dark/light, monokai, nord, catppuccin-mocha, high-contrast) + `/theme` selector
+- **First-run setup**: the `/setup` wizard is offered automatically on a fresh install
+- **Parallel sub-agents**: bounded fan-out executor with per-agent git worktree isolation, explicit merge-conflict reports, live `/agents` view with kill; `/plan --fanout` runs on it
+- **Skills**: multi-source discovery (.claude/.agents/.codex/.github skills dirs), `ignoredSkills` filter, `learn` tool with managed-skill promotion
+- **MCP**: `/mcp:import` (imports Claude Code, Codex, Gemini, Cursor, VS Code configs), `/mcp add` wizard, `/mcp:prompt`
+- **`ontology_batch_add`** tool: batch knowledge-graph writes in a single locked append
+- **Shell completions**: `phi completions bash|zsh|fish`
+- **Standalone installer**: `scripts/install.sh` / `install.ps1` with sha256 verification
+
+### Fixed
+- Build break: explicit `TApi` generic in the Cloudflare AI Gateway provider (TS2353)
+- Release pipeline rebranded to phi (`local-release.mjs`, `phi-*` assets, missing `pi-test.ps1` created)
+- `publish.mjs` no longer throws on independent package version lines
+- `mom` agent model configurable via `MOM_MODEL`
+
+## [0.98.2]
+
+### Fixed — a stale link in ~/.phi made the package impossible to install
+
+`npm install @phi-code-admin/phi-code` aborted on Windows whenever
+`~/.phi/agent/extensions/node_modules/` still held a link from an earlier install
+whose target had since been deleted. The postinstall exits non-zero, so npm rolled
+the whole package back: the agent could not be installed at all, and neither could
+`@phi-code-admin/mom`, which depends on it. A home directory that had never seen
+phi was unaffected, which is why the release went out green.
+
+The chain, each step verified against the real filesystem:
+
+- `existsSync(dest)` follows the link, so a dangling one reads as absent and the
+  removal step was skipped.
+- `symlinkSync` then failed with `EEXIST` — the link was still there.
+- The copy fallback ran against that dangling link, and `cpSync` does not throw on
+  it: it kills the process (`STATUS_STACK_BUFFER_OVERRUN`, exit `0xC0000409`).
+  No `catch` could run.
+- `rmSync` would not have helped either: with or without `force`, it tries to
+  enumerate the missing target and leaves the link in place — silently, with
+  `force`. `unlinkSync`/`rmdirSync` act on the link itself.
+
+Removal is now driven by `lstatSync` (which does not follow the link) and uses
+`unlinkSync`/`rmdirSync` for a link, `rmSync` for a real directory. The copy
+fallback also dereferences its source, so a workspace-symlinked package is copied
+by content rather than handed to `cpSync` as a link.
+
+Covered by `scripts/coding-agent-postinstall.test.mjs` (3 cases, run by
+`npm test`): a first install, an install over a dangling link, and an install over
+a real directory squatting a link's place.
+
+## [Unreleased]
+
+### Fixed — packages/web-ui compiles and builds against the 0.84.2 APIs again
+
+Upstream removed `packages/web-ui`; the fork keeps it, so it was left excluded from
+the typecheck after the merge. It is now back in the quality gates
+(`npm run check:web-ui`, wired into `npm run check`) and in the build chain.
+
+- Symbols moved to the compat entrypoint: `streamSimple`, `complete`, `getModel`,
+  `getModels`, `getProviders` now come from `phi-code-ai/compat`.
+- `Agent.streamFn` became the read/write `streamFunction` and a required constructor
+  option. `AgentInterface` upgrades it to the proxy-aware variant as before, and the
+  example passes `streamFn: streamSimple` explicitly.
+- `tsconfig.build.json` gained `allowImportingTsExtensions` +
+  `rewriteRelativeImportExtensions`: the source references `.ts`, the emit is `.js`.
+- Constructor parameter properties replaced by explicit fields (`erasableSyntaxOnly`).
+- **`packages/web-ui/example` was dropped from the npm workspaces by the merge**
+  (upstream's list no longer had it), so its dependencies were never installed and
+  `vite build` failed on a missing `@tailwindcss/vite`. Restored.
+- **The "test API key" button reported a valid key as invalid** for xAI and Z.ai: it
+  probed a hardcoded model id, and both lost theirs in the 0.84 catalogue. The probe
+  model is now resolved from the catalogue — preferred ids first, then the provider's
+  cheapest listed model — so a catalogue refresh cannot silently break key validation
+  again.
+
+The last three packages sitting under a third party's npm scope are renamed too, so
+the whole workspace now lives under the fork's own names:
+`@mariozechner/pi-web-ui` → `@phi-code-admin/web-ui` (private),
+`@mariozechner/pi-mom` → `@phi-code-admin/mom`, and
+`@mariozechner/pi` → `@phi-code-admin/pods` (binary `pi-pods` → `phi-pods`, which
+collided with the upstream pi tooling).
+
+Nothing published changed: web-ui is private and no published package was touched.
 
 ## [0.98.1] - 2026-08-17
 

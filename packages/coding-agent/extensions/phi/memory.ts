@@ -201,9 +201,7 @@ function isNoteLine(data: unknown): data is { file: string; line: number; conten
 	}
 	const candidate = data as Record<string, unknown>;
 	return (
-		typeof candidate.file === "string" &&
-		typeof candidate.line === "number" &&
-		typeof candidate.content === "string"
+		typeof candidate.file === "string" && typeof candidate.line === "number" && typeof candidate.content === "string"
 	);
 }
 
@@ -274,10 +272,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 							return { hit, matched };
 						})
 						.sort(
-							(a, b) =>
-								b.matched - a.matched ||
-								a.hit.file.localeCompare(b.hit.file) ||
-								a.hit.line - b.hit.line,
+							(a, b) => b.matched - a.matched || a.hit.file.localeCompare(b.hit.file) || a.hit.line - b.hit.line,
 						)
 						.map(
 							({ hit }): MemoryHit => ({
@@ -786,9 +781,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 						// label belongs between the previous entity and this one
 						const text = path
 							.map((s, i) =>
-								i === 0 || !s.relation
-									? s.entity.name
-									: `[${s.relation.type}] → ${s.entity.name}`,
+								i === 0 || !s.relation ? s.entity.name : `[${s.relation.type}] → ${s.entity.name}`,
 							)
 							.join(" → ");
 						return { content: [{ type: "text", text: `Path: ${text}` }] };

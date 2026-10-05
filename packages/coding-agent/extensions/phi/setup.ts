@@ -36,7 +36,6 @@ import {
 } from "./providers/alibaba.ts";
 import { getProviderCatalog, type ProviderCatalogEntry } from "./providers/catalog.ts";
 import { fetchLiveModels, pingProvider, toPersistedModel } from "./providers/live-models.ts";
-import { offlineMode, upstreamKnownIds } from "./providers/upstream-catalog.ts";
 import {
 	buildOpenCodeGoAnthropicProviderConfig,
 	buildOpenCodeGoProviderConfig,
@@ -45,6 +44,7 @@ import {
 	pingOpenCodeGo,
 	validateOpenCodeGoApiKey,
 } from "./providers/opencode-go.ts";
+import { offlineMode, upstreamKnownIds } from "./providers/upstream-catalog.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
