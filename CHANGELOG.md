@@ -29,6 +29,9 @@
 - Release assets renamed `pi-*` → `phi-*` (source archive, binaries, install-lock artifacts)
 - `ontology_batch_add`: batch graph writes (single locked append) replacing the single-item TODO in the orchestrator
 - `mom` agent model configurable via `MOM_MODEL` env var
+- Published package could not start: `extensions/phi/agents.ts` and `orchestrator.ts` imported `../../src/core/parallel-agents.ts`, a specifier that exists only in the checkout (`package.json#files` ships no `src/`), so `phi` exited with code 1 on three extension load errors. Both now import through the loader alias `phi-code`.
+- `ast_grep` never loaded: `@ast-grep/napi` is a declared dependency, but it was missing from the postinstall's `extensionDeps` and the alias map has no entry for it. Added to the list (the existing link logic already handles Windows).
+- `ontology_batch_add` failed with `TypeError: addBatch is not a function` against the **published** `sigma-memory@0.2.9` — the repository's in-tree package has the method, the published one does not. The tool now composes over `findEntity`/`addEntity`/`addRelation` idempotently, and four further `memory.ts` defects go with it (vector-hit formatting, `ontology_query` path rendering, the `init()` race, and a success message that ignored indexing failures).
 
 ### Changed
 - `README.md` synchronized with reality (19 packages, 17 extension modules, 7 memory tools)

@@ -115,6 +115,70 @@ collided with the upstream pi tooling).
 
 Nothing published changed: web-ui is private and no published package was touched.
 
+### Fixed — the published package could not start: two extensions imported a path that only exists in the checkout
+
+The fork's `agents` and `orchestrator` extension modules imported `killAgent`, `listAgents` (in
+`extensions/phi/agents.ts`) and `runParallel` (in `orchestrator.ts`) from
+`../../src/core/parallel-agents.ts`. That specifier is only valid in the source tree, where
+`extensions/phi/` sits next to `src/`; `package.json#files` ships `dist`, `docs`, `examples`,
+`skills`, `agents`, `extensions`, `config`, `scripts` — no `src/` — so an `npm install`ed phi
+exited with code 1 on three extension load errors before it could render anything, and neither
+`/agents` nor parallel sub-agents existed.
+
+Both now import through the loader alias `phi-code`, the way the other 20 extension modules in
+that directory already reach host APIs: the loader maps it to the coding agent's own entry,
+which re-exports `killAgent`, `listAgents` and `runParallel` from `core/parallel-agents.ts`.
+One specifier that resolves identically in a checkout and in the published package, on every
+platform, instead of one that only works in the checkout.
+
+### Fixed — `@ast-grep/napi` was never linked, so the `ast_grep` tool never loaded
+
+`extensions/phi/ast-grep.ts` imports `@ast-grep/napi` statically. It is a declared dependency of
+the package, but the postinstall only links the names in `extensionDeps`
+(`sigma-memory`, `sigma-agents`, `sigma-skills`, `zod`, `@modelcontextprotocol/sdk`) into
+`~/.phi/agent/extensions/node_modules`, and the loader's alias map has no entry for it either —
+so the module was unresolvable and the whole extension was dropped.
+
+`@ast-grep/napi` is now in `extensionDeps`, which is exactly what the list's own comment asks
+for ("any new bundled-extension dependency that is not phi-internal and not typebox must be
+added to this list"). It is a platform package — 0.45.3 publishes `win32-x64-msvc`,
+`win32-ia32-msvc`, `win32-arm64-msvc`, `darwin-x64`, `darwin-arm64`, `linux-x64-gnu`,
+`linux-arm64-gnu`, `linux-x64-musl` and `linux-arm64-musl` as optional dependencies — and the
+link logic already handles Windows (junction, with a copy fallback).
+
+### Fixed — `ontology_batch_add` called an API the published `sigma-memory` does not expose
+
+`extensions/phi/memory.ts` called `sigmaMemory.ontology.addBatch(...)`. The repository's own
+`packages/sigma-memory` has that method, but the **published** `sigma-memory@0.2.9` — which is
+what an `npm install` of phi resolves, and what the installed copy resolved on this machine —
+has no occurrence of "batch" in `dist/`, so every `ontology_batch_add` call returned
+`TypeError: … addBatch is not a function` while the tool's own `promptGuidelines` tell the model
+to prefer it over repeated `ontology_add` calls. (Republishing `sigma-memory` from the
+repository would close the gap; the extension no longer depends on it being closed.)
+
+The tool now composes over the API both versions expose. Entities are indexed from
+`findEntity({})` by lowercased name and created with `addEntity`; `fromName`/`toName` are
+resolved against that index — including entities created earlier in the same batch — and linked
+with `addRelation`; a re-run reuses existing entities and skips an identical
+`(from, to, type)` relation, matching the tool's own documented promise ("existing or from this
+batch"); endpoints that cannot be resolved are listed in the result instead of being dropped
+silently.
+
+Four further defects in the same file were found while verifying that, and are fixed with it:
+
+- vector hits were formatted as `File: x (line undefined)` — `VectorStore.search()` returns
+  `chunkIndex`, not `line`, in the published package and in the repository source alike — and now
+  read `File: x (chunk 3)`;
+- `ontology_query` with `path` printed the relation label after the target (`A → B → [uses]`)
+  instead of between the entities (`A → [uses] → B`);
+- a write or a search issued before `sigmaMemory.init()` resolved hit `VectorStore not
+  initialized`, and the rejection was swallowed by `.catch(() => {})`; `memory_search`,
+  `memory_write` and `memory_status` now await `memoryReady`;
+- `memory_write` claimed "(indexed for vector search)" even when indexing had failed; it now
+  awaits indexing and reports the outcome, with `details.vectorIndexed` / `details.vectorError`.
+
+The last defect is why the tool could report success without indexing anything.
+
 ## [0.98.1] - 2026-08-17
 
 ### Fixed — configs written before 0.98.0 are repaired at startup

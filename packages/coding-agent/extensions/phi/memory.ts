@@ -171,12 +171,51 @@ function buildMemoryManifest(sigmaMemory: SigmaMemory): string {
 	return lines.join("\n");
 }
 
+/**
+ * Minimum length for a query token to take part in keyword matching. Shorter
+ * fragments ("a", "to", "de") appear on almost every line and only add noise.
+ */
+const MIN_TOKEN_LENGTH = 3;
+
+/**
+ * Significant tokens of a query, lowercased, deduplicated, punctuation-split.
+ *
+ * Needed because `NotesManager.search()` tests `line.includes(wholeQuery)`: any
+ * multi-word query matches no note at all, so the extension unions per-token hits
+ * itself (see memory_search) instead of relying on that single substring test.
+ */
+function queryTokens(query: string): string[] {
+	const seen = new Set<string>();
+	for (const token of query.toLowerCase().split(/[^\p{L}\p{N}_-]+/u)) {
+		if (token.length >= MIN_TOKEN_LENGTH) {
+			seen.add(token);
+		}
+	}
+	return [...seen];
+}
+
+/** Narrow a library search result's `data` to a note line hit. */
+function isNoteLine(data: unknown): data is { file: string; line: number; content: string } {
+	if (!data || typeof data !== "object") {
+		return false;
+	}
+	const candidate = data as Record<string, unknown>;
+	return (
+		typeof candidate.file === "string" &&
+		typeof candidate.line === "number" &&
+		typeof candidate.content === "string"
+	);
+}
+
 export default function memoryExtension(pi: ExtensionAPI) {
 	// Initialize sigma-memory with embedded vector store
 	const sigmaMemory = new SigmaMemory();
 
-	// Initialize memory + vector store (lazy model download on first search)
-	sigmaMemory.init().catch(() => {
+	// Initialize memory + vector store (lazy model download on first search).
+	// Tools that touch the vector store must await this: calling vectors.* before
+	// init() finishes throws "VectorStore not initialized", which used to be
+	// swallowed (search returned notes only, writes claimed to be indexed).
+	const memoryReady = sigmaMemory.init().catch(() => {
 		// Non-critical — memory works without vectors
 	});
 
@@ -206,9 +245,61 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			const { query } = params as { query: string };
 
 			try {
+				await memoryReady;
 				const results = await sigmaMemory.search(query);
+				type MemoryHit = (typeof results)[number];
 
-				if (results.length === 0) {
+				// The library matches the whole query as one substring, so multi-word
+				// queries miss every note. Union the per-token hits instead (dedup by
+				// file:line) and order them by measured token coverage — the same number
+				// the output displays. Keyword recall only: semantic matching is the
+				// vector store's job.
+				const tokens = queryTokens(query);
+				const coverageByLine = new Map<string, { matched: number; total: number }>();
+				let notes: MemoryHit[] = [];
+				if (tokens.length > 0) {
+					const placement = results.find((r) => r.source === "notes")?.score ?? 0.8;
+					const byLine = new Map<string, { file: string; line: number; content: string }>();
+					for (const token of tokens) {
+						for (const hit of sigmaMemory.notes.search(token)) {
+							const key = `${hit.file}:${hit.line}`;
+							if (!byLine.has(key)) byLine.set(key, hit);
+						}
+					}
+					notes = [...byLine.values()]
+						.map((hit) => {
+							const lower = hit.content.toLowerCase();
+							const matched = tokens.filter((token) => lower.includes(token)).length;
+							coverageByLine.set(`${hit.file}:${hit.line}`, { matched, total: tokens.length });
+							return { hit, matched };
+						})
+						.sort(
+							(a, b) =>
+								b.matched - a.matched ||
+								a.hit.file.localeCompare(b.hit.file) ||
+								a.hit.line - b.hit.line,
+						)
+						.map(
+							({ hit }): MemoryHit => ({
+								source: "notes",
+								type: "note",
+								// placement, not relevance: the library pins notes at 0.8
+								// between ontology entities (0.9) and relations (0.7), so we
+								// reuse the score it reports rather than inventing one
+								score: placement,
+								data: hit,
+							}),
+						);
+				}
+
+				// score-descending as the library orders it; equal scores keep insertion
+				// order (sort is stable), so notes stay sorted by coverage
+				const ordered: MemoryHit[] =
+					tokens.length === 0
+						? results
+						: [...notes, ...results.filter((r) => r.source !== "notes")].sort((a, b) => b.score - a.score);
+
+				if (ordered.length === 0) {
 					return {
 						content: [
 							{
@@ -221,9 +312,9 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				}
 
 				// Format results by source
-				let resultText = `Found ${results.length} results for "${query}":\n\n`;
+				let resultText = `Found ${ordered.length} results for "${query}":\n\n`;
 
-				const groupedResults = results.reduce(
+				const groupedResults = ordered.reduce(
 					(groups, result) => {
 						if (!groups[result.source]) groups[result.source] = [];
 						groups[result.source].push(result);
@@ -237,13 +328,20 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
 					for (const result of sourceResults.slice(0, 5)) {
 						// Limit to 5 results per source
-						resultText += `**Score: ${result.score.toFixed(2)}** | Type: ${result.type}\n`;
-
 						if (result.source === "notes") {
-							const data = result.data;
-							resultText += `File: ${data.file} (line ${data.line})\n`;
-							resultText += `> ${data.content}\n\n`;
+							// no fake relevance: report how many query tokens this line matched
+							const coverage = isNoteLine(result.data)
+								? coverageByLine.get(`${result.data.file}:${result.data.line}`)
+								: undefined;
+							resultText += coverage
+								? `**matches: ${coverage.matched}/${coverage.total} tokens** | Type: note\n`
+								: `**Type: note** | no significant query token (≥ ${MIN_TOKEN_LENGTH} chars)\n`;
+							if (isNoteLine(result.data)) {
+								resultText += `File: ${result.data.file} (line ${result.data.line})\n`;
+								resultText += `> ${result.data.content}\n\n`;
+							}
 						} else if (result.source === "ontology") {
+							resultText += `**Score: ${result.score.toFixed(2)}** | Type: ${result.type}\n`;
 							const data = result.data;
 							if (result.type === "entity") {
 								resultText += `Entity: ${data.name} (${data.type})\n`;
@@ -253,8 +351,11 @@ export default function memoryExtension(pi: ExtensionAPI) {
 								resultText += `Properties: ${JSON.stringify(data.properties)}\n\n`;
 							}
 						} else if (result.source === "vectors") {
+							// vectors carry a real cosine similarity, so its score is shown
+							resultText += `**Score: ${result.score.toFixed(2)}** | Type: ${result.type}\n`;
 							const data = result.data;
-							resultText += `File: ${data.file} (line ${data.line})\n`;
+							// VectorStore.search() returns { file, chunkIndex, content, score }
+							resultText += `File: ${data.file} (chunk ${data.chunkIndex})\n`;
 							resultText += `> ${data.content}\n\n`;
 						}
 					}
@@ -264,7 +365,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
 				return {
 					content: [{ type: "text", text: resultText }],
-					details: { found: true, query, resultCount: results.length, sources: Object.keys(groupedResults) },
+					details: { found: true, query, resultCount: ordered.length, sources: Object.keys(groupedResults) },
 				};
 			} catch (error) {
 				return {
@@ -301,14 +402,30 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				// a same-name file already existed), so we never overwrite data.
 				const filename = sigmaMemory.notes.write(finalContent, targetName);
 
-				// Auto-index in vector store (non-blocking)
-				sigmaMemory.vectors.addDocument(filename, finalContent).catch(() => {
-					// Vector indexing failed silently — notes still saved
-				});
+				// Index in the vector store and report the actual outcome: this used to
+				// fire-and-forget with .catch(() => {}), so the tool claimed "(indexed for
+				// vector search)" even when the embedding step failed.
+				let vectorIndexed = true;
+				let vectorError: string | undefined;
+				try {
+					await memoryReady;
+					await sigmaMemory.vectors.addDocument(filename, finalContent);
+				} catch (error) {
+					vectorIndexed = false;
+					vectorError = error instanceof Error ? error.message : String(error);
+					if (process.env.PHI_MEMORY_VERBOSE) console.warn(`[memory] vector indexing failed: ${vectorError}`);
+				}
 
 				return {
-					content: [{ type: "text", text: `Content written to ${filename} (indexed for vector search)` }],
-					details: { filename, contentLength: content.length, vectorIndexed: true },
+					content: [
+						{
+							type: "text",
+							text: vectorIndexed
+								? `Content written to ${filename} (indexed for vector search)`
+								: `Content written to ${filename} (NOT indexed for vector search: ${vectorError})`,
+						},
+					],
+					details: { filename, contentLength: content.length, vectorIndexed, vectorError },
 				};
 			} catch (error) {
 				return {
@@ -518,28 +635,93 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-			const p = params as any;
+			// params are validated against this tool's TypeBox schema before execute()
+			const p = params as unknown as {
+				entities?: Array<{ entityType?: string; name?: string; properties?: Record<string, string> }>;
+				relations?: Array<{ fromName?: string; toName?: string; relationType?: string }>;
+			};
 			try {
-				const result = sigmaMemory.ontology.addBatch({
-					entities: (p.entities || []).map((e: any) => ({
+				// sigma-memory 0.2.9 has no ontology.addBatch(), so compose the batch
+				// from addEntity/addRelation. Names are resolved against one index
+				// (built once, updated as entities are added) so a relation can
+				// reference an entity created earlier in the same batch.
+				const byName = new Map<string, string>();
+				for (const e of sigmaMemory.ontology.findEntity({})) byName.set(e.name.toLowerCase(), e.id);
+
+				const entityIds: string[] = [];
+				const relationIds: string[] = [];
+				const reusedEntities: string[] = [];
+				const reusedRelations: string[] = [];
+				const unresolved: string[] = [];
+				const errors: string[] = [];
+
+				const resolveName = (name: unknown): string | undefined => {
+					const key = String(name ?? "").toLowerCase();
+					const direct = byName.get(key);
+					if (direct) return direct;
+					// fall back to the library's substring search for near-exact names
+					const partial = sigmaMemory.ontology
+						.findEntity({ name: String(name ?? "") })
+						.find((e) => e.name.toLowerCase() === key);
+					if (partial) byName.set(key, partial.id);
+					return partial?.id;
+				};
+
+				for (const e of p.entities || []) {
+					if (!e?.name) continue;
+					const existing = resolveName(e.name);
+					if (existing) {
+						reusedEntities.push(e.name);
+						continue;
+					}
+					const id = sigmaMemory.ontology.addEntity({
 						type: e.entityType,
 						name: e.name,
 						properties: e.properties || {},
-					})),
-					relations: (p.relations || []).map((r: any) => ({
-						fromName: r.fromName,
-						toName: r.toName,
-						type: r.relationType,
-					})),
-				});
+					});
+					byName.set(String(e.name).toLowerCase(), id);
+					entityIds.push(id);
+				}
+
+				for (const r of p.relations || []) {
+					const from = resolveName(r.fromName);
+					const to = resolveName(r.toName);
+					if (!from || !to) {
+						unresolved.push(`${r.fromName} -[${r.relationType}]-> ${r.toName}`);
+						continue;
+					}
+					try {
+						// the triple (from, to, type) is the natural key: re-running a
+						// batch must not duplicate the graph
+						const duplicate = sigmaMemory.ontology
+							.findRelations(from)
+							.some((rel) => rel.from === from && rel.to === to && rel.type === r.relationType);
+						if (duplicate) {
+							reusedRelations.push(`${r.fromName} -[${r.relationType}]-> ${r.toName}`);
+							continue;
+						}
+						relationIds.push(
+							sigmaMemory.ontology.addRelation({
+								from,
+								to,
+								type: r.relationType,
+								properties: {},
+							}),
+						);
+					} catch (error) {
+						errors.push(`${r.fromName} -[${r.relationType}]-> ${r.toName}: ${error}`);
+					}
+				}
+
+				let text = `Batch added: ${entityIds.length} entities, ${relationIds.length} relations.`;
+				if (reusedEntities.length > 0) text += ` Reused ${reusedEntities.length} existing entities.`;
+				if (reusedRelations.length > 0) text += ` Reused ${reusedRelations.length} existing relations.`;
+				if (unresolved.length > 0) text += `\nUnresolved endpoints (relation skipped): ${unresolved.join("; ")}`;
+				if (errors.length > 0) text += `\nRelation errors: ${errors.join("; ")}`;
+
 				return {
-					content: [
-						{
-							type: "text",
-							text: `Batch added: ${result.entityIds.length} entities, ${result.relationIds.length} relations.`,
-						},
-					],
-					details: result,
+					content: [{ type: "text", text }],
+					details: { entityIds, relationIds, reusedEntities, reusedRelations, unresolved, errors },
 				};
 			} catch (error) {
 				return { content: [{ type: "text", text: `Ontology batch error: ${error}` }], isError: true };
@@ -600,8 +782,14 @@ export default function memoryExtension(pi: ExtensionAPI) {
 							return { content: [{ type: "text", text: "'fromId' and 'toId' required" }], isError: true };
 						const path = sigmaMemory.ontology.queryPath(p.fromId, p.toId);
 						if (!path) return { content: [{ type: "text", text: "No path found between these entities." }] };
+						// each step carries the relation that *leads to* its entity, so the
+						// label belongs between the previous entity and this one
 						const text = path
-							.map((s) => `${s.entity.name}${s.relation ? ` → [${s.relation.type}]` : ""}`)
+							.map((s, i) =>
+								i === 0 || !s.relation
+									? s.entity.name
+									: `[${s.relation.type}] → ${s.entity.name}`,
+							)
 							.join(" → ");
 						return { content: [{ type: "text", text: `Path: ${text}` }] };
 					}
@@ -640,6 +828,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
 		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
 			try {
+				await memoryReady;
 				const status = await sigmaMemory.status();
 
 				let statusText = "# Memory Status\n\n";

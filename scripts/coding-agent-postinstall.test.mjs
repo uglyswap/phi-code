@@ -91,3 +91,29 @@ test("replaces a real directory sitting where a link belongs", () => {
 		assert.ok(!existsSync(join(squatter, "stale.txt")), "the stale directory was kept instead of replaced");
 	});
 });
+
+/**
+ * `extensions/phi/ast-grep.ts` imports `@ast-grep/napi` at module level, so the extension is
+ * dropped whole when the name is not resolvable from ~/.phi/agent/extensions/. It is a declared
+ * dependency of the package; only the postinstall link list was missing it.
+ */
+const astGrepPaths = [
+	join(import.meta.dirname, "..", "packages", "coding-agent", "node_modules", "@ast-grep", "napi"),
+	join(import.meta.dirname, "..", "node_modules", "@ast-grep", "napi"),
+];
+
+test(
+	"links @ast-grep/napi for the bundled extensions",
+	{ skip: !astGrepPaths.some((p) => existsSync(p)) && "the package's node_modules is not installed" },
+	() => {
+		withScratchHome((home) => {
+			const result = runPostinstall(home);
+
+			assert.equal(result.status, 0, `postinstall exited ${result.status}: ${result.stderr}`);
+			assert.ok(
+				existsSync(join(home, ".phi", "agent", "extensions", "node_modules", "@ast-grep", "napi")),
+				"@ast-grep/napi was not linked: the ast-grep extension cannot import it",
+			);
+		});
+	},
+);
