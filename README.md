@@ -68,20 +68,73 @@ Most of phi lives in additive extensions, skills, and new packages, but phi also
 
 ### Install
 
-```bash
-# Install globally
+phi needs **Node.js 22.19 or newer** (with npm). The npm package installs everything else automatically: the bundled extensions (memory with vector search, MCP, LSP, browser, ast-grep, sub-agents, orchestrator...), agents, skills and their native dependencies. This install path is tested end to end on Linux, macOS and Windows on every push to `main`.
+
+#### Windows (PowerShell)
+
+```powershell
+# 1. Node.js (skip if `node --version` already prints v22.19 or newer)
+winget install OpenJS.NodeJS.LTS
+# open a new terminal so node and npm are on PATH
+
+# 2. phi
 npm install -g @phi-code-admin/phi-code
+phi --version
+```
 
-# Or run directly without installing
+#### macOS
+
+```bash
+# 1. Node.js (skip if `node --version` already prints v22.19 or newer)
+brew install node
+
+# 2. phi
+npm install -g @phi-code-admin/phi-code
+phi --version
+```
+
+#### Linux
+
+```bash
+# 1. Node.js through nvm (skip if `node --version` already prints v22.19 or newer)
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+source ~/.nvm/nvm.sh
+nvm install 22
+
+# 2. phi
+npm install -g @phi-code-admin/phi-code
+phi --version
+```
+
+With a system-wide Node.js (distribution package, NodeSource), `npm install -g` usually needs `sudo`; nvm avoids it. The browser tools use a virtual display when `xvfb` is installed and run headless otherwise.
+
+#### Update
+
+```bash
+npm install -g @phi-code-admin/phi-code@latest
+```
+
+#### Try without installing
+
+```bash
 npx @phi-code-admin/phi-code
+```
 
-# Or install the standalone binary (no Node.js required), macOS / Linux
+#### Standalone binary (no Node.js install)
+
+Self-contained archives are attached to [GitHub Releases](https://github.com/uglyswap/phi-code/releases) when a release is published. They include the bundled extensions and their dependencies; only the browser tools need a system Node.js 22+ (the browser server is installed automatically on first use).
+
+```bash
+# macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/uglyswap/phi-code/main/scripts/install.sh | sh
+```
+
+```powershell
 # Windows (PowerShell)
 irm https://raw.githubusercontent.com/uglyswap/phi-code/main/scripts/install.ps1 | iex
 ```
 
-The installers verify the download against the release `SHA256SUMS` and install the whole release directory (the executable needs the `package.json`, themes and assets next to it). The standalone binary does not load the bundled phi extensions yet (`/plan`, MCP, memory, sub-agents, browser...): use the npm install for the full feature set.
+The installers verify the download against the release `SHA256SUMS`, install the whole release directory and can update a running phi. Set `PHI_VERSION` to pin a release.
 
 ### First Run
 
@@ -99,8 +152,8 @@ The setup wizard lets you:
 
 ### Requirements
 
-- **Node.js** 22.19+ (`engines` in `package.json`; not needed for the standalone binary)
-- **Operating systems**: Linux, macOS, Windows (via Git Bash, WSL, or native)
+- **Node.js** 22.19+ with npm (`engines` in `package.json`; the standalone binary only needs it for the browser tools)
+- **Operating systems**: Linux, macOS, Windows (native PowerShell, Git Bash or WSL)
 - **API key**: Any supported provider key (Alibaba, OpenAI, Anthropic, Google, OpenRouter, Groq, or local models)
 
 ---
@@ -361,7 +414,7 @@ Interactive setup wizard.
 
 ### MCP Extension (`mcp/`)
 
-Connect phi to any [MCP](https://modelcontextprotocol.io) server (Supabase, Playwright, Context7, filesystem, databases, and anything else that speaks MCP). Bundled and on by default: no install needed. Configure servers in `~/.phi/agent/mcp.json` (global) or `<project>/.phi/mcp.json` (project, takes precedence).
+Connect phi to any [MCP](https://modelcontextprotocol.io) server (Supabase, Playwright, Context7, filesystem, databases, and anything else that speaks MCP). Bundled and on by default: no install needed. Configure servers in `~/.phi/agent/mcp.json` (global) or `<project>/.phi/mcp.json` (project: read only for trusted projects, and it can add servers but not override global ones).
 
 **Transports:** `stdio` (local subprocess), `streamable-http`, and `sse`. OAuth is supported for remote servers (browser-based flow via `/mcp:auth`).
 
