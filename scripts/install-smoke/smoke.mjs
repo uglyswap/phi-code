@@ -70,7 +70,7 @@ for (const check of checks) {
 	let message = line?.[2] ?? `no RESULT line (exit ${res.code}${res.timedOut ? ", TIMEOUT" : ""})`;
 	if (status !== "FAIL" && res.code !== 0) {
 		status = "FAIL";
-		message = `${message} (but exit code ${res.code})`;
+		message = `${message} (but the process then ended with exit code ${res.code}, signal ${res.signal})`;
 	}
 	const subChecks = [...res.output.matchAll(/^CHECK (PASS|FAIL|SKIP) (.*)$/gm)].map((m) => `${m[1]} ${m[2]}`);
 	summary.push({ name: check.name, status, message, seconds: Math.round((Date.now() - t0) / 1000), subChecks });

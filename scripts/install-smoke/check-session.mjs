@@ -156,4 +156,7 @@ try {
 session.dispose();
 const failed = checks.filter((c) => !c.ok).map((c) => c.name);
 result(failed.length ? "FAIL" : "PASS", failed.length ? `failed: ${failed.join(", ")}` : `${checks.length} checks passed`);
-setTimeout(() => process.exit(), 500).unref();
+// Exit the way the CLI does after a session (process.exit), not by draining the
+// event loop: a native module that cannot survive process.exit() (e.g. an
+// abort in a static destructor) must fail this check.
+process.exit();

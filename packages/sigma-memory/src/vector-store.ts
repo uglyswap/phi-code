@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "fs";
 import { dirname } from "path";
 import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
+import { createWorkerPipeline, defaultUseEmbeddingWorker } from "./embedding-worker.ts";
 import { withFileLockSync } from "./file-lock.ts";
 import type { VectorSearchResult } from "./types.ts";
 
@@ -41,6 +42,17 @@ async function loadTransformersPipeline(
 	return mod.pipeline as (...args: any[]) => Promise<any>;
 }
 
+/** Absolute entry of @huggingface/transformers as this module resolves it (for the embedding worker). */
+function resolveTransformersEntry(): string {
+	try {
+		return require.resolve("@huggingface/transformers");
+	} catch (error) {
+		throw new Error(
+			`Vector search unavailable: cannot load @huggingface/transformers (${error instanceof Error ? error.message : String(error)}). Reinstall phi-code to restore it; full-text note search still works.`,
+		);
+	}
+}
+
 export interface VectorStoreOptions {
 	/** Directory where the embedding model is cached (created on first model load). */
 	modelCacheDir?: string;
@@ -50,6 +62,14 @@ export interface VectorStoreOptions {
 	 * @internal
 	 */
 	loadTransformers?: () => Promise<unknown>;
+	/**
+	 * Run the embedding pipeline in a worker thread (see embedding-worker.ts).
+	 * Default: macOS under Node, unless `loadTransformers` is injected.
+	 * @internal
+	 */
+	useWorker?: boolean;
+	/** Module the worker loads instead of @huggingface/transformers (tests). @internal */
+	transformersEntry?: string;
 }
 
 // The vector store initializes and loads its embedding model in the background
@@ -91,11 +111,15 @@ export class VectorStore {
 
 	private readonly modelCacheDir: string | undefined;
 	private readonly loadTransformers: () => Promise<unknown>;
+	private readonly useWorker: boolean;
+	private readonly transformersEntry: string | undefined;
 
 	constructor(dbPath: string, options: VectorStoreOptions = {}) {
 		this.dbPath = dbPath;
 		this.modelCacheDir = options.modelCacheDir;
 		this.loadTransformers = options.loadTransformers ?? (() => esmImport("@huggingface/transformers"));
+		this.useWorker = options.useWorker ?? (options.loadTransformers ? false : defaultUseEmbeddingWorker());
+		this.transformersEntry = options.transformersEntry;
 	}
 
 	/**
@@ -270,12 +294,19 @@ export class VectorStore {
 			// in Node, Bun and the compiled Bun binary (verified through jiti and
 			// the ~/.phi/agent/extensions/node_modules link).
 			if (this.modelCacheDir) mkdirSync(this.modelCacheDir, { recursive: true });
-			const createPipeline = await loadTransformersPipeline(this.loadTransformers, this.modelCacheDir);
-
-			this.pipeline = await createPipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", {
-				dtype,
-				...(this.modelCacheDir ? { cache_dir: this.modelCacheDir } : {}),
-			});
+			const pipelineOptions = { dtype, ...(this.modelCacheDir ? { cache_dir: this.modelCacheDir } : {}) };
+			if (this.useWorker) {
+				this.pipeline = await createWorkerPipeline({
+					transformersEntry: this.transformersEntry ?? resolveTransformersEntry(),
+					modelCacheDir: this.modelCacheDir,
+					task: "feature-extraction",
+					model: "Xenova/all-MiniLM-L6-v2",
+					options: pipelineOptions,
+				});
+			} else {
+				const createPipeline = await loadTransformersPipeline(this.loadTransformers, this.modelCacheDir);
+				this.pipeline = await createPipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", pipelineOptions);
+			}
 
 			vlog("[VectorStore] Embedding model loaded.");
 		})();
