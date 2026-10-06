@@ -20,6 +20,7 @@ on:
       - 'scripts/**'
       - 'package.json'
       - 'package-lock.json'
+      - '.github/workflows/install-smoke.yml'
 
 permissions:
   contents: read
