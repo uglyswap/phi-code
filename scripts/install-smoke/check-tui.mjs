@@ -5,8 +5,8 @@
 // Answers the trust / first-run prompts, checks it is still running after a
 // few seconds without a crash, then quits with ctrl+c twice.
 // Windows has no `script`: the check is skipped and says so.
-import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { createWriteStream, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { IS_WINDOWS, layout, result, stripAnsi } from "./common.mjs";
 
@@ -19,20 +19,32 @@ if (IS_WINDOWS) {
 const quote = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
 // `script` sizes the pty from its stdin, which is a pipe here: set a real size first.
 const inner = `stty cols 120 rows 40 2>/dev/null; exec ${quote(process.execPath)} ${quote(l.cli)}`;
-const args =
-	process.platform === "darwin" ? ["-q", "/dev/null", "/bin/sh", "-c", inner] : ["-q", "-e", "-c", `/bin/sh -c ${quote(inner)}`, "/dev/null"];
-const child = spawn("script", args, {
-	cwd: l.work,
-	env: { ...process.env, TERM: "xterm-256color" },
-	stdio: ["pipe", "pipe", "pipe"],
-});
+// BSD `script` (macOS) refuses a socket as stdin (tcgetattr: "Operation not
+// supported on socket") and Node's stdio pipes are sockets: feed it from a FIFO.
+const fifo = process.platform === "darwin" ? join(l.runDir, "tui-stdin.fifo") : undefined;
+if (fifo) {
+	rmSync(fifo, { force: true });
+	execFileSync("mkfifo", [fifo]);
+}
+const child = fifo
+	? spawn("/bin/sh", ["-c", 'exec script -q /dev/null /bin/sh -c "$TUI_INNER" < "$TUI_FIFO"'], {
+			cwd: l.work,
+			env: { ...process.env, TERM: "xterm-256color", TUI_INNER: inner, TUI_FIFO: fifo },
+			stdio: ["ignore", "pipe", "pipe"],
+		})
+	: spawn("script", ["-q", "-e", "-c", `/bin/sh -c ${quote(inner)}`, "/dev/null"], {
+			cwd: l.work,
+			env: { ...process.env, TERM: "xterm-256color" },
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+const input = fifo ? createWriteStream(fifo) : child.stdin;
 let raw = "";
 let exited = null;
 const answered = new Set();
 const answerOnce = (key, pattern, keys) => {
 	if (!answered.has(key) && pattern.test(stripAnsi(raw))) {
 		answered.add(key);
-		setTimeout(() => child.stdin.write(keys), 500);
+		setTimeout(() => input.write(keys), 500);
 	}
 };
 const onData = (d) => {
@@ -51,13 +63,14 @@ child.on("exit", (code, signal) => {
 
 await new Promise((r) => setTimeout(r, seconds * 1000));
 const aliveAfterWait = exited === null;
-child.stdin.write("\x03");
+input.write("\x03");
 await new Promise((r) => setTimeout(r, 400));
-child.stdin.write("\x03");
+input.write("\x03");
 const deadline = Date.now() + 8000;
 while (exited === null && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200));
 const exitedOnCtrlC = exited !== null;
 if (!exitedOnCtrlC) child.kill("SIGKILL");
+input.destroy();
 
 writeFileSync(join(l.runDir, "tui-raw.txt"), raw);
 const text = stripAnsi(raw);

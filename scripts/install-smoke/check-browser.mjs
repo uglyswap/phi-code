@@ -9,7 +9,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { layout, result } from "./common.mjs";
+import { layout, result, run } from "./common.mjs";
 
 const l = layout(process.argv[2]);
 const withTimeout = (promise, ms, label) =>
@@ -51,7 +51,20 @@ try {
 	console.log(`browser_extract: ${exText.slice(0, 400)}`);
 	if (ex.isError || !/Example Domain/.test(exText)) problems.push(`extract did not return the example.com text`);
 } catch (error) {
-	problems.push(String(error?.stack ?? error).split("\n").slice(0, 4).join(" | "));
+	console.log(`browser error (full):\n${error?.stack ?? error}`);
+	problems.push(String(error?.message ?? error).split("\n").slice(0, 4).join(" | "));
+	if (process.platform === "linux") {
+		// Launch failures on Linux are usually missing shared libraries: list them.
+		const bin = readdirSync(cacheRoot, { recursive: true }).find((p) => String(p).endsWith("camoufox-bin/camoufox-bin"));
+		if (bin) {
+			const ldd = await run("ldd", [join(cacheRoot, String(bin))], { timeoutMs: 30_000 });
+			const missingLibs = ldd.output.split("\n").filter((line) => line.includes("not found"));
+			console.log(`ldd camoufox-bin: ${missingLibs.length ? missingLibs.join("; ") : "no missing library"}`);
+			if (missingLibs.length) {
+				problems.push(`missing system libraries: ${missingLibs.map((x) => x.trim().split(" ")[0]).join(", ")}`);
+			}
+		}
+	}
 } finally {
 	await withTimeout(session.extensionRunner.emit({ type: "session_shutdown" }), 30_000, "session_shutdown").catch((e) =>
 		console.log(e.message),

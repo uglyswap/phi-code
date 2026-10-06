@@ -79,6 +79,31 @@ jobs:
           version=$(node -p "require('./packages/coding-agent/package.json').version")
           node scripts/install-smoke/smoke.mjs "$RUNNER_TEMP/phi-install-smoke/run" "$version"
 
+      # TEMPORARY diagnostic: process exit after an ONNX embedding (macOS abort).
+      - name: Diagnose exit after embedding (temporary)
+        if: always()
+        continue-on-error: true
+        run: |
+          cat > "$RUNNER_TEMP/onnx-exit.mjs" <<'EOS'
+          import { realpathSync } from "node:fs";
+          import { join } from "node:path";
+          import { pathToFileURL } from "node:url";
+          const [agentDir, variant] = process.argv.slice(2);
+          const dir = realpathSync(join(agentDir, "extensions", "node_modules", "sigma-memory"));
+          const { VectorStore } = await import(pathToFileURL(join(dir, "dist", "index.js")).href);
+          const vs = new VectorStore(join(agentDir, "diag", variant, "vectors.db"), { modelCacheDir: join(agentDir, "cache", "models") });
+          await vs.init();
+          await vs.addDocument("a.md", "hello world embedding");
+          console.log(`variant ${variant}: embedded`);
+          if (variant === "dispose") await vs.pipeline.dispose();
+          if (variant === "close") vs.close();
+          if (variant === "close-wait") { vs.close(); await new Promise((r) => setTimeout(r, 200)); }
+          if (variant !== "natural") process.exit(0);
+          EOS
+          for v in exit dispose close close-wait natural; do
+            node "$RUNNER_TEMP/onnx-exit.mjs" "$RUNNER_TEMP/phi-install-smoke/run/agent" $v; echo "variant $v -> exit $?"
+          done
+
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
