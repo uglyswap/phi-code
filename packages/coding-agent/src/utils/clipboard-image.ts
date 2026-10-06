@@ -215,26 +215,21 @@ function readClipboardImageViaXclip(): ClipboardImage | null {
 		timeoutMs: DEFAULT_LIST_TIMEOUT_MS,
 	});
 
-	let candidateTypes: string[] = [];
-	if (targets.ok) {
-		candidateTypes = targets.stdout
-			.toString("utf-8")
-			.split(/\r?\n/)
-			.map((t) => t.trim())
-			.filter(Boolean);
-	}
+	// Only read an image type the clipboard owner advertises. Probing every supported type
+	// blindly runs one blocking xclip call per type, each up to its timeout (#9786).
+	if (!targets.ok) return null;
 
-	const preferred = candidateTypes.length > 0 ? selectPreferredImageMimeType(candidateTypes) : null;
-	const tryTypes = preferred ? [preferred, ...SUPPORTED_IMAGE_MIME_TYPES] : [...SUPPORTED_IMAGE_MIME_TYPES];
+	const candidateTypes = targets.stdout
+		.toString("utf-8")
+		.split(/\r?\n/)
+		.map((t) => t.trim())
+		.filter(Boolean);
+	const preferred = selectPreferredImageMimeType(candidateTypes);
+	if (!preferred) return null;
 
-	for (const mimeType of tryTypes) {
-		const data = runCommand("xclip", ["-selection", "clipboard", "-t", mimeType, "-o"]);
-		if (data.ok && data.stdout.length > 0) {
-			return { bytes: data.stdout, mimeType: baseMimeType(mimeType) };
-		}
-	}
-
-	return null;
+	const data = runCommand("xclip", ["-selection", "clipboard", "-t", preferred, "-o"]);
+	if (!data.ok || data.stdout.length === 0) return null;
+	return { bytes: data.stdout, mimeType: baseMimeType(preferred) };
 }
 
 async function readClipboardImageViaNativeClipboard(): Promise<ClipboardImage | null> {

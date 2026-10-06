@@ -105,6 +105,18 @@ function collectSettingsDiagnostics(
 	}));
 }
 
+function deduplicateDiagnostics(
+	diagnostics: readonly AgentSessionRuntimeDiagnostic[],
+): AgentSessionRuntimeDiagnostic[] {
+	const seen = new Set<string>();
+	return diagnostics.filter((diagnostic) => {
+		const key = `${diagnostic.type}:${diagnostic.message}`;
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
+}
+
 function reportDiagnostics(diagnostics: readonly AgentSessionRuntimeDiagnostic[]): void {
 	for (const diagnostic of diagnostics) {
 		const color = diagnostic.type === "error" ? chalk.red : diagnostic.type === "warning" ? chalk.yellow : chalk.dim;
@@ -572,7 +584,10 @@ export interface MainOptions {
 export async function main(args: string[], options?: MainOptions) {
 	resetTimings();
 	const extensionFactories = [...builtInExtensions, ...(options?.extensionFactories ?? [])];
-	const offlineMode = args.includes("--offline") || isTruthyEnvFlag(readBrandedEnv("OFFLINE"));
+	// Arguments after "--" are messages, so a message reading "--offline" must not enable offline mode.
+	const endOfOptions = args.indexOf("--");
+	const optionArgs = endOfOptions === -1 ? args : args.slice(0, endOfOptions);
+	const offlineMode = optionArgs.includes("--offline") || isTruthyEnvFlag(readBrandedEnv("OFFLINE"));
 	if (offlineMode) {
 		setBrandedEnv(process.env, "OFFLINE", "1");
 		setBrandedEnv(process.env, "SKIP_VERSION_CHECK", "1");
@@ -667,7 +682,8 @@ export async function main(args: string[], options?: MainOptions) {
 	time("syncBundledAssets");
 
 	const startupSettingsManager = SettingsManager.create(cwd, agentDir);
-	reportDiagnostics(collectSettingsDiagnostics(startupSettingsManager, "startup session lookup"));
+	// Reported later: printed here they would be wiped by the interactive TUI (#7829).
+	const startupSettingsDiagnostics = collectSettingsDiagnostics(startupSettingsManager, "startup session lookup");
 
 	// Experimental first-time setup: theme choice and analytics opt-in.
 	// Runs before any runtime services are created so the chosen settings apply everywhere.
@@ -867,6 +883,7 @@ export async function main(args: string[], options?: MainOptions) {
 	configureHttpDispatcher(settingsManager.getHttpIdleTimeoutMs());
 
 	if (parsed.help) {
+		reportDiagnostics(startupSettingsDiagnostics);
 		const extensionFlags = resourceLoader
 			.getExtensions()
 			.extensions.flatMap((extension) => Array.from(extension.flags.values()));
@@ -875,6 +892,7 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 
 	if (parsed.listModels !== undefined) {
+		reportDiagnostics(startupSettingsDiagnostics);
 		const searchPattern = typeof parsed.listModels === "string" ? parsed.listModels : undefined;
 		await listModels(modelRuntime, searchPattern, AbortSignal.timeout(15_000));
 		process.exit(0);
@@ -905,8 +923,13 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 
 	time("resolveModelScope");
-	reportDiagnostics(runtime.diagnostics);
-	if (runtime.diagnostics.some((diagnostic) => diagnostic.type === "error")) {
+	const startupDiagnostics = deduplicateDiagnostics([...startupSettingsDiagnostics, ...runtime.diagnostics]);
+	const hasRuntimeErrors = runtime.diagnostics.some((diagnostic) => diagnostic.type === "error");
+	// Interactive mode shows them inside the chat, where they stay visible (#7829).
+	if (appMode !== "interactive" || hasRuntimeErrors) {
+		reportDiagnostics(startupDiagnostics);
+	}
+	if (hasRuntimeErrors) {
 		if (runtime.diagnostics.some((diagnostic) => diagnostic.message.includes("Failed to load extension"))) {
 			console.error(chalk.yellow(EXTENSION_LOAD_FAILURE_HINT));
 		}
@@ -942,6 +965,7 @@ export async function main(args: string[], options?: MainOptions) {
 		const interactiveMode = new InteractiveMode(runtime, {
 			migratedProviders,
 			modelFallbackMessage,
+			startupDiagnostics,
 			autoTrustOnReloadCwd,
 			initialMessage,
 			initialImages,

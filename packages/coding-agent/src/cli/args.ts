@@ -98,7 +98,13 @@ const KNOWN_VALUE_FLAGS = new Set([
  */
 function normalizeEqualsSyntax(args: string[]): string[] {
 	const normalized: string[] = [];
-	for (const arg of args) {
+	for (let index = 0; index < args.length; index++) {
+		const arg = args[index];
+		// Everything after "--" is positional: a message such as "--model=x" must stay intact.
+		if (arg === "--") {
+			normalized.push(...args.slice(index));
+			break;
+		}
 		if (arg.startsWith("--")) {
 			const eqIndex = arg.indexOf("=");
 			if (eqIndex > 2 && KNOWN_VALUE_FLAGS.has(arg.slice(2, eqIndex))) {
@@ -123,15 +129,36 @@ export function parseArgs(rawArgs: string[]): Args {
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
 
-		if (arg === "--help" || arg === "-h") {
+		if (arg === "--") {
+			// End of options (#7269): every remaining argument is a message or an @file.
+			for (const positionalArg of args.slice(i + 1)) {
+				if (positionalArg.startsWith("@")) {
+					result.fileArgs.push(positionalArg.slice(1));
+				} else {
+					result.messages.push(positionalArg);
+				}
+			}
+			break;
+		} else if (arg === "--help" || arg === "-h") {
 			result.help = true;
 		} else if (arg === "--version" || arg === "-v") {
 			result.version = true;
-		} else if (arg === "--mode" && i + 1 < args.length) {
-			const mode = args[++i];
-			if (mode === "text" || mode === "json" || mode === "rpc") {
-				result.mode = mode;
+		} else if (arg === "--mode") {
+			// Reject invalid or missing modes instead of silently falling back to interactive (#9045).
+			const mode = args[i + 1];
+			if (mode === undefined || mode.startsWith("-")) {
+				result.diagnostics.push({ type: "error", message: "--mode requires text, json, or rpc" });
+				continue;
 			}
+			i++;
+			if (mode !== "text" && mode !== "json" && mode !== "rpc") {
+				result.diagnostics.push({
+					type: "error",
+					message: `Invalid mode "${mode}". Valid values: text, json, rpc`,
+				});
+				continue;
+			}
+			result.mode = mode;
 		} else if (arg === "--continue" || arg === "-c") {
 			result.continue = true;
 		} else if (arg === "--resume" || arg === "-r") {
@@ -164,7 +191,11 @@ export function parseArgs(rawArgs: string[]): Args {
 		} else if (arg === "--session-dir" && i + 1 < args.length) {
 			result.sessionDir = args[++i];
 		} else if (arg === "--models" && i + 1 < args.length) {
-			result.models = args[++i].split(",").map((s) => s.trim());
+			// A trailing comma must not add an empty pattern that matches every model (#10334).
+			result.models = args[++i]
+				.split(",")
+				.map((s) => s.trim())
+				.filter((pattern) => pattern.length > 0);
 		} else if (arg === "--no-tools" || arg === "-nt") {
 			result.noTools = true;
 		} else if (arg === "--no-builtin-tools" || arg === "-nbt") {

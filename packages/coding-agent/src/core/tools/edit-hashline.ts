@@ -30,13 +30,29 @@ export interface AnchorRecoveryResult {
 	startLine: number;
 	/** End line (0-based, exclusive) of the recovered window */
 	endLine: number;
-	/** Fraction of oldText lines whose hash appears in the window (0-1) */
+	/**
+	 * Similarity of the window with oldText (0-1): matched non-empty lines divided by
+	 * the larger of the oldText and window non-empty line counts, so it bounds both the
+	 * share of oldText found and the share of the window the model has seen.
+	 */
 	score: number;
 	/** True when two windows score too close to pick safely */
 	ambiguous: boolean;
+	/**
+	 * Non-empty lines of the window that match no oldText line: content the model
+	 * never saw and that the replacement overwrites. Callers must report it.
+	 */
+	unmatchedWindowLines: number;
 }
 
-const NOT_FOUND: AnchorRecoveryResult = { found: false, startLine: -1, endLine: -1, score: 0, ambiguous: false };
+const NOT_FOUND: AnchorRecoveryResult = {
+	found: false,
+	startLine: -1,
+	endLine: -1,
+	score: 0,
+	ambiguous: false,
+	unmatchedWindowLines: 0,
+};
 
 /** Short content hash of one normalized line (trailing whitespace stripped). */
 export function lineAnchor(line: string): string {
@@ -61,66 +77,106 @@ export const RECOVERY_THRESHOLD = 0.6;
 /** Minimum relative margin between best and second-best window. */
 export const AMBIGUITY_MARGIN = 0.15;
 
+const isBlank = (line: string): boolean => line.trim().length === 0;
+
+/** Count non-empty lines shared by both hash lists, each line used at most once. */
+function countMatchedLines(oldHashes: string[], windowHashes: string[]): number {
+	const remaining = new Map<string, number>();
+	for (const h of windowHashes) remaining.set(h, (remaining.get(h) ?? 0) + 1);
+	let matched = 0;
+	for (const h of oldHashes) {
+		const count = remaining.get(h) ?? 0;
+		if (count > 0) {
+			matched++;
+			remaining.set(h, count - 1);
+		}
+	}
+	return matched;
+}
+
 /**
  * Recover the position of oldText in content by line anchors.
  * oldText must span at least 2 non-empty lines; single-line recovery is left
  * to the exact/fuzzy matchers (single short lines are too ambiguous).
+ *
+ * Safety rules: the first and last non-empty lines of oldText must both match the
+ * boundaries of the window (so the replacement can neither slide past the region
+ * the model saw nor swallow neighbouring lines), leading/trailing blank lines of
+ * oldText must be blank in the file too, and the window may not grow or shrink by
+ * more than the tolerated drift.
  */
 export function recoverByAnchors(content: string, oldText: string): AnchorRecoveryResult {
-	const oldLines = oldText.split("\n").filter((l) => l.trim().length > 0);
-	if (oldLines.length < 2) return NOT_FOUND;
+	const allOldLines = oldText.split("\n");
+	let leadingBlank = 0;
+	while (leadingBlank < allOldLines.length && isBlank(allOldLines[leadingBlank])) leadingBlank++;
+	let trailingBlank = 0;
+	while (
+		trailingBlank < allOldLines.length - leadingBlank &&
+		isBlank(allOldLines[allOldLines.length - 1 - trailingBlank])
+	) {
+		trailingBlank++;
+	}
+	const coreOldLines = allOldLines.slice(leadingBlank, allOldLines.length - trailingBlank);
+	const oldHashes = coreOldLines.filter((l) => !isBlank(l)).map(lineAnchor);
+	if (oldHashes.length < 2) return NOT_FOUND;
 
 	const contentLines = content.split("\n");
-	if (contentLines.length === 0) return NOT_FOUND;
+	const contentHashes = contentLines.map(lineAnchor);
+	const firstHash = oldHashes[0];
+	const lastHash = oldHashes[oldHashes.length - 1];
+	const coreSpan = coreOldLines.length;
+	const tolerance = Math.ceil(coreSpan * (1 - RECOVERY_THRESHOLD));
+	const minSpan = Math.max(2, coreSpan - tolerance);
+	const maxSpan = coreSpan + tolerance;
 
-	const anchors = computeAnchors(content);
-	const span = oldText.split("\n").length;
+	const candidates: Array<{ start: number; end: number; score: number; unmatched: number }> = [];
+	for (let start = 0; start < contentLines.length; start++) {
+		if (contentHashes[start] !== firstHash || isBlank(contentLines[start])) continue;
+		const lastEnd = Math.min(start + maxSpan - 1, contentLines.length - 1);
+		for (let end = start + minSpan - 1; end <= lastEnd; end++) {
+			if (contentHashes[end] !== lastHash || isBlank(contentLines[end])) continue;
+			const windowStart = start - leadingBlank;
+			const windowEnd = end + 1 + trailingBlank;
+			if (windowStart < 0 || windowEnd > contentLines.length) continue;
+			let blankBoundaries = true;
+			for (let i = windowStart; i < start; i++) blankBoundaries &&= isBlank(contentLines[i]);
+			for (let i = end + 1; i < windowEnd; i++) blankBoundaries &&= isBlank(contentLines[i]);
+			if (!blankBoundaries) continue;
 
-	// Score every candidate window. A window is anchored at any line that
-	// matches at least one oldText anchor hash; we then count how many of the
-	// oldText hashes appear inside [start, start+span).
-	const candidates: Array<{ start: number; hits: number }> = [];
-	const oldHashes = oldLines.map(lineAnchor);
-
-	const seenStarts = new Set<number>();
-	for (const h of oldHashes) {
-		for (const lineNo of anchors.get(h) ?? []) {
-			// Consider windows where this matched line could plausibly align:
-			// try it as the first line of the window.
-			if (seenStarts.has(lineNo)) continue;
-			seenStarts.add(lineNo);
-			const end = Math.min(lineNo + span, contentLines.length);
-			let hits = 0;
-			for (const oh of oldHashes) {
-				for (let i = lineNo; i < end; i++) {
-					if (lineAnchor(contentLines[i]) === oh) {
-						hits++;
-						break;
-					}
-				}
+			const windowHashes: string[] = [];
+			for (let i = start; i <= end; i++) {
+				if (!isBlank(contentLines[i])) windowHashes.push(contentHashes[i]);
 			}
-			candidates.push({ start: lineNo, hits });
+			const matched = countMatchedLines(oldHashes, windowHashes);
+			candidates.push({
+				start: windowStart,
+				end: windowEnd,
+				score: matched / Math.max(oldHashes.length, windowHashes.length),
+				unmatched: windowHashes.length - matched,
+			});
 		}
 	}
 
 	if (candidates.length === 0) return NOT_FOUND;
 
-	candidates.sort((a, b) => b.hits - a.hits);
+	candidates.sort((a, b) => b.score - a.score);
 	const best = candidates[0];
-	const score = best.hits / oldHashes.length;
-	if (score < RECOVERY_THRESHOLD) return NOT_FOUND;
+	if (best.score < RECOVERY_THRESHOLD) return NOT_FOUND;
 
-	const second = candidates.length > 1 ? candidates[1].hits / oldHashes.length : 0;
-	if (score - second < AMBIGUITY_MARGIN && candidates[1].start !== best.start) {
-		return { ...NOT_FOUND, ambiguous: true, score };
+	// Every candidate is a distinct window, so any runner-up within the margin is a
+	// genuine alternative location (or extent) and the choice would be a guess.
+	const second = candidates.length > 1 ? candidates[1].score : 0;
+	if (best.score - second < AMBIGUITY_MARGIN) {
+		return { ...NOT_FOUND, ambiguous: true, score: best.score };
 	}
 
 	return {
 		found: true,
 		startLine: best.start,
-		endLine: Math.min(best.start + span, contentLines.length),
-		score,
+		endLine: best.end,
+		score: best.score,
 		ambiguous: false,
+		unmatchedWindowLines: best.unmatched,
 	};
 }
 

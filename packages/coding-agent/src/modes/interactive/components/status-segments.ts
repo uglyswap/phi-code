@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 
 /**
  * Configurable status line segments for the footer.
@@ -85,6 +85,26 @@ export function computeSessionCostUsd(totals: SessionTokenTotals, modelCost?: Mo
 	return estimate > 0 ? estimate : 0;
 }
 
+/** Token usage of a single message, with the provider-reported cost when known. */
+export interface MessageUsageForCost {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	cost: { total: number };
+}
+
+/**
+ * Cost in USD of one message's usage. Prefers the provider-reported cost; otherwise estimates it
+ * with `rates`, which must be the rates of the model that PRODUCED the message. Summing this per
+ * message keeps multi-model sessions (/plan phases, /model switches) correct, whereas pricing the
+ * whole session at the current model's rates did not.
+ */
+export function computeMessageCostUsd(usage: MessageUsageForCost, rates?: ModelCostRates): number {
+	if (usage.cost.total > 0) return usage.cost.total;
+	return computeSessionCostUsd({ ...usage, cost: 0 }, rates);
+}
+
 /** Format a USD cost for compact footer display. */
 export function formatCostUsd(cost: number): string {
 	if (cost <= 0) return "$0.000";
@@ -107,37 +127,94 @@ export function formatGitSegment(branch: string | null, dirty: boolean): string 
 	return dirty ? `${branch}*` : branch;
 }
 
-/** Runner signature for `git status --porcelain`; injectable for tests. */
-export type GitPorcelainRunner = (repoDir: string) => string | null;
+/**
+ * Runner for `git status --porcelain`; injectable for tests. May answer synchronously or
+ * asynchronously; the default runner is asynchronous so the footer never blocks rendering.
+ */
+export type GitPorcelainRunner = (repoDir: string) => string | null | Promise<string | null>;
 
-function defaultGitPorcelainRunner(repoDir: string): string | null {
-	try {
-		const result = spawnSync("git", ["--no-optional-locks", "status", "--porcelain"], {
-			cwd: repoDir,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "ignore"],
+/** Upper bound for one background `git status`, so a hung git cannot pin a child process. */
+const GIT_STATUS_TIMEOUT_MS = 10_000;
+
+/**
+ * Asynchronous `git status --porcelain`. Only emptiness matters, so the process is stopped as
+ * soon as it prints a non-blank byte: on large repositories this avoids walking every change.
+ * `--no-optional-locks` keeps the background call from taking index.lock.
+ */
+function defaultGitPorcelainRunner(repoDir: string): Promise<string | null> {
+	return new Promise((resolvePromise) => {
+		let settled = false;
+		let output = "";
+		const finish = (value: string | null) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			resolvePromise(value);
+		};
+		let child: ReturnType<typeof spawn>;
+		try {
+			child = spawn("git", ["--no-optional-locks", "status", "--porcelain"], {
+				cwd: repoDir,
+				stdio: ["ignore", "pipe", "ignore"],
+				windowsHide: true,
+			});
+		} catch {
+			resolvePromise(null);
+			return;
+		}
+		const timer = setTimeout(() => {
+			child.kill();
+			finish(null);
+		}, GIT_STATUS_TIMEOUT_MS);
+		timer.unref?.();
+		child.stdout?.setEncoding("utf8");
+		child.stdout?.on("data", (chunk: string) => {
+			output += chunk;
+			if (output.trim().length > 0) {
+				finish(output);
+				child.kill();
+			}
 		});
-		if (result.status !== 0 || typeof result.stdout !== "string") return null;
-		return result.stdout;
-	} catch {
-		return null;
-	}
+		// "error" (git missing: ENOENT) must be consumed or Node raises an unhandled exception.
+		child.on("error", () => finish(null));
+		child.on("close", (code) => finish(code === 0 ? output : null));
+	});
+}
+
+interface GitDirtyCacheEntry {
+	/** null when git failed or the path is not a repository. */
+	dirty: boolean | null;
+	expiresAt: number;
 }
 
 /**
- * Dirty-state lookup with a 2 second TTL cache. `git status --porcelain` is
- * too slow to run on every footer frame, so results are cached per repo.
+ * Dirty-state lookup with a 2 second TTL cache, called from the footer render path.
+ *
+ * With an asynchronous runner (the default), isDirty() never blocks: it returns the last known
+ * value (null before the first answer) and refreshes it in the background, at most one git
+ * process per repository at a time; `onUpdate` fires when a refresh changes the answer so the
+ * caller can re-render. The previous implementation ran a synchronous `git status` on the render
+ * path every 2 seconds, freezing the TUI on large repositories and on Windows.
  * Returns null when git is unavailable or the path is not a repo.
  */
 export class GitDirtyCache {
 	private static readonly TTL_MS = 2000;
-	private cache = new Map<string, { dirty: boolean; expiresAt: number }>();
+	private cache = new Map<string, GitDirtyCacheEntry>();
+	/** Token of the refresh in flight per repository; invalidate() drops it so a stale answer is ignored. */
+	private inFlight = new Map<string, number>();
+	private nextRefreshToken = 0;
 	private runner: GitPorcelainRunner;
 	private now: () => number;
+	private onUpdate: (() => void) | undefined;
 
-	constructor(runner: GitPorcelainRunner = defaultGitPorcelainRunner, now: () => number = Date.now) {
+	constructor(
+		runner: GitPorcelainRunner = defaultGitPorcelainRunner,
+		now: () => number = Date.now,
+		onUpdate?: () => void,
+	) {
 		this.runner = runner;
 		this.now = now;
+		this.onUpdate = onUpdate;
 	}
 
 	isDirty(repoDir: string): boolean | null {
@@ -146,18 +223,41 @@ export class GitDirtyCache {
 		if (cached && cached.expiresAt > now) {
 			return cached.dirty;
 		}
+		if (this.inFlight.has(repoDir)) {
+			return cached?.dirty ?? null;
+		}
+
 		const output = this.runner(repoDir);
-		if (output === null) return null;
-		const dirty = parseGitPorcelainDirty(output);
-		this.cache.set(repoDir, { dirty, expiresAt: now + GitDirtyCache.TTL_MS });
-		return dirty;
+		if (!(output instanceof Promise)) {
+			if (output === null) return null;
+			const dirty = parseGitPorcelainDirty(output);
+			this.cache.set(repoDir, { dirty, expiresAt: now + GitDirtyCache.TTL_MS });
+			return dirty;
+		}
+
+		const token = ++this.nextRefreshToken;
+		this.inFlight.set(repoDir, token);
+		void output
+			.catch(() => null)
+			.then((result) => {
+				if (this.inFlight.get(repoDir) !== token) return;
+				this.inFlight.delete(repoDir);
+				const dirty = result === null ? null : parseGitPorcelainDirty(result);
+				const previous = this.cache.get(repoDir)?.dirty ?? null;
+				// Failures are cached too, so a broken git is not respawned on every frame.
+				this.cache.set(repoDir, { dirty, expiresAt: this.now() + GitDirtyCache.TTL_MS });
+				if (dirty !== previous) this.onUpdate?.();
+			});
+		return cached?.dirty ?? null;
 	}
 
 	invalidate(repoDir?: string): void {
 		if (repoDir === undefined) {
 			this.cache.clear();
+			this.inFlight.clear();
 		} else {
 			this.cache.delete(repoDir);
+			this.inFlight.delete(repoDir);
 		}
 	}
 }

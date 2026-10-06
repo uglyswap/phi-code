@@ -1,5 +1,6 @@
 /**
- * Config file watcher - debounced fs.watch wrapper for ~/.phi/agent/*.json.
+ * Config file watcher - debounced fs.watch wrapper for <agent dir>/*.json
+ * (~/.phi/agent by default, or PHI_CODING_AGENT_DIR).
  *
  * Per Q5 + Q9: emits "<file>_changed" events when models.json or routing.json
  * are modified on disk. Debounced 300ms to coalesce burst writes (atomic
@@ -20,8 +21,8 @@
 
 import { EventEmitter } from "node:events";
 import { existsSync, type FSWatcher, watch } from "node:fs";
-import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { getAgentDir } from "../config.ts";
 
 interface WatchedFile {
 	path: string;
@@ -38,7 +39,9 @@ export class ConfigWatcher extends EventEmitter {
 	constructor(options?: { debounceMs?: number; agentDir?: string }) {
 		super();
 		this.debounceMs = options?.debounceMs ?? 300;
-		const agentDir = options?.agentDir ?? join(homedir(), ".phi", "agent");
+		// getAgentDir() honors PHI_CODING_AGENT_DIR (and the configured config dir name);
+		// a hard-coded ~/.phi/agent watched files the agent never reads.
+		const agentDir = options?.agentDir ?? getAgentDir();
 		this.files = [
 			{
 				path: join(agentDir, "models.json"),

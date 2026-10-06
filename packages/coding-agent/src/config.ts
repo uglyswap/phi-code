@@ -4,6 +4,7 @@ import { basename, dirname, join, resolve, sep, win32 } from "path";
 import { fileURLToPath } from "url";
 import { spawnProcessSync } from "./utils/child-process.ts";
 import { normalizePath } from "./utils/paths.ts";
+import { stripBom } from "./utils/text.ts";
 
 // =============================================================================
 // Package Detection
@@ -429,6 +430,18 @@ export function getExportTemplateDir(): string {
 	return join(packageDir, srcOrDist, "core", "export-html");
 }
 
+/**
+ * Get path to the bundled phi extensions (TypeScript sources loaded at runtime).
+ * - For Bun binary: extensions/phi/ next to executable (staged by scripts/build-binaries.sh)
+ * - For Node.js / tsx: <package>/extensions/phi/
+ *
+ * Never derive this from import.meta.url: in a Bun binary it points into the
+ * embedded filesystem ($bunfs / B:\~BUN), where the extensions do not exist.
+ */
+export function getBundledExtensionsDir(): string {
+	return join(getPackageDir(), "extensions", "phi");
+}
+
 /** Get path to package.json */
 export function getPackageJsonPath(): string {
 	return join(getPackageDir(), "package.json");
@@ -489,7 +502,7 @@ interface PackageJson {
 
 let pkg: PackageJson = {};
 try {
-	pkg = JSON.parse(readFileSync(getPackageJsonPath(), "utf-8")) as PackageJson;
+	pkg = JSON.parse(stripBom(readFileSync(getPackageJsonPath(), "utf-8"))) as PackageJson;
 } catch (e: unknown) {
 	const err = e as NodeJS.ErrnoException;
 	if (err.code !== "ENOENT") throw e;

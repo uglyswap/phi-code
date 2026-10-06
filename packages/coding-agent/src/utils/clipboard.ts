@@ -1,23 +1,10 @@
-import { type ExecFileSyncOptionsWithStringEncoding, execFileSync, execSync, spawn } from "child_process";
 import { platform } from "os";
+import { runClipboardCommand } from "./clipboard-command.ts";
 import { isWaylandSession } from "./clipboard-image.ts";
 import { clipboard } from "./clipboard-native.ts";
 
-type NativeClipboardExecOptions = {
-	input: string;
-	timeout: number;
-	stdio: ["pipe", "ignore", "ignore"];
-};
-
-function copyToX11Clipboard(options: NativeClipboardExecOptions): void {
-	try {
-		execSync("xclip -selection clipboard", options);
-	} catch {
-		execSync("xsel --clipboard --input", options);
-	}
-}
-
 const MAX_OSC52_ENCODED_LENGTH = 100_000;
+const CLIPBOARD_COMMAND_TIMEOUT_MS = 5000;
 
 function isRemoteSession(env: NodeJS.ProcessEnv = process.env): boolean {
 	return Boolean(env.SSH_CONNECTION || env.SSH_CLIENT || env.MOSH_CONNECTION);
@@ -32,29 +19,15 @@ function emitOsc52(text: string): boolean {
 	return true;
 }
 
-type ClipboardReadResult = { ok: true; text: string | null } | { ok: false };
-
-const READ_CLIPBOARD_OPTIONS: ExecFileSyncOptionsWithStringEncoding = {
-	encoding: "utf8",
-	maxBuffer: 50 * 1024 * 1024,
-	timeout: 5000,
-};
-
-function readWaylandClipboardText(): ClipboardReadResult {
-	try {
-		const text = execFileSync("wl-paste", ["--no-newline", "--type", "text"], READ_CLIPBOARD_OPTIONS);
-		return { ok: true, text: text || null };
-	} catch {
-		return { ok: false };
-	}
-}
-
 /** Read plain text from the system clipboard. */
 export async function readClipboardText(): Promise<string | null> {
 	if (platform() === "linux" && isWaylandSession() && process.env.WAYLAND_DISPLAY) {
-		const result = readWaylandClipboardText();
-		if (result.ok) {
-			return result.text;
+		// Asynchronous so a slow or hung wl-paste never blocks the TUI event loop.
+		const bytes = await runClipboardCommand("wl-paste", ["--no-newline", "--type", "text"], {
+			timeoutMs: CLIPBOARD_COMMAND_TIMEOUT_MS,
+		});
+		if (bytes !== undefined) {
+			return bytes.toString("utf8") || null;
 		}
 	}
 
@@ -70,10 +43,40 @@ export async function readClipboardText(): Promise<string | null> {
 	}
 }
 
+/** Platform clipboard writers, in preference order. */
+function getClipboardWriteCommands(p: NodeJS.Platform, env: NodeJS.ProcessEnv): Array<[string, string[]]> {
+	if (p === "darwin") return [["pbcopy", []]];
+	if (p === "win32") return [["clip", []]];
+
+	const commands: Array<[string, string[]]> = [];
+	if (env.TERMUX_VERSION) commands.push(["termux-clipboard-set", []]);
+	if (isWaylandSession(env) && env.WAYLAND_DISPLAY) commands.push(["wl-copy", []]);
+	if (env.DISPLAY) {
+		commands.push(["xclip", ["-selection", "clipboard"]], ["xsel", ["--clipboard", "--input"]]);
+	}
+	return commands;
+}
+
+function getClipboardFailureMessage(p: NodeJS.Platform, env: NodeJS.ProcessEnv): string {
+	if (p === "linux") {
+		if (env.TERMUX_VERSION) {
+			return "Failed to copy to clipboard: install the Termux:API app and the `termux-api` package";
+		}
+		if (env.WAYLAND_DISPLAY) {
+			return "Failed to copy to clipboard: install `wl-clipboard` (`wl-copy`) or check Wayland access";
+		}
+		if (env.DISPLAY) {
+			return "Failed to copy to clipboard: install `xclip` or `xsel`, or check X11 access";
+		}
+	}
+	return "Failed to copy to clipboard";
+}
+
 export async function copyToClipboard(text: string): Promise<void> {
 	let copied = false;
 
 	const p = platform();
+	const env = process.env;
 
 	// Prefer direct clipboard writes. Emitting OSC 52 first can make terminals
 	// write the same native clipboard concurrently with the addon, and very large
@@ -94,82 +97,36 @@ export async function copyToClipboard(text: string): Promise<void> {
 		// Fall through to platform-specific clipboard tools.
 	}
 
-	const remote = isRemoteSession();
+	const remote = isRemoteSession(env);
 	if (copied && !remote) {
 		return;
 	}
 
-	const options: NativeClipboardExecOptions = { input: text, timeout: 5000, stdio: ["pipe", "ignore", "ignore"] };
-
 	if (!copied) {
-		try {
-			if (p === "darwin") {
-				execSync("pbcopy", options);
+		// Spawned asynchronously (no execSync): a hung clipboard tool must not freeze the TUI.
+		for (const [command, args] of getClipboardWriteCommands(p, env)) {
+			const result = await runClipboardCommand(command, args, {
+				input: text,
+				timeoutMs: CLIPBOARD_COMMAND_TIMEOUT_MS,
+			});
+			if (result !== undefined) {
 				copied = true;
-			} else if (p === "win32") {
-				execSync("clip", options);
-				copied = true;
-			} else {
-				// Linux. Try Termux, Wayland, or X11 clipboard tools.
-				if (process.env.TERMUX_VERSION) {
-					try {
-						execSync("termux-clipboard-set", options);
-						copied = true;
-					} catch {
-						// Fall back to Wayland or X11 tools.
-					}
-				}
-
-				if (!copied) {
-					const hasWaylandDisplay = Boolean(process.env.WAYLAND_DISPLAY);
-					const hasX11Display = Boolean(process.env.DISPLAY);
-					const isWayland = isWaylandSession();
-					if (isWayland && hasWaylandDisplay) {
-						try {
-							// Verify wl-copy exists (spawn errors are async and won't be caught)
-							execSync("which wl-copy", { stdio: "ignore" });
-							// wl-copy with execSync hangs due to fork behavior; use spawn instead.
-							// Await the exit code and only claim success on a clean exit, so a
-							// failed wl-copy falls through to the xclip/OSC 52 fallbacks.
-							const wlCopyExit = await new Promise<number>((resolve) => {
-								const proc = spawn("wl-copy", [], { stdio: ["pipe", "ignore", "ignore"] });
-								proc.on("error", () => resolve(1));
-								proc.on("close", (code) => resolve(code ?? 1));
-								proc.stdin.on("error", () => {
-									// Ignore EPIPE errors if wl-copy exits early
-								});
-								proc.stdin.write(text);
-								proc.stdin.end();
-							});
-							if (wlCopyExit === 0) {
-								copied = true;
-							} else if (hasX11Display) {
-								copyToX11Clipboard(options);
-								copied = true;
-							}
-						} catch {
-							if (hasX11Display) {
-								copyToX11Clipboard(options);
-								copied = true;
-							}
-						}
-					} else if (hasX11Display) {
-						copyToX11Clipboard(options);
-						copied = true;
-					}
-				}
+				break;
 			}
-		} catch {
-			// Fall through to OSC 52 fallback.
 		}
 	}
 
-	if (remote || !copied) {
-		const osc52Copied = emitOsc52(text);
-		copied = copied || osc52Copied;
+	// OSC 52 cannot be verified, so a local desktop session reports the failure instead of
+	// a false success (#9618). Remote sessions always emit it to reach the client clipboard,
+	// and display-less Linux (containers, WSL without WSLg) has no other clipboard route.
+	const headless = p === "linux" && !env.DISPLAY && !env.WAYLAND_DISPLAY && !env.TERMUX_VERSION;
+	let oversized = false;
+	if (remote || (!copied && headless)) {
+		if (emitOsc52(text)) copied = true;
+		else oversized = true;
 	}
 
-	if (!copied) {
-		throw new Error("Failed to copy to clipboard");
-	}
+	if (copied) return;
+	if (oversized) throw new Error("Failed to copy to clipboard: text exceeds the OSC 52 size limit");
+	throw new Error(getClipboardFailureMessage(p, env));
 }

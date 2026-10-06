@@ -6,7 +6,7 @@ import { main } from "./main.ts";
 
 process.title = `${APP_NAME}-rpc`;
 setBrandedEnv(process.env, "CODING_AGENT", "true");
-process.env.AI_AGENT = "pi";
+process.env.AI_AGENT = APP_NAME;
 process.emitWarning = (() => {}) as typeof process.emitWarning;
 
 configureHttpDispatcher();

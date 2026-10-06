@@ -42,6 +42,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	const contextFiles = providedContextFiles ?? [];
 	const skills = providedSkills ?? [];
+	const tools = selectedTools || ["read", "bash", "edit", "write"];
+	// Skills only need a tool that can read their files: bash works too (#8552).
+	const skillFileReadTool = (["read", "bash"] as const).find((tool) => tools.includes(tool));
 
 	if (customPrompt) {
 		let prompt = customPrompt;
@@ -60,10 +63,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 			prompt += "</project_context>\n";
 		}
 
-		// Append skills section (only if read tool is available)
-		const customPromptHasRead = !selectedTools || selectedTools.includes("read");
-		if (customPromptHasRead && skills.length > 0) {
-			prompt += formatSkillsForPrompt(skills);
+		// Append skills when a tool capable of reading their files is available.
+		if (skillFileReadTool && skills.length > 0) {
+			prompt += formatSkillsSection(skills, skillFileReadTool);
 		}
 
 		prompt += `\nCurrent working directory: ${promptCwd}\n`;
@@ -78,7 +80,6 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	// Build tools list based on selected tools.
 	// A tool appears in Available tools only when the caller provides a one-line snippet.
-	const tools = selectedTools || ["read", "bash", "edit", "write"];
 	const visibleTools = tools.filter((name) => !!toolSnippets?.[name]);
 	const toolsList =
 		visibleTools.length > 0 ? visibleTools.map((name) => `- ${name}: ${toolSnippets![name]}`).join("\n") : "(none)";
@@ -98,7 +99,6 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const hasGrep = tools.includes("grep");
 	const hasFind = tools.includes("find");
 	const hasLs = tools.includes("ls");
-	const hasRead = tools.includes("read");
 
 	// File exploration guidelines
 	if (hasBash && !hasGrep && !hasFind && !hasLs) {
@@ -118,24 +118,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
 
-	// Phi Code critical rules block - placed FIRST so LLMs see it before
-	// anything else. The XML <critical_rule> tag follows the format LLMs
-	// (Claude, Kimi, GLM) respect most reliably for high-priority instructions.
-	// The memory_search rule is also re-injected per-turn by extensions/phi/memory.ts
-	// via the before_agent_start hook for maximum enforcement.
-	const criticalRules = `<critical_rule priority="absolute">
-BEFORE responding to ANY user message, you MUST first call \`memory_search\`
-with relevant keywords from the user's intent. This is non-negotiable.
-Even for simple questions, call memory_search first to check for prior
-context, decisions, or saved notes about this project. Only AFTER reading
-the results, proceed with the task.
-
-AFTER completing any significant work, you MUST call \`memory_write\` to
-save what you did and what you learned. This is how the project memory
-grows across sessions.
-</critical_rule>
-
-`;
+	const criticalRules = buildMemoryCriticalRules(tools);
 
 	let prompt = `${criticalRules}You are an expert coding assistant operating inside ${APP_NAME}, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
 
@@ -170,12 +153,52 @@ ${APP_NAME} documentation (read only when the user asks about ${APP_NAME} itself
 		prompt += "</project_context>\n";
 	}
 
-	// Append skills section (only if read tool is available)
-	if (hasRead && skills.length > 0) {
-		prompt += formatSkillsForPrompt(skills);
+	// Append skills when a tool capable of reading their files is available.
+	if (skillFileReadTool && skills.length > 0) {
+		prompt += formatSkillsSection(skills, skillFileReadTool);
 	}
 
 	prompt += `\nCurrent working directory: ${promptCwd}`;
 
 	return prompt;
+}
+
+const READ_TOOL_SKILL_HINT = "Use the read tool to load a skill's file when the task matches its description.";
+const BASH_SKILL_HINT = "Use bash to load a skill's file when the task matches its description.";
+
+/** Skills section, telling the model to load skill files with bash when the read tool is not active. */
+function formatSkillsSection(skills: Skill[], fileReadTool: "read" | "bash"): string {
+	const section = formatSkillsForPrompt(skills);
+	return fileReadTool === "read" ? section : section.replace(READ_TOOL_SKILL_HINT, BASH_SKILL_HINT);
+}
+
+/**
+ * Phi Code memory rules, placed FIRST so LLMs see them before anything else. The XML
+ * <critical_rule> tag follows the format LLMs (Claude, Kimi, GLM) respect most reliably for
+ * high-priority instructions; extensions/phi/memory.ts also re-injects the search rule per turn.
+ *
+ * Each rule is emitted only when its tool is active: imposing memory_search when the memory
+ * extension is absent or filtered out (--no-extensions, --tools) made models call a tool that
+ * does not exist on every turn.
+ */
+function buildMemoryCriticalRules(tools: string[]): string {
+	const rules: string[] = [];
+	if (tools.includes("memory_search")) {
+		rules.push(`BEFORE responding to ANY user message, you MUST first call \`memory_search\`
+with relevant keywords from the user's intent. This is non-negotiable.
+Even for simple questions, call memory_search first to check for prior
+context, decisions, or saved notes about this project. Only AFTER reading
+the results, proceed with the task.`);
+	}
+	if (tools.includes("memory_write")) {
+		rules.push(`AFTER completing any significant work, you MUST call \`memory_write\` to
+save what you did and what you learned. This is how the project memory
+grows across sessions.`);
+	}
+	if (rules.length === 0) return "";
+	return `<critical_rule priority="absolute">
+${rules.join("\n\n")}
+</critical_rule>
+
+`;
 }

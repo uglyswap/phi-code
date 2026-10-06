@@ -16,7 +16,7 @@ import {
 	createCustomMessage,
 } from "../messages.ts";
 import type { ReadonlySessionManager, SessionEntry } from "../session-manager.ts";
-import { completeSummarization, estimateTokens } from "./compaction.ts";
+import { completeSummarization, estimateTokens, getSummarizationFailure } from "./compaction.ts";
 import {
 	computeFileLists,
 	createFileOps,
@@ -253,6 +253,9 @@ export function prepareBranchEntries(entries: SessionEntry[], tokenBudget: numbe
 /** Minimum positive token budget when contextWindow - reserveTokens would be <= 0 */
 const MIN_BRANCH_TOKEN_BUDGET = 1000;
 
+/** Output cap for branch summaries, clamped to the model's own maxTokens. */
+const BRANCH_SUMMARY_MAX_TOKENS = 4096;
+
 const BRANCH_SUMMARY_PREAMBLE = `The user explored a different conversation branch before returning here.
 Summary of that exploration:
 
@@ -353,15 +356,24 @@ export async function generateBranchSummary(
 	// without running through agent state/events. Retried via completeSummarization
 	// so transient stream drops reuse the configured retry policy.
 	const context = { systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages };
-	const requestOptions: SimpleStreamOptions = { apiKey, headers, env, signal, maxTokens: 2048 };
+	// 2048 tokens were consumed by thinking on reasoning models, so the summary failed or was cut.
+	const maxTokens = Math.min(
+		BRANCH_SUMMARY_MAX_TOKENS,
+		model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
+	);
+	const requestOptions: SimpleStreamOptions = { apiKey, headers, env, signal, maxTokens };
 	const response = await completeSummarization(model, context, requestOptions, streamFn, retry, callbacks);
 
 	// Check if aborted or errored
 	if (response.stopReason === "aborted") {
 		return { aborted: true };
 	}
-	if (response.stopReason === "error") {
-		return { error: response.errorMessage || "Summarization failed" };
+	const failure = getSummarizationFailure(response, "Branch summarization");
+	if (failure) {
+		return { error: failure };
+	}
+	if (response.content.some((block) => block.type === "toolCall")) {
+		return { error: "Branch summarization attempted to call a tool" };
 	}
 
 	let summary = contentText(response.content);

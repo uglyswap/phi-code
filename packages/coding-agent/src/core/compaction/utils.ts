@@ -89,6 +89,21 @@ export function formatFileOperations(readFiles: string[], modifiedFiles: string[
 	return `\n\n${FILE_REREAD_POINTER}\n\n${sections.join("\n\n")}`;
 }
 
+/**
+ * Remove the blocks added by {@link formatFileOperations} (re-read pointer,
+ * <read-files>, <modified-files>) from a summary. compact() re-appends the
+ * cumulative file lists after every compaction, so these blocks are metadata,
+ * not summary content the model is expected to reproduce.
+ */
+export function stripFileOperations(summary: string): string {
+	return summary
+		.split(FILE_REREAD_POINTER)
+		.join("")
+		.replace(/<(read-files|modified-files)>[\s\S]*?<\/\1>/g, "")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
+}
+
 // ============================================================================
 // Message Serialization
 // ============================================================================

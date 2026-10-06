@@ -24,6 +24,7 @@ import {
 	formatFileOperations,
 	SUMMARIZATION_SYSTEM_PROMPT,
 	serializeConversation,
+	stripFileOperations,
 } from "./utils.ts";
 
 // ============================================================================
@@ -431,13 +432,11 @@ export function findCutPoint(
 
 		// Check if we've exceeded the budget
 		if (accumulatedTokens >= keepRecentTokens) {
-			// Find the closest valid cut point at or after this entry
-			for (let c = 0; c < cutPoints.length; c++) {
-				if (cutPoints[c] >= i) {
-					cutIndex = cutPoints[c];
-					break;
-				}
-			}
+			// Prefer the closest valid cut point at or after this entry. If trailing
+			// tool results exceed the budget by themselves, keep their preceding
+			// assistant tool call instead of falling back to the first message
+			// (which would compact nothing).
+			cutIndex = cutPoints.find((candidate) => candidate >= i) ?? cutPoints[cutPoints.length - 1];
 			break;
 		}
 	}
@@ -561,6 +560,20 @@ Use this EXACT format:
 - [Preserve important context, add new if needed]
 
 Keep each section concise. Preserve exact file paths, function names, and error messages. If a tool result was marked as truncated, mark any claim derived from it as [UNCERTAIN - based on truncated output] rather than stating it as fact.`;
+
+/**
+ * Returns an error message when a summarization response cannot safely be persisted.
+ * A length stop contains partial text and must not become a session checkpoint.
+ */
+export function getSummarizationFailure(response: AssistantMessage, label: string): string | undefined {
+	if (response.stopReason === "error") {
+		return `${label} failed: ${response.errorMessage || "Unknown error"}`;
+	}
+	if (response.stopReason === "length") {
+		return `${label} failed: generation hit the token cap and the summary is incomplete`;
+	}
+	return undefined;
+}
 
 function createSummarizationOptions(
 	model: Model<any>,
@@ -702,8 +715,12 @@ export async function generateSummaryWithUsage(
 		callbacks,
 	);
 
-	if (response.stopReason === "error") {
-		throw new Error(`Summarization failed: ${response.errorMessage || "Unknown error"}`);
+	const failure = getSummarizationFailure(response, "Summarization");
+	if (failure) {
+		throw new Error(failure);
+	}
+	if (response.content.some((block) => block.type === "toolCall")) {
+		throw new Error("Summarization attempted to call a tool");
 	}
 
 	const textContent = contentText(response.content);
@@ -729,7 +746,12 @@ const SUMMARY_UNION_CAP_CHARS = 60_000;
  *
  * Exported for tests.
  */
-export function resolveSummaryUnion(previousSummary: string | undefined, textContent: string): string {
+export function resolveSummaryUnion(previousSummaryWithFiles: string | undefined, textContent: string): string {
+	if (!previousSummaryWithFiles) return textContent;
+	// The previous checkpoint ends with the <read-files>/<modified-files> lists appended by
+	// compact(). The model is not asked to copy them (compact() re-appends the cumulative
+	// lists), so comparing against them flagged "lost paths" on almost every compaction.
+	const previousSummary = stripFileOperations(previousSummaryWithFiles);
 	if (!previousSummary) return textContent;
 
 	// Cap check FIRST: when the union is impossible anyway, skip the drift
@@ -888,20 +910,23 @@ export function prepareCompaction(
 // Main compaction function
 // ============================================================================
 
-const TURN_PREFIX_SUMMARIZATION_PROMPT = `This is the PREFIX of a turn that was too large to keep. The SUFFIX (recent work) is retained.
+// The continuation-oriented wording and the Markdown "# Conversation" / "# Instructions"
+// boundary avoid refusals from Claude Fable 5.1, which read the old PREFIX/SUFFIX phrasing
+// inside <conversation> tags as a request to reconstruct hidden content (#9652).
+const TURN_PREFIX_SUMMARIZATION_PROMPT = `The messages above are earlier context from an ongoing conversation. Later messages are stored separately and do not need to be reconstructed.
 
-Summarize the prefix to provide context for the retained suffix:
+Create a concise checkpoint of the user's request and the progress shown above. This checkpoint will be placed before the later messages so the conversation can continue with the necessary context.
 
 ## Original Request
-[What did the user ask for in this turn?]
+[What did the user ask for?]
 
-## Early Progress
-- [Key decisions and work done in the prefix]
+## Progress So Far
+- [Key decisions and work completed in these messages]
 
-## Context for Suffix
-- [Information needed to understand the retained recent work]
+## Context Needed to Continue
+- [Information from these messages needed to understand the later work]
 
-Be concise. Focus on what's needed to understand the kept suffix.`;
+Only summarize information explicitly present above. Do not infer or recreate later messages.`;
 
 /**
  * Generate summaries for compaction using prepared data.
@@ -939,7 +964,10 @@ export async function compact(
 	let summaryUsage: Usage;
 
 	if (isSplitTurn && turnPrefixMessages.length > 0) {
-		let historyText = "No prior history.";
+		// Nothing new to summarize before the split turn: keep the previous checkpoint instead of
+		// dropping it (frequent when oversized trailing tool results force the cut, #9740).
+		// File lists are stripped because they are re-appended below.
+		let historyText = previousSummary ? stripFileOperations(previousSummary) : "No prior history.";
 		let historyUsage: Usage | undefined;
 		if (messagesToSummarize.length > 0) {
 			const historyResult = await generateSummaryWithUsage(
@@ -1036,7 +1064,7 @@ async function generateTurnPrefixSummary(
 	); // Smaller budget for turn prefix
 	const llmMessages = convertToLlm(messages);
 	const conversationText = serializeConversation(llmMessages);
-	const promptText = `<conversation>\n${conversationText}\n</conversation>\n\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`;
+	const promptText = `# Conversation\n${conversationText}\n\n# Instructions\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`;
 	const summarizationMessages = [
 		{
 			role: "user" as const,
@@ -1054,8 +1082,12 @@ async function generateTurnPrefixSummary(
 		callbacks,
 	);
 
-	if (response.stopReason === "error") {
-		throw new Error(`Turn prefix summarization failed: ${response.errorMessage || "Unknown error"}`);
+	const failure = getSummarizationFailure(response, "Turn prefix summarization");
+	if (failure) {
+		throw new Error(failure);
+	}
+	if (response.content.some((block) => block.type === "toolCall")) {
+		throw new Error("Turn prefix summarization attempted to call a tool");
 	}
 
 	return {

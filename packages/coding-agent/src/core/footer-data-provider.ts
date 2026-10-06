@@ -117,7 +117,8 @@ export class FooterDataProvider {
 	private refreshInFlight = false;
 	private refreshPending = false;
 	private disposed = false;
-	private gitDirtyCache = new GitDirtyCache();
+	// Redraws as soon as an async `git status` answer changes the dirty marker.
+	private gitDirtyCache = new GitDirtyCache(undefined, undefined, () => this.notifyBranchChange());
 
 	constructor(cwd: string) {
 		this.cwd = cwd;

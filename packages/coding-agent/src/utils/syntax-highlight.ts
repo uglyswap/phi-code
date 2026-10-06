@@ -87,7 +87,15 @@ export function renderHighlightedHtml(html: string, theme: HighlightTheme = {}):
 			return;
 		}
 		const formatter = getActiveFormatter(scopes, theme);
-		output += formatter ? formatter(textBuffer) : textBuffer;
+		// Format each line separately: callers split the output into lines, and an ANSI
+		// color opened on one line and closed on a later one leaves the middle lines
+		// uncolored (multiline strings, docstrings, block comments) (#10143).
+		output += formatter
+			? textBuffer
+					.split("\n")
+					.map((line) => (line ? formatter(line) : line))
+					.join("\n")
+			: textBuffer;
 		textBuffer = "";
 	};
 

@@ -193,9 +193,24 @@ export interface Edit {
 	newText: string;
 }
 
+/** An edit applied through hashline anchor recovery instead of an exact or fuzzy match. */
+export interface RecoveredEdit {
+	editIndex: number;
+	/** Start line (0-based) of the replaced window */
+	startLine: number;
+	/** End line (0-based, exclusive) of the replaced window */
+	endLine: number;
+	/** Similarity between oldText and the replaced window (0-1) */
+	score: number;
+	/** Non-empty lines of the replaced window that matched no oldText line */
+	unmatchedWindowLines: number;
+}
+
 export interface AppliedEditsResult {
 	baseContent: string;
 	newContent: string;
+	/** Edits that were applied by anchor recovery; the caller must report them to the model. */
+	recoveredEdits?: RecoveredEdit[];
 }
 
 /**
@@ -323,6 +338,7 @@ export function applyEditsToNormalizedContent(
 	const replacementBaseContent = usedFuzzyMatch ? normalizeForFuzzyMatch(normalizedContent) : normalizedContent;
 
 	const matchedEdits: MatchedEdit[] = [];
+	const recoveredEdits: RecoveredEdit[] = [];
 	for (let i = 0; i < normalizedEdits.length; i++) {
 		const edit = normalizedEdits[i];
 		const matchResult = fuzzyFindText(replacementBaseContent, edit.oldText);
@@ -340,6 +356,13 @@ export function applyEditsToNormalizedContent(
 					matchLength += lines[l].length + (l < recovery.endLine - 1 ? 1 : 0);
 				}
 				matchedEdits.push({ editIndex: i, matchIndex, matchLength, newText: edit.newText });
+				recoveredEdits.push({
+					editIndex: i,
+					startLine: recovery.startLine,
+					endLine: recovery.endLine,
+					score: recovery.score,
+					unmatchedWindowLines: recovery.unmatchedWindowLines,
+				});
 				continue;
 			}
 			if (recovery.ambiguous) {
@@ -383,7 +406,7 @@ export function applyEditsToNormalizedContent(
 		throw getNoChangeError(path, normalizedEdits.length);
 	}
 
-	return { baseContent, newContent };
+	return recoveredEdits.length > 0 ? { baseContent, newContent, recoveredEdits } : { baseContent, newContent };
 }
 
 /** Generate a standard unified patch. */

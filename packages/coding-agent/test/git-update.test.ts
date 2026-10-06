@@ -438,7 +438,11 @@ describe("DefaultPackageManager git update", () => {
 
 		it("should not refresh pinned temporary git sources", async () => {
 			const managerWithPaths = packageManager as unknown as PackageManagerPathInternals;
-			const cachedDir = managerWithPaths.getGitInstallPath(managerWithPaths.parseSource(gitSource), "temporary");
+			// The pinned ref is part of the temporary cache key (#9982).
+			const cachedDir = managerWithPaths.getGitInstallPath(
+				managerWithPaths.parseSource(`${gitSource}@main`),
+				"temporary",
+			);
 			const extensionFile = join(cachedDir, "pi-extensions", "session-breakdown.ts");
 
 			rmSync(cachedDir, { recursive: true, force: true });

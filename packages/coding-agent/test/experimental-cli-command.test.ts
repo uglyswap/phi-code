@@ -95,8 +95,9 @@ describe("experimental CLI commands", () => {
 			command: { command: "pi", options: { fileArgs: ["prompt.md"] } },
 		});
 		if (!result.ok || result.command.command !== "pi") return;
-		expect(result.command.options.unknownFlags.get("unknown")).toBe(true);
-		expect(result.command.options.unknownFlags.get("listen")).toBe("unix:///tmp/pi.sock");
+		// "--" ends option parsing (#7269): what follows is message text, not flags.
+		expect(result.command.options.unknownFlags).toEqual(new Map([["unknown", true]]));
+		expect(result.command.options.messages).toEqual(["--listen", "unix:///tmp/pi.sock"]);
 	});
 
 	test.each([

@@ -58,7 +58,7 @@ export async function getLatestRelease(
 	currentVersion: string,
 	options: { timeoutMs?: number; retry?: boolean } = {},
 ): Promise<LatestRelease | undefined> {
-	// PI_SKIP_VERSION_CHECK only disables the *automatic* check
+	// PHI_SKIP_VERSION_CHECK (or PI_SKIP_VERSION_CHECK) only disables the *automatic* check
 	// (checkForNewVersion); an explicit `phi update` still queries the registry.
 	if (readBrandedEnv("OFFLINE")) return undefined;
 
@@ -104,7 +104,8 @@ export async function getLatestVersion(
 }
 
 export async function checkForNewVersion(currentVersion: string): Promise<LatestRelease | undefined> {
-	if (process.env.PI_SKIP_VERSION_CHECK) return undefined;
+	// PHI_SKIP_VERSION_CHECK, with the inherited PI_SKIP_VERSION_CHECK as a fallback.
+	if (readBrandedEnv("SKIP_VERSION_CHECK")) return undefined;
 
 	try {
 		const latestRelease = await getLatestRelease(currentVersion);

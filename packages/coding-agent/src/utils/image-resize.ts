@@ -88,8 +88,10 @@ export async function resizeImage(
 	options?: ImageResizeOptions,
 ): Promise<ResizedImage | null> {
 	const isTypeScriptRuntime = import.meta.url.endsWith(".ts");
+	// The compiled package ships image-resize-worker.js next to this file; pointing at the
+	// .ts source there makes the worker fail to load and silently resize on the main thread.
 	const workerUrl = new URL(
-		isTypeScriptRuntime ? "./image-resize-worker.ts" : "./image-resize-worker.ts",
+		isTypeScriptRuntime ? "./image-resize-worker.ts" : "./image-resize-worker.js",
 		import.meta.url,
 	);
 

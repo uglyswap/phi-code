@@ -17,6 +17,7 @@ import {
 	generateDiffString,
 	generateUnifiedPatch,
 	normalizeToLF,
+	type RecoveredEdit,
 	restoreLineEndings,
 	stripBom,
 } from "./edit-diff.ts";
@@ -72,6 +73,17 @@ type LegacyEditToolInput = EditToolInput & {
 	newText?: unknown;
 };
 
+type SingleEditInput = { oldText: string; newText: string };
+
+function isSingleEditInput(value: unknown): value is SingleEditInput {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		return false;
+	}
+
+	const edit = value as Record<string, unknown>;
+	return typeof edit.oldText === "string" && typeof edit.newText === "string";
+}
+
 export interface EditToolDetails {
 	/** Display-oriented diff of the changes made */
 	diff: string;
@@ -112,12 +124,19 @@ function prepareEditArguments(input: unknown): EditToolInput {
 
 	const args = input as Record<string, unknown>;
 
-	// Some models (Opus 4.6, GLM-5.1) send edits as a JSON string instead of an array
+	// Some models (Opus 4.6, GLM-5.1) send edits as a JSON string instead of an array.
+	// Others (GLM, Qwen, DeepSeek) send a single edit object instead of a one-element array (#7835).
 	if (typeof args.edits === "string") {
 		try {
 			const parsed = JSON.parse(args.edits);
-			if (Array.isArray(parsed)) args.edits = parsed;
+			if (Array.isArray(parsed)) {
+				args.edits = parsed;
+			} else if (isSingleEditInput(parsed)) {
+				args.edits = [parsed];
+			}
 		} catch {}
+	} else if (isSingleEditInput(args.edits)) {
+		args.edits = [args.edits];
 	}
 
 	const legacy = args as LegacyEditToolInput;
@@ -129,6 +148,23 @@ function prepareEditArguments(input: unknown): EditToolInput {
 	edits.push({ oldText: legacy.oldText, newText: legacy.newText });
 	const { oldText: _oldText, newText: _newText, ...rest } = legacy;
 	return { ...rest, edits } as EditToolInput;
+}
+
+/**
+ * Anchor recovery replaces a region that did not match oldText exactly; tell the model
+ * so it re-reads the file instead of assuming its view of the content was current.
+ */
+function formatRecoveryWarnings(recoveredEdits: RecoveredEdit[] | undefined, totalEdits: number): string {
+	if (!recoveredEdits || recoveredEdits.length === 0) return "";
+	const lines = recoveredEdits.map((recovery) => {
+		const label = totalEdits === 1 ? "oldText" : `edits[${recovery.editIndex}].oldText`;
+		const overwritten =
+			recovery.unmatchedWindowLines > 0
+				? ` ${recovery.unmatchedWindowLines} line(s) in that range did not match oldText and were overwritten.`
+				: "";
+		return `Warning: ${label} did not match the file exactly (the file changed since it was read). It was applied by fuzzy anchor recovery to lines ${recovery.startLine + 1}-${recovery.endLine} (similarity ${Math.round(recovery.score * 100)}%).${overwritten}`;
+	});
+	return `\n\n${lines.join("\n")}\nRe-read the file to verify the result.`;
 }
 
 function validateEditInput(input: EditToolInput): { path: string; edits: Edit[] } {
@@ -349,7 +385,11 @@ export function createEditToolDefinition(
 				const { bom, text: content } = stripBom(rawContent);
 				const originalEnding = detectLineEnding(content);
 				const normalizedContent = normalizeToLF(content);
-				const { baseContent, newContent } = applyEditsToNormalizedContent(normalizedContent, edits, path);
+				const { baseContent, newContent, recoveredEdits } = applyEditsToNormalizedContent(
+					normalizedContent,
+					edits,
+					path,
+				);
 				throwIfAborted();
 
 				const finalContent = bom + restoreLineEndings(newContent, originalEnding);
@@ -362,7 +402,7 @@ export function createEditToolDefinition(
 					content: [
 						{
 							type: "text",
-							text: `Successfully replaced ${edits.length} block(s) in ${path}.`,
+							text: `Successfully replaced ${edits.length} block(s) in ${path}.${formatRecoveryWarnings(recoveredEdits, edits.length)}`,
 						},
 					],
 					details: { diff: diffResult.diff, patch, firstChangedLine: diffResult.firstChangedLine },

@@ -16,6 +16,7 @@ import { getCustomThemesDir, getThemesDir } from "../../../config.ts";
 import type { SourceInfo } from "../../../core/source-info.ts";
 import { closeWatcher, watchWithErrorHandler } from "../../../utils/fs-watch.ts";
 import { highlight, supportsLanguage } from "../../../utils/syntax-highlight.ts";
+import { stripBom } from "../../../utils/text.ts";
 
 // ============================================================================
 // Types & Schema
@@ -610,7 +611,7 @@ function parseThemeJson(label: string, json: unknown): ThemeJson {
 function parseThemeJsonContent(label: string, content: string): ThemeJson {
 	let json: unknown;
 	try {
-		json = JSON.parse(content);
+		json = JSON.parse(stripBom(content));
 	} catch (error) {
 		throw new Error(`Failed to parse theme ${label}: ${error}`);
 	}
@@ -1156,6 +1157,8 @@ function buildCliHighlightTheme(t: Theme): CliHighlightTheme {
 		number: (s: string) => t.fg("syntaxNumber", s),
 		regexp: (s: string) => t.fg("syntaxString", s),
 		string: (s: string) => t.fg("syntaxString", s),
+		// Interpolations inside strings keep the normal text color instead of the string color (#10143).
+		subst: (s: string) => t.fg("text", s),
 		comment: (s: string) => t.fg("syntaxComment", s),
 		doctag: (s: string) => t.fg("syntaxComment", s),
 		meta: (s: string) => t.fg("muted", s),

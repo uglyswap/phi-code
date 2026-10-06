@@ -1,4 +1,3 @@
-import { execFileSync, execSync, spawn } from "child_process";
 import { platform } from "os";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { copyToClipboard, readClipboardText } from "../src/utils/clipboard.ts";
@@ -9,9 +8,14 @@ const mocks = vi.hoisted(() => {
 			getText: vi.fn<() => Promise<string>>(),
 			setText: vi.fn<(text: string) => Promise<void>>(),
 		},
-		execFileSync: vi.fn(),
-		execSync: vi.fn(),
-		spawn: vi.fn(),
+		command:
+			vi.fn<
+				(
+					command: string,
+					args: readonly string[],
+					options?: { input?: string; timeoutMs?: number; maxBufferBytes?: number },
+				) => Promise<Buffer | undefined>
+			>(),
 		platform: vi.fn<() => NodeJS.Platform>(),
 		isWaylandSession: vi.fn<() => boolean>(),
 	};
@@ -23,11 +27,9 @@ vi.mock("../src/utils/clipboard-native.ts", () => {
 	};
 });
 
-vi.mock("child_process", () => {
+vi.mock("../src/utils/clipboard-command.ts", () => {
 	return {
-		execFileSync: mocks.execFileSync,
-		execSync: mocks.execSync,
-		spawn: mocks.spawn,
+		runClipboardCommand: mocks.command,
 	};
 });
 
@@ -43,9 +45,6 @@ vi.mock("../src/utils/clipboard-image.ts", () => {
 	};
 });
 
-const mockedExecFileSync = vi.mocked(execFileSync);
-const mockedExecSync = vi.mocked(execSync);
-const mockedSpawn = vi.mocked(spawn);
 const mockedPlatform = vi.mocked(platform);
 
 let originalWrite: typeof process.stdout.write;
@@ -56,18 +55,27 @@ function osc52Writes(): string[] {
 	return stdoutWrites.filter((write) => write.startsWith("\x1b]52;c;"));
 }
 
+function commandNames(): string[] {
+	return mocks.command.mock.calls.map(([name]) => name);
+}
+
 beforeEach(() => {
 	vi.unstubAllEnvs();
-	vi.stubEnv("SSH_CONNECTION", "");
-	vi.stubEnv("SSH_CLIENT", "");
-	vi.stubEnv("MOSH_CONNECTION", "");
+	for (const name of [
+		"SSH_CONNECTION",
+		"SSH_CLIENT",
+		"MOSH_CONNECTION",
+		"WAYLAND_DISPLAY",
+		"DISPLAY",
+		"TERMUX_VERSION",
+	]) {
+		vi.stubEnv(name, "");
+	}
 	stdoutWrites = [];
 	nativeResolved = false;
 	mocks.clipboard.getText.mockReset();
 	mocks.clipboard.setText.mockReset();
-	mocks.execFileSync.mockReset();
-	mocks.execSync.mockReset();
-	mocks.spawn.mockReset();
+	mocks.command.mockReset();
 	mocks.platform.mockReset();
 	mocks.isWaylandSession.mockReset();
 	mockedPlatform.mockReturnValue("darwin");
@@ -77,6 +85,7 @@ beforeEach(() => {
 		await new Promise((resolve) => setTimeout(resolve, 1));
 		nativeResolved = true;
 	});
+	mocks.command.mockResolvedValue(Buffer.alloc(0));
 	originalWrite = process.stdout.write.bind(process.stdout);
 	process.stdout.write = ((...args: Parameters<typeof process.stdout.write>) => {
 		const [chunk] = args;
@@ -98,6 +107,7 @@ describe("readClipboardText", () => {
 		mocks.clipboard.getText.mockResolvedValue("clipboard text");
 
 		await expect(readClipboardText()).resolves.toBe("clipboard text");
+		expect(mocks.command).not.toHaveBeenCalled();
 	});
 
 	test("reads the Wayland clipboard before the stale native X11 clipboard", async () => {
@@ -105,14 +115,12 @@ describe("readClipboardText", () => {
 		mockedPlatform.mockReturnValue("linux");
 		mocks.isWaylandSession.mockReturnValue(true);
 		vi.stubEnv("WAYLAND_DISPLAY", "wayland-0");
-		mockedExecFileSync.mockReturnValue("Wayland text");
+		mocks.command.mockResolvedValue(Buffer.from("Wayland text"));
 		mocks.clipboard.getText.mockResolvedValue("stale X11 text");
 
 		await expect(readClipboardText()).resolves.toBe("Wayland text");
-		expect(mockedExecFileSync).toHaveBeenCalledWith("wl-paste", ["--no-newline", "--type", "text"], {
-			encoding: "utf8",
-			maxBuffer: 50 * 1024 * 1024,
-			timeout: 5000,
+		expect(mocks.command).toHaveBeenCalledWith("wl-paste", ["--no-newline", "--type", "text"], {
+			timeoutMs: 5000,
 		});
 		expect(mocks.clipboard.getText).not.toHaveBeenCalled();
 	});
@@ -121,7 +129,7 @@ describe("readClipboardText", () => {
 		mockedPlatform.mockReturnValue("linux");
 		mocks.isWaylandSession.mockReturnValue(true);
 		vi.stubEnv("WAYLAND_DISPLAY", "wayland-0");
-		mockedExecFileSync.mockReturnValue("");
+		mocks.command.mockResolvedValue(Buffer.alloc(0));
 		mocks.clipboard.getText.mockResolvedValue("stale X11 text");
 
 		await expect(readClipboardText()).resolves.toBeNull();
@@ -132,9 +140,7 @@ describe("readClipboardText", () => {
 		mockedPlatform.mockReturnValue("linux");
 		mocks.isWaylandSession.mockReturnValue(true);
 		vi.stubEnv("WAYLAND_DISPLAY", "wayland-0");
-		mockedExecFileSync.mockImplementation(() => {
-			throw new Error("wl-paste unavailable");
-		});
+		mocks.command.mockResolvedValue(undefined);
 		mocks.clipboard.getText.mockResolvedValue("X11 fallback text");
 
 		await expect(readClipboardText()).resolves.toBe("X11 fallback text");
@@ -149,13 +155,11 @@ describe("readClipboardText", () => {
 });
 
 describe("copyToClipboard", () => {
-	test("local native success skips OSC 52 and shell fallbacks", async () => {
+	test("local native success skips OSC 52 and commands", async () => {
 		await copyToClipboard("hello");
 
-		expect(mocks.clipboard.setText).toHaveBeenCalledWith("hello");
 		expect(osc52Writes()).toHaveLength(0);
-		expect(mockedExecSync).not.toHaveBeenCalled();
-		expect(mockedSpawn).not.toHaveBeenCalled();
+		expect(mocks.command).not.toHaveBeenCalled();
 	});
 
 	test("remote native success emits OSC 52 after native write", async () => {
@@ -170,28 +174,93 @@ describe("copyToClipboard", () => {
 
 		expect(nativeResolved).toBe(true);
 		expect(osc52Writes()).toHaveLength(1);
-		expect(mockedExecSync).not.toHaveBeenCalled();
+		expect(mocks.command).not.toHaveBeenCalled();
 	});
 
-	test("local shell fallback success skips OSC 52", async () => {
+	test("a rejected native write falls back to pbcopy without OSC 52", async () => {
 		mocks.clipboard.setText.mockRejectedValue(new Error("native failed"));
-		mockedExecSync.mockReturnValue(Buffer.alloc(0));
 
 		await copyToClipboard("hello");
 
-		expect(mockedExecSync).toHaveBeenCalledWith("pbcopy", {
+		expect(mocks.command).toHaveBeenCalledWith("pbcopy", [], { input: "hello", timeoutMs: 5000 });
+		expect(osc52Writes()).toHaveLength(0);
+	});
+
+	test("Linux skips the native writer", async () => {
+		mockedPlatform.mockReturnValue("linux");
+		vi.stubEnv("DISPLAY", ":0");
+
+		await copyToClipboard("hello");
+
+		expect(mocks.clipboard.setText).not.toHaveBeenCalled();
+		expect(mocks.command).toHaveBeenCalledWith("xclip", ["-selection", "clipboard"], {
 			input: "hello",
-			stdio: ["pipe", "ignore", "ignore"],
-			timeout: 5000,
+			timeoutMs: 5000,
 		});
 		expect(osc52Writes()).toHaveLength(0);
 	});
 
-	test("uses OSC 52 fallback when native and shell tools fail", async () => {
+	test("tries xclip and xsel after wl-copy fails", async () => {
+		mockedPlatform.mockReturnValue("linux");
+		mocks.isWaylandSession.mockReturnValue(true);
+		vi.stubEnv("WAYLAND_DISPLAY", "wayland-0");
+		vi.stubEnv("DISPLAY", ":0");
+		mocks.command.mockImplementation(async (name) => (name === "xsel" ? Buffer.alloc(0) : undefined));
+
+		await copyToClipboard("hello");
+
+		expect(commandNames()).toEqual(["wl-copy", "xclip", "xsel"]);
+		expect(osc52Writes()).toHaveLength(0);
+	});
+
+	test("local failure does not report an unverified OSC 52 write as success", async () => {
+		// Regression test for #9618.
 		mocks.clipboard.setText.mockRejectedValue(new Error("native failed"));
-		mockedExecSync.mockImplementation(() => {
-			throw new Error("pbcopy failed");
-		});
+		mocks.command.mockResolvedValue(undefined);
+
+		await expect(copyToClipboard("hello")).rejects.toThrow("Failed to copy to clipboard");
+		expect(osc52Writes()).toHaveLength(0);
+	});
+
+	test("local Linux failure reports the missing X11 tools", async () => {
+		// Regression test for #9618.
+		mockedPlatform.mockReturnValue("linux");
+		vi.stubEnv("DISPLAY", ":0");
+		mocks.command.mockResolvedValue(undefined);
+
+		await expect(copyToClipboard("hello")).rejects.toThrow(
+			"Failed to copy to clipboard: install `xclip` or `xsel`, or check X11 access",
+		);
+		expect(commandNames()).toEqual(["xclip", "xsel"]);
+		expect(osc52Writes()).toHaveLength(0);
+	});
+
+	test("reports the Wayland clipboard tool instead of the X11 fallback", async () => {
+		mockedPlatform.mockReturnValue("linux");
+		mocks.isWaylandSession.mockReturnValue(true);
+		vi.stubEnv("WAYLAND_DISPLAY", "wayland-0");
+		vi.stubEnv("DISPLAY", ":0");
+		mocks.command.mockResolvedValue(undefined);
+
+		await expect(copyToClipboard("hello")).rejects.toThrow(
+			"Failed to copy to clipboard: install `wl-clipboard` (`wl-copy`) or check Wayland access",
+		);
+		expect(commandNames()).toEqual(["wl-copy", "xclip", "xsel"]);
+	});
+
+	test("display-less Linux falls back to OSC 52", async () => {
+		mockedPlatform.mockReturnValue("linux");
+
+		await copyToClipboard("hello");
+
+		expect(mocks.command).not.toHaveBeenCalled();
+		expect(osc52Writes()).toHaveLength(1);
+	});
+
+	test("uses OSC 52 when native and command writes fail in a remote session", async () => {
+		vi.stubEnv("SSH_CONNECTION", "client server");
+		mocks.clipboard.setText.mockRejectedValue(new Error("native failed"));
+		mocks.command.mockResolvedValue(undefined);
 
 		await copyToClipboard("hello");
 
@@ -199,12 +268,13 @@ describe("copyToClipboard", () => {
 	});
 
 	test("does not emit oversized OSC 52 payloads", async () => {
+		vi.stubEnv("SSH_CONNECTION", "client server");
 		mocks.clipboard.setText.mockRejectedValue(new Error("native failed"));
-		mockedExecSync.mockImplementation(() => {
-			throw new Error("pbcopy failed");
-		});
+		mocks.command.mockResolvedValue(undefined);
 
-		await expect(copyToClipboard("x".repeat(80_000))).rejects.toThrow("Failed to copy to clipboard");
+		await expect(copyToClipboard("x".repeat(80_000))).rejects.toThrow(
+			"Failed to copy to clipboard: text exceeds the OSC 52 size limit",
+		);
 		expect(osc52Writes()).toHaveLength(0);
 	});
 });

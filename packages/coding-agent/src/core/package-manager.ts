@@ -27,11 +27,12 @@ import type { Readable } from "node:stream";
 import { globSync } from "glob";
 import ignore from "ignore";
 import { minimatch } from "minimatch";
-import { maxSatisfying, rcompare, satisfies, valid, validRange } from "semver";
+import { gt, maxSatisfying, rcompare, satisfies, valid, validRange } from "semver";
 import { CONFIG_DIR_NAME, getPackageDir } from "../config.ts";
 import { spawnProcess, spawnProcessSync } from "../utils/child-process.ts";
 import { type GitSource, parseGitUrl } from "../utils/git.ts";
 import { canonicalizePath, isLocalPath, markPathIgnoredByCloudSync, resolvePath } from "../utils/paths.ts";
+import { stripBom } from "../utils/text.ts";
 import { readBrandedEnv } from "./env-vars.ts";
 import { isStdoutTakenOver } from "./output-guard.ts";
 import { type PiManifest, readPiManifest } from "./pi-manifest.ts";
@@ -436,7 +437,14 @@ function collectSkillEntries(
 			}
 
 			const relPath = toPosixPath(relative(root, fullPath));
-			if (mode === "pi" && dir === root && isFile && entry.name.endsWith(".md") && !ig.ignores(relPath)) {
+			// Root-level .md files are skills in "pi" mode; ".agents" skill directories may
+			// nest Markdown skills below their root (#8255).
+			const shouldIncludeMarkdownFile =
+				isFile &&
+				entry.name.endsWith(".md") &&
+				!ig.ignores(relPath) &&
+				((mode === "pi" && dir === root) || (mode === "agents" && dir !== root));
+			if (shouldIncludeMarkdownFile) {
 				entries.push(fullPath);
 				continue;
 			}
@@ -1176,7 +1184,9 @@ export class DefaultPackageManager implements PackageManager {
 
 		try {
 			const targetVersion = await this.getLatestNpmVersion(source.version ? source.spec : source.name, source.range);
-			return targetVersion !== installedVersion;
+			// Only a strictly newer registry version is an update: an installed prerelease or
+			// locally published build newer than the registry must not be downgraded (#8226).
+			return gt(targetVersion, installedVersion);
 		} catch {
 			// Preserve existing update behavior when version lookup fails.
 			return true;
@@ -1510,7 +1520,9 @@ export class DefaultPackageManager implements PackageManager {
 
 		try {
 			const targetVersion = await this.getLatestNpmVersion(source.version ? source.spec : source.name, source.range);
-			return targetVersion !== installedVersion;
+			// Only a strictly newer registry version is an update: an installed prerelease or
+			// locally published build newer than the registry must not be downgraded (#8226).
+			return gt(targetVersion, installedVersion);
 		} catch {
 			return false;
 		}
@@ -1521,7 +1533,7 @@ export class DefaultPackageManager implements PackageManager {
 		if (!existsSync(packageJsonPath)) return undefined;
 		try {
 			const content = readFileSync(packageJsonPath, "utf-8");
-			const pkg = JSON.parse(content) as { version?: string };
+			const pkg = JSON.parse(stripBom(content)) as { version?: string };
 			return pkg.version;
 		} catch {
 			return undefined;
@@ -1778,10 +1790,26 @@ export class DefaultPackageManager implements PackageManager {
 
 	private getPackageManagerName(): string {
 		const npmCommand = this.getNpmCommand();
-		const commandParts = [npmCommand.command, ...npmCommand.args];
-		const separatorIndex = commandParts.lastIndexOf("--");
-		const packageManagerCommand = separatorIndex >= 0 ? commandParts[separatorIndex + 1] : npmCommand.command;
-		return packageManagerCommand ? basename(packageManagerCommand).replace(/\.(cmd|exe)$/i, "") : "";
+		const normalizeCommandName = (command: string): string => basename(command).replace(/\.(cmd|exe)$/i, "");
+		const supportedPackageManagers = new Set(["npm", "pnpm", "bun"]);
+		const directCommand = normalizeCommandName(npmCommand.command);
+		const separatorIndex = npmCommand.args.lastIndexOf("--");
+		if (separatorIndex >= 0) {
+			const wrappedCommand = npmCommand.args[separatorIndex + 1];
+			return wrappedCommand ? normalizeCommandName(wrappedCommand) : directCommand;
+		}
+		if (supportedPackageManagers.has(directCommand)) return directCommand;
+
+		// Wrappers such as "corepack pnpm" name the real package manager in their arguments.
+		const wrappedPackageManagers = [
+			...new Set(
+				npmCommand.args.map(normalizeCommandName).filter((command) => supportedPackageManagers.has(command)),
+			),
+		];
+		if (wrappedPackageManagers.length > 1) {
+			throw new Error(`Ambiguous npmCommand package managers: ${wrappedPackageManagers.join(", ")}`);
+		}
+		return wrappedPackageManagers[0] ?? directCommand;
 	}
 
 	private async runNpmCommand(args: string[], options?: { cwd?: string }): Promise<void> {
@@ -1790,11 +1818,24 @@ export class DefaultPackageManager implements PackageManager {
 	}
 
 	private getGitDependencyInstallArgs(): string[] {
-		const configuredCommand = this.settingsManager.getNpmCommand();
-		if (configuredCommand && configuredCommand.length > 0) {
-			return ["install"];
+		// Never auto-install peers: the host runtime (phi-code-*) is a peer of extensions,
+		// and a second installed copy creates duplicate extension runtimes (#9863).
+		switch (this.getPackageManagerName()) {
+			case "bun":
+				return ["install", "--omit=dev", "--omit=peer"];
+			case "pnpm":
+				return [
+					"install",
+					"--prod",
+					"--config.auto-install-peers=false",
+					"--config.strict-peer-dependencies=false",
+					"--config.strict-dep-builds=false",
+				];
+			case "npm":
+				return ["install", "--omit=dev", "--legacy-peer-deps"];
+			default:
+				return ["install"];
 		}
-		return ["install", "--omit=dev"];
 	}
 
 	private runNpmCommandSync(args: string[]): string {
@@ -1903,7 +1944,7 @@ export class DefaultPackageManager implements PackageManager {
 		if (!existsSync(packageJsonPath)) return false;
 
 		try {
-			const manifest = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as { dependencies?: unknown };
+			const manifest = JSON.parse(stripBom(readFileSync(packageJsonPath, "utf-8"))) as { dependencies?: unknown };
 			if (
 				!manifest.dependencies ||
 				typeof manifest.dependencies !== "object" ||
@@ -2113,7 +2154,8 @@ export class DefaultPackageManager implements PackageManager {
 
 	private getGitInstallPath(source: GitSource, scope: SourceScope): string {
 		if (scope === "temporary") {
-			return this.getTemporaryDir(`git-${source.host}`, source.path);
+			// Include the ref in the hash so each pinned ref gets its own checkout (#9982).
+			return this.getTemporaryDir(`git-${source.host}`, source.path, source.ref);
 		}
 		const installRoot = this.getGitInstallRoot(scope);
 		if (!installRoot) {
@@ -2133,10 +2175,10 @@ export class DefaultPackageManager implements PackageManager {
 		return join(this.agentDir, "git");
 	}
 
-	private getTemporaryDir(prefix: string, suffix?: string): string {
+	private getTemporaryDir(prefix: string, suffix?: string, ref?: string): string {
 		const root = this.resolveManagedPath(getExtensionTempFolder(this.agentDir), prefix);
 		const hash = createHash("sha256")
-			.update(`${prefix}-${suffix ?? ""}`)
+			.update(`${prefix}-${suffix ?? ""}${ref ? `@${ref}` : ""}`)
 			.digest("hex")
 			.slice(0, 8);
 		return this.resolveManagedPath(root, hash, suffix ?? "");

@@ -50,8 +50,8 @@ function findJpegTiffOffset(bytes: Uint8Array): number {
 			if (offset + 4 >= bytes.length) return -1;
 			const segmentStart = offset + 4;
 			if (segmentStart + 6 > bytes.length) return -1;
-			if (!hasExifHeader(bytes, segmentStart)) return -1;
-			return segmentStart + 6;
+			// XMP and other APP1 payloads may precede the EXIF segment: keep scanning (#8616).
+			if (hasExifHeader(bytes, segmentStart)) return segmentStart + 6;
 		}
 
 		if (offset + 4 > bytes.length) return -1;

@@ -6,9 +6,10 @@ import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provi
 import { addUsageToTotals, createUsageTotals } from "../../../core/usage-totals.ts";
 import { theme } from "../theme/theme.ts";
 import {
-	computeSessionCostUsd,
+	computeMessageCostUsd,
 	formatCostUsd,
 	formatGitSegment,
+	type ModelCostRates,
 	resolveStatusLineSegments,
 	type StatusLineSegmentId,
 } from "./status-segments.ts";
@@ -122,10 +123,30 @@ export class FooterComponent implements Component {
 		// Calculate cumulative usage from ALL session entries (not just post-compaction messages)
 		const usageTotals = createUsageTotals();
 		let latestCacheHitRate: number | undefined;
+		// Cost is accumulated per message: an unpriced response is estimated at the catalogue rates
+		// of the model that produced it, not the current model (multi-model sessions, /plan phases).
+		// Usage without a known producer (tool results, summaries) falls back to the current model.
+		let sessionCost = 0;
+		const currentRates = state.model?.cost;
+		const ratesByModel = new Map<string, ModelCostRates | undefined>();
+		const runtime = this.session.modelRuntime;
+		const ratesFor = (provider: string, modelId: string): ModelCostRates | undefined => {
+			const key = `${provider}/${modelId}`;
+			if (!ratesByModel.has(key)) {
+				// Optional lookup: the footer renders on every frame and must not fail on a partial runtime.
+				const model = typeof runtime?.getModel === "function" ? runtime.getModel(provider, modelId) : undefined;
+				ratesByModel.set(key, model?.cost);
+			}
+			return ratesByModel.get(key);
+		};
 
 		for (const entry of this.session.sessionManager.getEntries()) {
 			if (entry.type === "message" && entry.message.role === "assistant") {
 				addUsageToTotals(usageTotals, entry.message.usage);
+				sessionCost += computeMessageCostUsd(
+					entry.message.usage,
+					ratesFor(entry.message.provider, entry.message.model),
+				);
 
 				const latestPromptTokens =
 					entry.message.usage.input + entry.message.usage.cacheRead + entry.message.usage.cacheWrite;
@@ -133,8 +154,10 @@ export class FooterComponent implements Component {
 					latestPromptTokens > 0 ? (entry.message.usage.cacheRead / latestPromptTokens) * 100 : undefined;
 			} else if (entry.type === "message" && entry.message.role === "toolResult" && entry.message.usage) {
 				addUsageToTotals(usageTotals, entry.message.usage);
+				sessionCost += computeMessageCostUsd(entry.message.usage, currentRates);
 			} else if ((entry.type === "branch_summary" || entry.type === "compaction") && entry.usage) {
 				addUsageToTotals(usageTotals, entry.usage);
+				sessionCost += computeMessageCostUsd(entry.usage, currentRates);
 			}
 		}
 
@@ -187,9 +210,8 @@ export class FooterComponent implements Component {
 				(this.session.modelRuntime?.isUsingSubscription(state.model.provider) ?? false)
 			: false;
 		if (hasSegment("cost")) {
-			// Prefer the provider-reported cost; fall back to tokens x catalogue
-			// price so subscription/flat-rate providers still show an estimate.
-			const sessionCost = computeSessionCostUsd(usageTotals, state.model?.cost);
+			// Provider-reported costs, plus tokens x catalogue price for unpriced messages so
+			// subscription/flat-rate providers still show an estimate.
 			if (sessionCost > 0 || usingSubscription) {
 				const costStr = `${formatCostUsd(sessionCost)}${usingSubscription ? " (sub)" : ""}`;
 				statsParts.push(costStr);

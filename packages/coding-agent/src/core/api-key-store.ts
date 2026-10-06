@@ -28,6 +28,7 @@ import { EventEmitter } from "node:events";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { getModelsPath } from "../config.ts";
+import { stripBom } from "../utils/text.ts";
 import { stripJsonComments } from "./json-utils.ts";
 import { resolveConfigValue } from "./resolve-config-value.ts";
 
@@ -71,7 +72,7 @@ export class ApiKeyStore extends EventEmitter {
 			const raw = readFileSync(this.configPath, "utf-8");
 			// Same comment/trailing-comma tolerance as model-registry: a commented
 			// models.json must not break /keys hot-reload while the agent still runs.
-			const parsed = JSON.parse(stripJsonComments(raw)) as ModelsConfigPersisted;
+			const parsed = JSON.parse(stripJsonComments(stripBom(raw))) as ModelsConfigPersisted;
 			if (!parsed.providers || typeof parsed.providers !== "object") {
 				parsed.providers = {};
 			}

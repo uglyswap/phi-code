@@ -290,8 +290,9 @@ async function configContextEnv(
 	explicit?: Record<string, string>,
 ): Promise<Record<string, string> | undefined> {
 	const env = { ...explicit };
-	// Wrapped, not point-free: getConfigValueEnvVarNames takes an optional env as its
-	// second parameter and flatMap would hand it the array index.
+	// Wrapped, not point-free: getConfigValueEnvVarNames(config) takes a single argument
+	// today; the wrapper only guards against a future optional parameter receiving
+	// flatMap's index. It does not change the current behavior.
 	for (const name of new Set(values.flatMap((value) => getConfigValueEnvVarNames(value)))) {
 		if (env[name] !== undefined) continue;
 		const value = await ctx.env(name);
