@@ -12,7 +12,9 @@ name: Install smoke
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    # TEMPORARY (iteration on the CI branch): workflow_dispatch only works once the
+    # workflow exists on the default branch. Remove ci/install-smoke before merging.
+    branches: [main, ci/install-smoke]
     paths:
       - 'packages/**'
       - 'scripts/**'
