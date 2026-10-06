@@ -3,8 +3,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
 import chalk from "chalk";
 import { ensurePodProvider, podProviderId } from "../agent-provider.ts";
+import { getVllmApiKey } from "../api-key.ts";
 import { AGENT_COMMAND, AGENT_PACKAGE, CLI_COMMAND } from "../branding.ts";
 import { getActivePod, loadConfig } from "../config.ts";
+import { getSshHost } from "../ssh.ts";
 
 // ────────────────────────────────────────────────────────────────────────────────
 // Types
@@ -113,11 +115,7 @@ export async function promptModel(modelName: string, userArgs: string[], opts: P
 	}
 
 	// Extract host from SSH string
-	const host =
-		pod.ssh
-			.split(" ")
-			.find((p) => p.includes("@"))
-			?.split("@")[1] ?? "localhost";
+	const host = getSshHost(pod.ssh) ?? "localhost";
 
 	// Build the system prompt for code navigation
 	const systemPrompt = `You help the user understand and navigate the codebase in the current working directory.
@@ -141,7 +139,7 @@ Current working directory: ${process.cwd()}`;
 	// Pods are reached over a private endpoint that usually ignores the key, but
 	// the agent still requires a credential to start. "dummy" keeps that path
 	// working without inventing a secret.
-	const apiKey = opts.apiKey || process.env.PHI_API_KEY || process.env.PI_API_KEY || "dummy";
+	const apiKey = opts.apiKey || getVllmApiKey() || "dummy";
 	const providerId = podProviderId(podName);
 
 	const launch = resolveAgentLaunch();

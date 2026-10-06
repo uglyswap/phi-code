@@ -2,7 +2,7 @@
 # GPU pod bootstrap for vLLM deployment
 set -euo pipefail
 
-# Parse arguments passed from pi CLI
+# Parse arguments passed from the phi-pods CLI
 MOUNT_COMMAND=""
 MODELS_PATH=""
 HF_TOKEN=""
@@ -164,7 +164,9 @@ case "$VLLM_VERSION" in
         echo "Installing vLLM release with PyTorch..."
         # Install vLLM with automatic PyTorch backend selection
         # vLLM will automatically install the correct PyTorch version
-        uv pip install vllm>=0.10.0 --torch-backend=auto || {
+        # Quoted: unquoted, ">=0.10.0" is parsed as a redirection to a file named
+        # "=0.10.0" and the version constraint is silently dropped.
+        uv pip install "vllm>=0.10.0" --torch-backend=auto || {
             echo "ERROR: Failed to install vLLM"
             exit 1
         }
@@ -298,16 +300,17 @@ fi
 mkdir -p ~/.config/vllm
 touch ~/.config/vllm/do_not_track
 
-# Write environment to .bashrc for persistence
+# Write environment to .bashrc for persistence.
+# Secrets (HF_TOKEN, the vLLM API key) are deliberately NOT persisted here: a
+# plaintext token in a dotfile outlives the pod session and is readable by any
+# process or backup that reads the home directory. `phi-pods start` exports them
+# for the model process only.
 cat >> ~/.bashrc << EOF
 
-# Pi vLLM environment
+# phi-pods vLLM environment
 [ -d "\$HOME/venv" ] && source "\$HOME/venv/bin/activate"
 export PATH="/usr/local/cuda-${DRIVER_CUDA_VERSION}/bin:\$HOME/.local/bin:\$PATH"
 export LD_LIBRARY_PATH="/usr/local/cuda-${DRIVER_CUDA_VERSION}/lib64:\${LD_LIBRARY_PATH:-}"
-export HF_TOKEN="${HF_TOKEN}"
-export PI_API_KEY="${PI_API_KEY}"
-export HUGGING_FACE_HUB_TOKEN="${HF_TOKEN}"
 export HF_HUB_ENABLE_HF_TRANSFER=1
 export VLLM_NO_USAGE_STATS=1
 export VLLM_DO_NOT_TRACK=1
@@ -318,7 +321,7 @@ EOF
 # Create log directory for vLLM
 mkdir -p ~/.vllm_logs
 
-# --- Output GPU info for pi CLI to parse -------------------------------------
+# --- Output GPU info for the phi-pods CLI to parse --------------------------
 echo ""
 echo "===GPU_INFO_START==="
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader | while IFS=, read -r id name memory; do

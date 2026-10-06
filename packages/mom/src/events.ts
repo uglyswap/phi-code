@@ -1,7 +1,8 @@
 import { Cron } from "croner";
-import { existsSync, type FSWatcher, mkdirSync, readdirSync, statSync, unlinkSync, watch } from "fs";
+import { existsSync, type FSWatcher, mkdirSync, readdirSync, statSync, unlinkSync } from "fs";
 import { readFile } from "fs/promises";
 import { join } from "path";
+import { closeWatcher, FS_WATCH_RETRY_DELAY_MS, watchWithErrorHandler } from "./fs-watch.ts";
 import * as log from "./log.ts";
 import type { SlackBot, SlackEvent } from "./slack.ts";
 
@@ -39,6 +40,10 @@ export type MomEvent = ImmediateEvent | OneShotEvent | PeriodicEvent;
 const DEBOUNCE_MS = 100;
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 100;
+// setTimeout stores its delay as a signed 32-bit integer: anything larger
+// (about 24.8 days) overflows and fires after 1 ms. Long one-shot events are
+// therefore re-armed in steps of at most this many milliseconds.
+export const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
 
 export class EventsWatcher {
 	private timers: Map<string, NodeJS.Timeout> = new Map();
@@ -46,7 +51,9 @@ export class EventsWatcher {
 	private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
 	private startTime: number;
 	private watcher: FSWatcher | null = null;
+	private watcherRetryTimer: NodeJS.Timeout | null = null;
 	private knownFiles: Set<string> = new Set();
+	private stopped = true;
 
 	// Champs explicites : `erasableSyntaxOnly` (tsconfig.base) interdit les
 	// parametres de constructeur avec modificateur.
@@ -63,6 +70,8 @@ export class EventsWatcher {
 	 * Start watching for events. Call this after SlackBot is ready.
 	 */
 	start(): void {
+		this.stopped = false;
+
 		// Ensure events directory exists
 		if (!existsSync(this.eventsDir)) {
 			mkdirSync(this.eventsDir, { recursive: true });
@@ -73,11 +82,7 @@ export class EventsWatcher {
 		// Scan existing files
 		this.scanExisting();
 
-		// Watch for changes
-		this.watcher = watch(this.eventsDir, (_eventType, filename) => {
-			if (!filename || !filename.endsWith(".json")) return;
-			this.debounce(filename, () => this.handleFileChange(filename));
-		});
+		this.startFsWatcher();
 
 		log.logInfo(`Events watcher started, tracking ${this.knownFiles.size} files`);
 	}
@@ -86,10 +91,14 @@ export class EventsWatcher {
 	 * Stop watching and cancel all scheduled events.
 	 */
 	stop(): void {
+		this.stopped = true;
+
 		// Stop fs watcher
-		if (this.watcher) {
-			this.watcher.close();
-			this.watcher = null;
+		closeWatcher(this.watcher);
+		this.watcher = null;
+		if (this.watcherRetryTimer) {
+			clearTimeout(this.watcherRetryTimer);
+			this.watcherRetryTimer = null;
 		}
 
 		// Cancel all debounce timers
@@ -112,6 +121,45 @@ export class EventsWatcher {
 
 		this.knownFiles.clear();
 		log.logInfo("Events watcher stopped");
+	}
+
+	private startFsWatcher(): void {
+		this.watcher = watchWithErrorHandler(
+			this.eventsDir,
+			(_eventType, filename) => {
+				if (!filename || !filename.endsWith(".json")) return;
+				this.debounce(filename, () => this.handleFileChange(filename));
+			},
+			(error) => this.handleFsWatcherError(error),
+		);
+	}
+
+	private handleFsWatcherError(error: unknown): void {
+		log.logWarning(
+			`Events watcher failed, retrying in ${FS_WATCH_RETRY_DELAY_MS / 1000}s`,
+			error instanceof Error ? error.message : String(error),
+		);
+		closeWatcher(this.watcher);
+		this.watcher = null;
+		this.scheduleFsWatcherRetry();
+	}
+
+	private scheduleFsWatcherRetry(): void {
+		if (this.stopped || this.watcherRetryTimer) {
+			return;
+		}
+
+		this.watcherRetryTimer = setTimeout(() => {
+			this.watcherRetryTimer = null;
+			if (this.stopped) {
+				return;
+			}
+			this.startFsWatcher();
+			if (this.watcher) {
+				// Changes made while no watcher was active were missed: resync.
+				this.rescanExisting();
+			}
+		}, FS_WATCH_RETRY_DELAY_MS);
 	}
 
 	private debounce(filename: string, fn: () => void): void {
@@ -139,6 +187,26 @@ export class EventsWatcher {
 
 		for (const filename of files) {
 			this.handleFile(filename);
+		}
+	}
+
+	private rescanExisting(): void {
+		let files: string[];
+		try {
+			files = readdirSync(this.eventsDir).filter((f) => f.endsWith(".json"));
+		} catch (err) {
+			log.logWarning("Failed to read events directory", String(err));
+			return;
+		}
+
+		const currentFiles = new Set(files);
+		for (const filename of files) {
+			this.handleFileChange(filename);
+		}
+		for (const filename of Array.from(this.knownFiles)) {
+			if (!currentFiles.has(filename)) {
+				this.handleDelete(filename);
+			}
 		}
 	}
 
@@ -292,12 +360,24 @@ export class EventsWatcher {
 
 		const delay = atTime - now;
 		log.logInfo(`Scheduling one-shot event: ${filename} in ${Math.round(delay / 1000)}s`);
+		this.armOneShot(filename, event, atTime);
+	}
 
-		const timer = setTimeout(() => {
-			this.timers.delete(filename);
-			log.logInfo(`Executing one-shot event: ${filename}`);
-			this.execute(filename, event);
-		}, delay);
+	private armOneShot(filename: string, event: OneShotEvent, atTime: number): void {
+		const remaining = atTime - Date.now();
+		const timer = setTimeout(
+			() => {
+				this.timers.delete(filename);
+				if (atTime - Date.now() > 0) {
+					// Intermediate wake-up of a delay longer than MAX_TIMER_DELAY_MS.
+					this.armOneShot(filename, event, atTime);
+					return;
+				}
+				log.logInfo(`Executing one-shot event: ${filename}`);
+				this.execute(filename, event);
+			},
+			Math.min(Math.max(remaining, 0), MAX_TIMER_DELAY_MS),
+		);
 
 		this.timers.set(filename, timer);
 	}

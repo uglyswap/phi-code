@@ -2,6 +2,7 @@ import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient } from "@slack/web-api";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { basename, join } from "path";
+import { type AccessPolicy, isUserAllowed } from "./access.ts";
 import * as log from "./log.ts";
 import type { Attachment, ChannelStore } from "./store.ts";
 
@@ -128,6 +129,7 @@ export class SlackBot {
 	private handler: MomHandler;
 	private workingDir: string;
 	private store: ChannelStore;
+	private accessPolicy: AccessPolicy;
 	private botUserId: string | null = null;
 	private startupTs: string | null = null; // Messages older than this are just logged, not processed
 
@@ -137,9 +139,16 @@ export class SlackBot {
 
 	constructor(
 		handler: MomHandler,
-		config: { appToken: string; botToken: string; workingDir: string; store: ChannelStore },
+		config: {
+			appToken: string;
+			botToken: string;
+			workingDir: string;
+			store: ChannelStore;
+			accessPolicy: AccessPolicy;
+		},
 	) {
 		this.handler = handler;
+		this.accessPolicy = config.accessPolicy;
 		this.workingDir = config.workingDir;
 		this.store = config.store;
 		this.socketClient = new SocketModeClient({ appToken: config.appToken });
@@ -308,6 +317,13 @@ export class SlackBot {
 				return;
 			}
 
+			// Only allowlisted users may trigger the agent (it has bash access).
+			// The message is still logged above so it stays part of the channel context.
+			if (!this.isAllowed(e.user, e.channel)) {
+				ack();
+				return;
+			}
+
 			// Check for stop command - execute immediately, don't queue!
 			if (slackEvent.text.toLowerCase().trim() === "stop") {
 				if (this.handler.isRunning(e.channel)) {
@@ -386,7 +402,7 @@ export class SlackBot {
 			}
 
 			// Only trigger handler for DMs
-			if (isDM) {
+			if (isDM && this.isAllowed(e.user, e.channel)) {
 				// Check for stop command - execute immediately, don't queue!
 				if (slackEvent.text.toLowerCase().trim() === "stop") {
 					if (this.handler.isRunning(e.channel)) {
@@ -407,6 +423,12 @@ export class SlackBot {
 
 			ack();
 		});
+	}
+
+	private isAllowed(userId: string, channelId: string): boolean {
+		if (isUserAllowed(this.accessPolicy, userId)) return true;
+		log.logWarning(`[${channelId}] Ignoring message from non-allowlisted user ${userId}`);
+		return false;
 	}
 
 	/**

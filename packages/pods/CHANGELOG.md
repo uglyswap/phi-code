@@ -34,3 +34,22 @@
 
 - An unexpected failure in `agent` exits non-zero. The handler reported success,
   which hid the failure from scripts and CI.
+
+- `PHI_API_KEY` works for every command. `pods setup` and `start` only read
+  `PI_API_KEY`, so a `PHI_API_KEY`-only setup failed and `start` exported the
+  literal string `undefined` as the vLLM key. `start` now refuses to run without
+  a key, and leaves `HF_TOKEN` out (with a warning) instead of exporting
+  `undefined`.
+- Values exported for the model process (`HF_TOKEN`, the API key, per-model
+  env) are shell-quoted, so a quote in a token cannot break the remote command.
+- `pods setup` no longer writes `HF_TOKEN` / the API key in clear into the pod's
+  `~/.bashrc`; `start` passes them to the model process only. Interactive shells
+  on the pod no longer have them exported.
+- The `vllm>=0.10.0` constraint in `pod_setup.sh` is quoted: unquoted, `>` was a
+  redirection and the minimum version was silently dropped.
+- The pod host is extracted correctly when the SSH command has options before
+  the destination (`ssh -p 22 root@h`, `ssh -i key root@h`), and `scpFile` keeps
+  the identity file and `-o` options instead of only the port.
+- The API key is no longer printed after `start`; the output refers to
+  `$PHI_API_KEY` instead.
+- Remaining `pi ...` hints in `start`/`list`/`logs` output now name `phi-pods`.

@@ -1,4 +1,5 @@
 import type { SandboxRuntimeProvider } from "./SandboxRuntimeProvider.ts";
+import { isTrustedSandboxSource } from "./sandbox-security.ts";
 
 // Type declaration for chrome extension API (when available)
 declare const chrome: any;
@@ -129,6 +130,12 @@ export class RuntimeMessageRouter {
 
 				const context = this.sandboxes.get(sandboxId);
 				if (!context) {
+					return;
+				}
+
+				// The sandbox ID alone is not proof of origin (artifact IDs are
+				// predictable): only the sandbox's own iframe may use its providers.
+				if (!isTrustedSandboxSource(e.source, context.iframe?.contentWindow, window)) {
 					return;
 				}
 

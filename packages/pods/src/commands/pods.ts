@@ -1,20 +1,15 @@
 import chalk from "chalk";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { getVllmApiKey } from "../api-key.ts";
+import { CLI_COMMAND } from "../branding.ts";
 import { addPod, loadConfig, removePod, setActivePod } from "../config.ts";
+import { shellQuote } from "../shell.ts";
 import { scpFile, sshExec, sshExecStream } from "../ssh.ts";
 import type { GPU, Pod } from "../types.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-/**
- * Escape a value for safe inclusion inside single quotes in a POSIX shell
- * command. Wraps the result in single quotes and replaces any embedded single
- * quote with the '\'' sequence so the value cannot break out of the quoting or
- * inject shell syntax (e.g. a path or token containing a single quote).
- */
-const shellQuote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 
 /**
  * List all pods
@@ -24,7 +19,7 @@ export const listPods = () => {
 	const podNames = Object.keys(config.pods);
 
 	if (podNames.length === 0) {
-		console.log("No pods configured. Use 'pi pods setup' to add a pod.");
+		console.log(`No pods configured. Use '${CLI_COMMAND} pods setup' to add a pod.`);
 		return;
 	}
 
@@ -56,7 +51,7 @@ export const setupPod = async (
 ) => {
 	// Validate environment variables
 	const hfToken = process.env.HF_TOKEN;
-	const vllmApiKey = process.env.PI_API_KEY;
+	const vllmApiKey = getVllmApiKey();
 
 	if (!hfToken) {
 		console.error(chalk.red("ERROR: HF_TOKEN environment variable is required"));
@@ -66,8 +61,8 @@ export const setupPod = async (
 	}
 
 	if (!vllmApiKey) {
-		console.error(chalk.red("ERROR: PI_API_KEY environment variable is required"));
-		console.error("Set an API key: export PI_API_KEY=your_api_key_here");
+		console.error(chalk.red("ERROR: PHI_API_KEY environment variable is required (PI_API_KEY is also accepted)"));
+		console.error("Set an API key: export PHI_API_KEY=your_api_key_here");
 		process.exit(1);
 	}
 
@@ -178,7 +173,7 @@ export const setupPod = async (
 	console.log(chalk.green(`✓ Pod '${name}' setup complete and set as active pod`));
 	console.log("");
 	console.log("You can now deploy models with:");
-	console.log(chalk.cyan(`  pi start <model> --name <name>`));
+	console.log(chalk.cyan(`  ${CLI_COMMAND} start <model> --name <name>`));
 };
 
 /**

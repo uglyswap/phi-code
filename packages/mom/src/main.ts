@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { join, resolve } from "path";
+import { parseAccessPolicy } from "./access.ts";
 import { type AgentRunner, getOrCreateRunner } from "./agent.ts";
 import { downloadChannel } from "./download.ts";
 import { createEventsWatcher } from "./events.ts";
@@ -73,6 +74,12 @@ const { workingDir, sandbox } = { workingDir: parsedArgs.workingDir, sandbox: pa
 
 if (!MOM_SLACK_APP_TOKEN || !MOM_SLACK_BOT_TOKEN) {
 	console.error("Missing env: MOM_SLACK_APP_TOKEN, MOM_SLACK_BOT_TOKEN");
+	process.exit(1);
+}
+
+const accessPolicy = parseAccessPolicy(process.env.MOM_ALLOWED_USERS);
+if ("error" in accessPolicy) {
+	console.error(accessPolicy.error);
 	process.exit(1);
 }
 
@@ -345,6 +352,7 @@ const bot = new SlackBotClass(handler, {
 	botToken: MOM_SLACK_BOT_TOKEN,
 	workingDir,
 	store: sharedStore,
+	accessPolicy,
 });
 
 // Start events watcher

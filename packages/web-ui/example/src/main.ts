@@ -19,7 +19,7 @@ import {
 } from "@phi-code-admin/web-ui";
 import { html, render } from "lit";
 import { Bell, History, Plus, Settings } from "lucide";
-import { Agent, type AgentMessage } from "phi-code-agent";
+import { Agent, type AgentEvent, type AgentMessage } from "phi-code-agent";
 import type { TextContent } from "phi-code-ai";
 import { getModel, streamSimple } from "phi-code-ai/compat";
 import "./app.css";
@@ -182,9 +182,12 @@ Feel free to use these tools when needed to provide accurate and helpful respons
 		convertToLlm: customConvertToLlm,
 	});
 
-	agentUnsubscribe = agent.subscribe((event: any) => {
-		if (event.type === "state-update") {
-			const messages = event.state.messages;
+	agentUnsubscribe = agent.subscribe((event: AgentEvent) => {
+		// The Agent emits no "state-update" event (the old listener never fired, so
+		// sessions were never titled or auto-saved). Persist whenever a message is
+		// finalized and once more when the run ends.
+		if (event.type === "message_end" || event.type === "agent_end") {
+			const messages = agent.state.messages;
 
 			// Generate title after first successful response
 			if (!currentTitle && shouldSaveSession(messages)) {

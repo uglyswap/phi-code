@@ -3,10 +3,12 @@ import { spawn } from "child_process";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { getVllmApiKey } from "../api-key.ts";
 import { CLI_COMMAND } from "../branding.ts";
 import { getActivePod, loadConfig, saveConfig } from "../config.ts";
 import { getModelConfig, getModelName, isKnownModel } from "../model-configs.ts";
-import { sshExec } from "../ssh.ts";
+import { shellQuote } from "../shell.ts";
+import { getSshHost, sshExec } from "../ssh.ts";
 import type { Pod } from "../types.ts";
 
 // Les identifiants name/modelId sont interpoles dans des commandes shell
@@ -28,6 +30,33 @@ const assertSafeModelId = (modelId: string): void => {
 		console.error(chalk.red(`Model id invalide '${modelId}' : caracteres autorises [A-Za-z0-9._-/]`));
 		process.exit(1);
 	}
+};
+
+/**
+ * Shell `export` lines for the model process environment. Every value is
+ * shell-quoted: tokens are interpolated into a command run by the remote shell,
+ * so a quote or `$(...)` in a value must not break out. Unset secrets are left
+ * out instead of being exported as the literal string "undefined".
+ */
+export const buildModelEnvExports = (input: {
+	hfToken?: string;
+	apiKey: string;
+	gpus: number[];
+	modelEnv?: Record<string, string>;
+}): string => {
+	const env: Array<[string, string]> = [
+		...(input.hfToken ? [["HF_TOKEN", input.hfToken] as [string, string]] : []),
+		// The remote scripts read the key as PI_API_KEY (model_run.sh -> VLLM_API_KEY).
+		["PI_API_KEY", input.apiKey],
+		["HF_HUB_ENABLE_HF_TRANSFER", "1"],
+		["VLLM_NO_USAGE_STATS", "1"],
+		["PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True"],
+		["FORCE_COLOR", "1"],
+		["TERM", "xterm-256color"],
+		...(input.gpus.length === 1 ? [["CUDA_VISIBLE_DEVICES", String(input.gpus[0])] as [string, string]] : []),
+		...Object.entries(input.modelEnv || {}),
+	];
+	return env.map(([key, value]) => `export ${key}=${shellQuote(value)}`).join("\n");
 };
 
 /**
@@ -112,6 +141,18 @@ export const startModel = async (
 	assertSafeModelName(name);
 
 	const { name: podName, pod } = getPod(options.pod);
+
+	// Without a key vLLM would be started with the literal key "undefined".
+	const apiKey = getVllmApiKey();
+	if (!apiKey) {
+		console.error(chalk.red("ERROR: PHI_API_KEY environment variable is required (PI_API_KEY is also accepted)"));
+		console.error("Use the same key as for 'pods setup': export PHI_API_KEY=your_api_key_here");
+		process.exit(1);
+	}
+	const hfToken = process.env.HF_TOKEN;
+	if (!hfToken) {
+		console.log(chalk.yellow("Warning: HF_TOKEN is not set; gated or private models will fail to download."));
+	}
 
 	// Validation
 	if (!pod.modelsPath) {
@@ -241,19 +282,7 @@ chmod +x /tmp/model_run_${name}.sh`,
 	);
 
 	// Prepare environment
-	const env = [
-		`HF_TOKEN='${process.env.HF_TOKEN}'`,
-		`PI_API_KEY='${process.env.PI_API_KEY}'`,
-		`HF_HUB_ENABLE_HF_TRANSFER=1`,
-		`VLLM_NO_USAGE_STATS=1`,
-		`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`,
-		`FORCE_COLOR=1`,
-		`TERM=xterm-256color`,
-		...(gpus.length === 1 ? [`CUDA_VISIBLE_DEVICES=${gpus[0]}`] : []),
-		...Object.entries(modelConfig?.env || {}).map(([k, v]) => `${k}='${v}'`),
-	]
-		.map((e) => `export ${e}`)
-		.join("\n");
+	const env = buildModelEnvExports({ hfToken, apiKey, gpus, modelEnv: modelConfig?.env });
 
 	// Start the model runner with script command for pseudo-TTY (preserves colors)
 	// Note: We use script to preserve colors and create a log file
@@ -297,7 +326,7 @@ WRAPPER
 	const sshParts = pod.ssh.split(" ");
 	const sshCommand = sshParts[0]; // "ssh"
 	const sshArgs = sshParts.slice(1); // ["root@86.38.238.55"]
-	const host = sshArgs[0].split("@")[1] || "localhost";
+	const host = getSshHost(pod.ssh) || "localhost";
 	const tailCmd = `tail -f ~/.vllm_logs/${name}.log`;
 
 	// Build the full args array for spawn
@@ -385,7 +414,7 @@ WRAPPER
 			console.log("  • Try a smaller model variant");
 		}
 
-		console.log(`\n${chalk.cyan(`Check full logs: pi ssh "tail -100 ~/.vllm_logs/${name}.log"`)}`);
+		console.log(`\n${chalk.cyan(`Check full logs: ${CLI_COMMAND} ssh "tail -100 ~/.vllm_logs/${name}.log"`)}`);
 		process.exit(1);
 	} else if (startupComplete) {
 		// Model started successfully - output connection details
@@ -394,12 +423,13 @@ WRAPPER
 		console.log(chalk.cyan("─".repeat(50)));
 		console.log(chalk.white("Base URL:    ") + chalk.yellow(`http://${host}:${port}/v1`));
 		console.log(chalk.white("Model:       ") + chalk.yellow(modelId));
-		console.log(chalk.white("API Key:     ") + chalk.yellow(process.env.PI_API_KEY || "(not set)"));
+		// Never echo the key itself: terminal scrollback and CI logs outlive the session.
+		console.log(chalk.white("API Key:     ") + chalk.yellow("value of $PHI_API_KEY"));
 		console.log(chalk.cyan("─".repeat(50)));
 
 		console.log(`\n${chalk.bold("Export for shell:")}`);
 		console.log(chalk.gray(`export OPENAI_BASE_URL="http://${host}:${port}/v1"`));
-		console.log(chalk.gray(`export OPENAI_API_KEY="${process.env.PI_API_KEY || "your-api-key"}"`));
+		console.log(chalk.gray('export OPENAI_API_KEY="$PHI_API_KEY"'));
 		console.log(chalk.gray(`export OPENAI_MODEL="${modelId}"`));
 
 		console.log(`\n${chalk.bold("Example usage:")}`);
@@ -420,20 +450,20 @@ WRAPPER
     -d '{"model":"${modelId}","messages":[{"role":"user","content":"Hi"}]}'`),
 		);
 		console.log("");
-		console.log(chalk.cyan(`Chat with model:  pi agent ${name} "Your message"`));
-		console.log(chalk.cyan(`Interactive mode: pi agent ${name} -i`));
-		console.log(chalk.cyan(`Monitor logs:     pi logs ${name}`));
-		console.log(chalk.cyan(`Stop model:       pi stop ${name}`));
+		console.log(chalk.cyan(`Chat with model:  ${CLI_COMMAND} agent ${name} "Your message"`));
+		console.log(chalk.cyan(`Interactive mode: ${CLI_COMMAND} agent ${name}`));
+		console.log(chalk.cyan(`Monitor logs:     ${CLI_COMMAND} logs ${name}`));
+		console.log(chalk.cyan(`Stop model:       ${CLI_COMMAND} stop ${name}`));
 	} else if (interrupted) {
 		console.log(chalk.yellow("\n\nStopped monitoring. Model deployment continues in background."));
-		console.log(chalk.cyan(`Chat with model: pi agent ${name} "Your message"`));
-		console.log(chalk.cyan(`Check status: pi logs ${name}`));
-		console.log(chalk.cyan(`Stop model: pi stop ${name}`));
+		console.log(chalk.cyan(`Chat with model: ${CLI_COMMAND} agent ${name} "Your message"`));
+		console.log(chalk.cyan(`Check status: ${CLI_COMMAND} logs ${name}`));
+		console.log(chalk.cyan(`Stop model: ${CLI_COMMAND} stop ${name}`));
 	} else {
 		console.log(chalk.yellow("\n\nLog stream ended. Model may still be running."));
-		console.log(chalk.cyan(`Chat with model: pi agent ${name} "Your message"`));
-		console.log(chalk.cyan(`Check status: pi logs ${name}`));
-		console.log(chalk.cyan(`Stop model: pi stop ${name}`));
+		console.log(chalk.cyan(`Chat with model: ${CLI_COMMAND} agent ${name} "Your message"`));
+		console.log(chalk.cyan(`Check status: ${CLI_COMMAND} logs ${name}`));
+		console.log(chalk.cyan(`Stop model: ${CLI_COMMAND} stop ${name}`));
 	}
 };
 
@@ -514,8 +544,7 @@ export const listModels = async (options: { pod?: string }) => {
 	}
 
 	// Get pod SSH host for URL display
-	const sshParts = pod.ssh.split(" ");
-	const host = sshParts.find((p) => p.includes("@"))?.split("@")[1] || "unknown";
+	const host = getSshHost(pod.ssh) || "unknown";
 
 	console.log(`Models on pod '${chalk.bold(podName)}':`);
 	for (const name of modelNames) {
@@ -562,7 +591,7 @@ export const listModels = async (options: { pod?: string }) => {
 			console.log(chalk.red(`  ${name}: Process ${model.pid} is not running`));
 			anyDead = true;
 		} else if (status === "crashed") {
-			console.log(chalk.red(`  ${name}: vLLM crashed (check logs with 'pi logs ${name}')`));
+			console.log(chalk.red(`  ${name}: vLLM crashed (check logs with '${CLI_COMMAND} logs ${name}')`));
 			anyDead = true;
 		} else if (status === "starting") {
 			console.log(chalk.yellow(`  ${name}: Still starting up...`));
@@ -572,7 +601,7 @@ export const listModels = async (options: { pod?: string }) => {
 	if (anyDead) {
 		console.log("");
 		console.log(chalk.yellow("Some models are not running. Clean up with:"));
-		console.log(chalk.cyan("  pi stop <name>"));
+		console.log(chalk.cyan(`  ${CLI_COMMAND} stop <name>`));
 	} else {
 		console.log(chalk.green("✓ All processes verified"));
 	}
@@ -643,7 +672,7 @@ export const showKnownModels = async () => {
 		);
 	}
 
-	console.log("Usage: pi start <model> --name <name> [options]\n");
+	console.log(`Usage: ${CLI_COMMAND} start <model> --name <name> [options]\n`);
 
 	// Group models by compatibility and family
 	const compatible: Record<string, Array<{ id: string; name: string; config: string; notes?: string }>> = {};

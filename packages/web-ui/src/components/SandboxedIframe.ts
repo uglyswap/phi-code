@@ -4,6 +4,7 @@ import { ConsoleRuntimeProvider } from "./sandbox/ConsoleRuntimeProvider.ts";
 import { RuntimeMessageBridge } from "./sandbox/RuntimeMessageBridge.ts";
 import { type MessageConsumer, RUNTIME_MESSAGE_ROUTER } from "./sandbox/RuntimeMessageRouter.ts";
 import type { SandboxRuntimeProvider } from "./sandbox/SandboxRuntimeProvider.ts";
+import { isSafeExternalUrl } from "./sandbox/sandbox-security.ts";
 
 export interface SandboxFile {
 	fileName: string;
@@ -149,13 +150,18 @@ export class SandboxIframe extends LitElement {
 		// Listen for open-external-url messages from iframe
 		const externalUrlHandler = (e: MessageEvent) => {
 			if (e.data.type === "open-external-url" && e.source === this.iframe?.contentWindow) {
+				// Model-generated code controls the URL: refuse javascript:/data: etc.
+				if (!isSafeExternalUrl(e.data.url)) {
+					console.warn("Blocked sandbox request to open a non-http(s)/mailto URL");
+					return;
+				}
 				// Use chrome.tabs API to open in new tab
 				const chromeAPI = (globalThis as any).chrome;
 				if (chromeAPI?.tabs) {
 					chromeAPI.tabs.create({ url: e.data.url });
 				} else {
 					// Fallback for non-extension context
-					window.open(e.data.url, "_blank");
+					window.open(e.data.url, "_blank", "noopener,noreferrer");
 				}
 			}
 		};
@@ -220,8 +226,13 @@ export class SandboxIframe extends LitElement {
 		// Listen for open-external-url messages from iframe
 		const externalUrlHandler = (e: MessageEvent) => {
 			if (e.data.type === "open-external-url" && e.source === this.iframe?.contentWindow) {
-				// Fallback for non-extension context
-				window.open(e.data.url, "_blank");
+				// Model-generated code controls the URL: refuse javascript:/data: etc.
+				if (!isSafeExternalUrl(e.data.url)) {
+					console.warn("Blocked sandbox request to open a non-http(s)/mailto URL");
+					return;
+				}
+				// noopener: the opened page must not get a handle on the app window.
+				window.open(e.data.url, "_blank", "noopener,noreferrer");
 			}
 		};
 		window.addEventListener("message", externalUrlHandler);

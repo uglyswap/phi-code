@@ -110,11 +110,39 @@ export interface ExecResult {
 	code: number;
 }
 
+// Environment variable names that look like credentials. The host sandbox runs
+// model-chosen commands, so `env` / `printenv` must not reveal the Slack tokens
+// or provider API keys mom itself was started with.
+const SECRET_ENV_NAME = /(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|CREDENTIAL|SESSION_?KEY)/i;
+
+/**
+ * Build the environment for commands run by the host sandbox: the parent
+ * environment minus mom's own variables (MOM_*) and anything whose name looks
+ * like a credential. Names listed in MOM_ENV_PASSTHROUGH (comma-separated) are
+ * kept, so an operator can deliberately expose e.g. GH_TOKEN to skills.
+ */
+export function buildCommandEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	const passthrough = new Set(
+		(env.MOM_ENV_PASSTHROUGH ?? "")
+			.split(",")
+			.map((name) => name.trim())
+			.filter((name) => name.length > 0),
+	);
+	const filtered: NodeJS.ProcessEnv = {};
+	for (const [name, value] of Object.entries(env)) {
+		if (value === undefined) continue;
+		const isSecret = /^MOM_/i.test(name) || SECRET_ENV_NAME.test(name);
+		if (isSecret && !passthrough.has(name)) continue;
+		filtered[name] = value;
+	}
+	return filtered;
+}
+
 class HostExecutor implements Executor {
 	async exec(command: string, options?: ExecOptions): Promise<ExecResult> {
 		const shell = process.platform === "win32" ? "cmd" : "sh";
 		const shellArgs = process.platform === "win32" ? ["/c"] : ["-c"];
-		return this.spawnAndCollect(shell, [...shellArgs, command], options);
+		return this.spawnAndCollect(shell, [...shellArgs, command], options, buildCommandEnv(process.env));
 	}
 
 	/**
@@ -127,9 +155,17 @@ class HostExecutor implements Executor {
 		return this.spawnAndCollect(cmd, args, options);
 	}
 
-	private spawnAndCollect(cmd: string, args: string[], options?: ExecOptions): Promise<ExecResult> {
+	private spawnAndCollect(
+		cmd: string,
+		args: string[],
+		options?: ExecOptions,
+		env?: NodeJS.ProcessEnv,
+	): Promise<ExecResult> {
 		return new Promise((resolve, reject) => {
 			const child = spawn(cmd, args, {
+				// undefined inherits process.env (docker CLI path: the command itself
+				// runs inside the container, which never sees the host environment).
+				env,
 				detached: true,
 				stdio: ["ignore", "pipe", "pipe"],
 			});

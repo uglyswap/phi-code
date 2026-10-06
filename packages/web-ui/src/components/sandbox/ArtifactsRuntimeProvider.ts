@@ -5,6 +5,10 @@ import {
 } from "../../prompts/prompts.ts";
 import type { SandboxRuntimeProvider } from "./SandboxRuntimeProvider.ts";
 
+// Enforced here, in the host: the sandbox-side runtime is model-generated code
+// and can post raw "artifact-operation" messages regardless of its description.
+const READ_ONLY_ERROR = "Artifacts are read-only in this context";
+
 // Define minimal interface for ArtifactsPanel to avoid circular dependencies
 interface ArtifactsPanelLike {
 	artifacts: Map<string, { content: string }>;
@@ -169,6 +173,10 @@ export class ArtifactsRuntimeProvider implements SandboxRuntimeProvider {
 				}
 
 				case "createOrUpdate": {
+					if (!this.readWrite) {
+						respond({ success: false, error: READ_ONLY_ERROR });
+						break;
+					}
 					try {
 						const exists = this.artifactsPanel.artifacts.has(filename);
 						const command = exists ? "rewrite" : "create";
@@ -195,6 +203,10 @@ export class ArtifactsRuntimeProvider implements SandboxRuntimeProvider {
 				}
 
 				case "delete": {
+					if (!this.readWrite) {
+						respond({ success: false, error: READ_ONLY_ERROR });
+						break;
+					}
 					try {
 						await this.artifactsPanel.tool.execute("", {
 							command: "delete",

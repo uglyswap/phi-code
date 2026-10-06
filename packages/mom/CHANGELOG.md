@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Mom now refuses to start unless `MOM_ALLOWED_USERS` is set: only the listed
+  Slack user IDs can trigger the agent (`*` restores the previous "anyone in the
+  channel or DM" behaviour). Messages from other users are logged but ignored.
+
+### Fixed
+
+- `MOM_MODEL` with a non-Anthropic model now uses that provider's API key instead
+  of always sending the Anthropic credential.
+- Host-mode commands no longer inherit mom's Slack tokens and API keys: `MOM_*`
+  and credential-like variables are filtered out (opt back in per variable with
+  `MOM_ENV_PASSTHROUGH`).
+- Secret redaction now covers `sk-ant-`, `sk-proj-`, Slack (`xoxb-`, `xapp-`),
+  GitHub fine-grained (`github_pat_`) and Google keys, and applies to tool errors
+  and model output posted to Slack, not only to thread tool results.
+- Event-directory `fs.watch` errors (e.g. `EMFILE`) no longer crash mom; the
+  watcher is retried after 5 seconds (port of upstream #3564).
+- One-shot events scheduled more than ~24.8 days ahead no longer fire immediately
+  (timer overflow).
+- `main`/`types` now point to an existing library entry (`dist/index.js`), and the
+  `@phi-code-admin/phi-code` dependency matches the workspace version (^0.99.1).
+- README auth paths now use `~/.phi/mom/` instead of `~/.pi/mom/`.
+
 ### Changed
 
 - Renamed to `@phi-code-admin/mom`. Entries below refer to the package by its

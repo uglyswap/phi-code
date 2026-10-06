@@ -4,6 +4,7 @@ import { spawn } from "child_process";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { getVllmApiKey } from "./api-key.ts";
 import { AGENT_COMMAND, CLI_COMMAND } from "./branding.ts";
 import { listModels, showKnownModels, startModel, stopAllModels, stopModel, viewLogs } from "./commands/models.ts";
 import { listPods, removePodCommand, setupPod, switchActivePod } from "./commands/pods.ts";
@@ -334,7 +335,7 @@ try {
 					process.exit(1);
 				}
 
-				const apiKey = process.env.PHI_API_KEY || process.env.PI_API_KEY;
+				const apiKey = getVllmApiKey();
 
 				// Pass all args after the model name
 				const agentArgs = args.slice(2);

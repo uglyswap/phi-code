@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Model runner script - runs sequentially, killed by pi stop
+# Model runner script - runs sequentially, killed by phi-pods stop
 set -euo pipefail
 
-# These values are replaced before upload by pi CLI
+# These values are replaced before upload by the phi-pods CLI
 MODEL_ID="{{MODEL_ID}}"
 NAME="{{NAME}}"
 PORT="{{PORT}}"

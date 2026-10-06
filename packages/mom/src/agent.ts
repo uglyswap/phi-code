@@ -17,8 +17,10 @@ import { join } from "path";
 import { Agent, type AgentEvent } from "phi-code-agent";
 import type { ImageContent } from "phi-code-ai";
 import { getModel } from "phi-code-ai/compat";
+import { resolveProviderApiKey } from "./api-key.ts";
 import { createMomSettingsManager, syncLogToSessionManager } from "./context.ts";
 import * as log from "./log.ts";
+import { redactSecrets } from "./redact.ts";
 import { createExecutor, type SandboxConfig } from "./sandbox.ts";
 import type { ChannelInfo, SlackContext, UserInfo } from "./slack.ts";
 import type { ChannelStore } from "./store.ts";
@@ -58,19 +60,6 @@ export interface AgentRunner {
 		pendingMessages?: PendingMessage[],
 	): Promise<{ stopReason: string; errorMessage?: string }>;
 	abort(): void;
-}
-
-async function getAnthropicApiKey(modelRuntime: ModelRuntime): Promise<string> {
-	const auth = await modelRuntime.getAuth("anthropic");
-	const key = auth?.auth.apiKey;
-	if (!key) {
-		throw new Error(
-			"No API key found for anthropic.\n\n" +
-				"Set an API key environment variable, or use /login with Anthropic and link to auth.json from " +
-				join(homedir(), CONFIG_DIR_NAME, "mom", "auth.json"),
-		);
-	}
-	return key;
 }
 
 const IMAGE_MIME_TYPES: Record<string, string> = {
@@ -352,25 +341,6 @@ function truncate(text: string, maxLen: number): string {
 	return `${text.substring(0, maxLen - 3)}...`;
 }
 
-// Scrub common secret shapes before posting tool output to a Slack thread.
-// Slack message history is outside the operator's control, so a model that
-// reads .env / dumps env vars must not leak raw secrets into it.
-const SECRET_PATTERNS: RegExp[] = [
-	/sk-[A-Za-z0-9]{16,}/g, // OpenAI-style keys
-	/ghp_[A-Za-z0-9]{16,}/g, // GitHub personal access tokens
-	/AKIA[0-9A-Z]{16}/g, // AWS access key IDs
-	/Bearer\s+[A-Za-z0-9._-]{16,}/g, // Bearer tokens
-	/eyJ[A-Za-z0-9._-]{16,}/g, // JWTs
-];
-
-function redactSecrets(text: string): string {
-	let scrubbed = text;
-	for (const pattern of SECRET_PATTERNS) {
-		scrubbed = scrubbed.replace(pattern, "[REDACTED]");
-	}
-	return scrubbed;
-}
-
 // Max length of tool result text posted to a Slack thread.
 const THREAD_RESULT_MAX_LENGTH = 2000;
 
@@ -474,8 +444,9 @@ async function createRunner(sandboxConfig: SandboxConfig, channelId: string, cha
 	// Create AuthStorage and the model runtime.
 	// Auth stored outside workspace so agent can't access it.
 	// modelsPath: null keeps mom off the user's models.json — its model set is fixed here.
+	const authPath = join(homedir(), CONFIG_DIR_NAME, "mom", "auth.json");
 	const modelRuntime = await ModelRuntime.create({
-		authPath: join(homedir(), CONFIG_DIR_NAME, "mom", "auth.json"),
+		authPath,
 		modelsPath: null,
 		allowModelNetwork: false,
 	});
@@ -490,7 +461,9 @@ async function createRunner(sandboxConfig: SandboxConfig, channelId: string, cha
 		},
 		convertToLlm,
 		streamFn: (model, context, options) => modelRuntime.streamSimple(model, context, options),
-		getApiKey: async () => getAnthropicApiKey(modelRuntime),
+		// Resolve the key of the provider actually being called (MOM_MODEL may
+		// select a non-Anthropic model).
+		getApiKey: async (provider) => resolveProviderApiKey(modelRuntime, provider, authPath),
 	});
 
 	// Load existing messages
@@ -604,7 +577,10 @@ async function createRunner(sandboxConfig: SandboxConfig, channelId: string, cha
 			queue.enqueueMessage(threadMessage, "thread", "tool result thread", false);
 
 			if (agentEvent.isError) {
-				queue.enqueue(() => ctx.respond(`_Error: ${truncate(resultStr, 200)}_`, false), "tool error");
+				queue.enqueue(
+					() => ctx.respond(`_Error: ${redactSecrets(truncate(resultStr, 200))}_`, false),
+					"tool error",
+				);
 			}
 		} else if (event.type === "message_start") {
 			const agentEvent = event as AgentEvent & { type: "message_start" };
@@ -646,9 +622,11 @@ async function createRunner(sandboxConfig: SandboxConfig, channelId: string, cha
 					}
 				}
 
-				const text = textParts.join("\n");
+				// Model output can echo secrets it read through tools: scrub before posting.
+				const text = redactSecrets(textParts.join("\n"));
 
-				for (const thinking of thinkingParts) {
+				for (const rawThinking of thinkingParts) {
+					const thinking = redactSecrets(rawThinking);
 					log.logThinking(logCtx, thinking);
 					queue.enqueueMessage(`_${thinking}_`, "main", "thinking main");
 					queue.enqueueMessage(`_${thinking}_`, "thread", "thinking thread", false);
@@ -857,7 +835,7 @@ async function createRunner(sandboxConfig: SandboxConfig, channelId: string, cha
 			if (runState.stopReason === "error" && runState.errorMessage) {
 				try {
 					await ctx.replaceMessage("_Sorry, something went wrong_");
-					await ctx.respondInThread(`_Error: ${runState.errorMessage}_`);
+					await ctx.respondInThread(`_Error: ${redactSecrets(runState.errorMessage)}_`);
 				} catch (err) {
 					const errMsg = err instanceof Error ? err.message : String(err);
 					log.logWarning("Failed to post error message", errMsg);
@@ -866,11 +844,12 @@ async function createRunner(sandboxConfig: SandboxConfig, channelId: string, cha
 				// Final message update
 				const messages = session.messages;
 				const lastAssistant = messages.filter((m) => m.role === "assistant").pop();
-				const finalText =
+				const finalText = redactSecrets(
 					lastAssistant?.content
 						.filter((c): c is { type: "text"; text: string } => c.type === "text")
 						.map((c) => c.text)
-						.join("\n") || "";
+						.join("\n") || "",
+				);
 
 				// Check for [SILENT] marker - delete message and thread instead of posting
 				if (finalText.trim() === "[SILENT]" || finalText.trim().startsWith("[SILENT]")) {

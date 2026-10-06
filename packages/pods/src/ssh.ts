@@ -107,35 +107,111 @@ export const sshExecStream = async (
 	});
 };
 
+// OpenSSH client options that consume an argument (`man ssh`). Needed to tell
+// `-i key root@h` apart from a destination: treating every non-dash token as the
+// host made `ssh -i key root@h` resolve to "key".
+const SSH_OPTIONS_WITH_ARG = new Set("BbcDEeFIiJLlmOopQRSWw");
+
+export interface SshOption {
+	flag: string;
+	value?: string;
+}
+
+export interface ParsedSshCommand {
+	binary: string;
+	options: SshOption[];
+	/** Destination as written, e.g. `root@1.2.3.4` or `my-host`. Empty if missing. */
+	destination: string;
+}
+
+/**
+ * Parse a pod's stored SSH command (e.g. "ssh -p 2222 -i ~/.ssh/key root@1.2.3.4").
+ */
+export const parseSshCommand = (sshCmd: string): ParsedSshCommand => {
+	const parts = sshCmd.split(" ").filter((p) => p);
+	const options: SshOption[] = [];
+	let destination = "";
+
+	for (let i = 1; i < parts.length; i++) {
+		const part = parts[i];
+		if (part.startsWith("-") && part.length > 1) {
+			const flag = part[1];
+			if (SSH_OPTIONS_WITH_ARG.has(flag)) {
+				// Both "-p 22" and "-p22" are accepted by ssh.
+				if (part.length > 2) {
+					options.push({ flag, value: part.slice(2) });
+				} else {
+					options.push({ flag, value: parts[i + 1] });
+					i++;
+				}
+			} else {
+				// Grouped boolean flags such as "-tA".
+				for (const f of part.slice(1)) options.push({ flag: f });
+			}
+			continue;
+		}
+		destination = part;
+		break;
+	}
+
+	return { binary: parts[0] ?? "ssh", options, destination };
+};
+
+/**
+ * Host name or address of the pod (user and port stripped), or undefined when
+ * the SSH command has no destination.
+ */
+export const getSshHost = (sshCmd: string): string | undefined => {
+	const { destination } = parseSshCommand(sshCmd);
+	if (!destination) return undefined;
+	let host = destination.replace(/^ssh:\/\//, "");
+	host = host.slice(host.lastIndexOf("@") + 1);
+	// ssh://host:port form only; a bare destination cannot carry a port.
+	if (destination.startsWith("ssh://")) host = host.replace(/:\d+$/, "");
+	return host || undefined;
+};
+
+// scp equivalents of ssh options. The port flag differs (-p -> -P) and -l (login
+// name in ssh) means a bandwidth limit in scp, so it is folded into the
+// destination instead. Options with no scp meaning (-t, -L, -A ...) are dropped.
+const SCP_PASSTHROUGH_WITH_ARG = new Set(["i", "o", "F", "J", "c"]);
+const SCP_PASSTHROUGH_BOOLEAN = new Set(["4", "6", "C", "q"]);
+
+/**
+ * Build scp arguments that reuse the connection options of a pod's SSH command.
+ */
+export const buildScpArgs = (sshCmd: string, localPath: string, remotePath: string): string[] | undefined => {
+	const { options, destination } = parseSshCommand(sshCmd);
+	if (!destination) return undefined;
+
+	const args: string[] = [];
+	let login: string | undefined;
+	for (const { flag, value } of options) {
+		if (flag === "p" && value) {
+			args.push("-P", value);
+		} else if (flag === "l" && value) {
+			login = value;
+		} else if (SCP_PASSTHROUGH_WITH_ARG.has(flag) && value) {
+			args.push(`-${flag}`, value);
+		} else if (SCP_PASSTHROUGH_BOOLEAN.has(flag) && value === undefined) {
+			args.push(`-${flag}`);
+		}
+	}
+
+	const target = login && !destination.includes("@") ? `${login}@${destination}` : destination;
+	args.push(localPath, `${target}:${remotePath}`);
+	return args;
+};
+
 /**
  * Copy a file to remote via SCP
  */
 export const scpFile = async (sshCmd: string, localPath: string, remotePath: string): Promise<boolean> => {
-	// Extract host from SSH command
-	const sshParts = sshCmd.split(" ").filter((p) => p);
-	let host = "";
-	let port = "22";
-	let i = 1; // Skip 'ssh'
-
-	while (i < sshParts.length) {
-		if (sshParts[i] === "-p" && i + 1 < sshParts.length) {
-			port = sshParts[i + 1];
-			i += 2;
-		} else if (!sshParts[i].startsWith("-")) {
-			host = sshParts[i];
-			break;
-		} else {
-			i++;
-		}
-	}
-
-	if (!host) {
+	const scpArgs = buildScpArgs(sshCmd, localPath, remotePath);
+	if (!scpArgs) {
 		console.error("Could not parse host from SSH command");
 		return false;
 	}
-
-	// Build SCP command
-	const scpArgs = ["-P", port, localPath, `${host}:${remotePath}`];
 
 	return new Promise((resolve) => {
 		const proc = spawn("scp", scpArgs, { stdio: "inherit" });

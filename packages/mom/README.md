@@ -62,9 +62,11 @@ npm install @phi-code-admin/mom
 # Set environment variables
 export MOM_SLACK_APP_TOKEN=xapp-...
 export MOM_SLACK_BOT_TOKEN=xoxb-...
+# Slack user IDs allowed to use mom (required, see Access Control)
+export MOM_ALLOWED_USERS=U012ABC,U034DEF
 # Option 1: Anthropic API key
 export ANTHROPIC_API_KEY=sk-ant-...
-# Option 2: use /login command in pi agent, then copy/link auth.json to ~/.pi/mom/
+# Option 2: use /login command in phi, then copy/link auth.json to ~/.phi/mom/
 
 # Create Docker sandbox (recommended)
 docker run -d \
@@ -95,7 +97,10 @@ Options:
 |----------|-------------|
 | `MOM_SLACK_APP_TOKEN` | Slack app-level token (xapp-...) |
 | `MOM_SLACK_BOT_TOKEN` | Slack bot token (xoxb-...) |
+| `MOM_ALLOWED_USERS` | **Required.** Comma-separated Slack user IDs (e.g. `U012ABC,U034DEF`) allowed to trigger mom, or `*` to allow anyone who can mention or DM the bot. Mom refuses to start when it is unset |
 | `ANTHROPIC_API_KEY` | (Optional) Anthropic API key |
+| `MOM_MODEL` | (Optional) Model as `provider/model-id` (default `anthropic/claude-sonnet-4-5`). The API key of that provider is used |
+| `MOM_ENV_PASSTHROUGH` | (Optional, host mode) Comma-separated variable names to expose to commands despite the secret filter (e.g. `GH_TOKEN`) |
 
 ## Authentication
 
@@ -112,7 +117,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 - enter `/login` command
   - choose "Anthropic" provider
   - follow instructions in the browser
-- link `auth.json` to mom: `ln -s ~/.pi/agent/auth.json ~/.pi/mom/auth.json`
+- link `auth.json` to mom: `ln -s ~/.phi/agent/auth.json ~/.phi/mom/auth.json`
 
 ## How Mom Works
 
@@ -165,6 +170,7 @@ Mom uses the `bash` tool to do most of her work. It can run in one of two enviro
 **Host environment**:
 - Commands execute directly on your machine
 - Mom has full access to your system
+- Commands do not inherit mom's own secrets: `MOM_*` variables and variables whose name looks like a credential (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*API_KEY*`, ...) are removed from their environment unless listed in `MOM_ENV_PASSTHROUGH`
 - Not recommended. See security section below
 
 ### Self-Managing Environment
@@ -434,6 +440,8 @@ Mom executes the hidden command and sends your SSH key to the attacker.
 - Always use Docker mode unless you're in a disposable environment
 
 ### Access Control
+
+**Only allowlisted users can trigger mom.** `MOM_ALLOWED_USERS` lists the Slack user IDs (find one in a user's Slack profile, "Copy member ID") whose @mentions and DMs start the agent. Messages from anyone else are still logged to `log.jsonl` (so mom keeps the channel context) but never run the agent, and mom does not reply to them. Mom refuses to start without the variable; set it to `*` only if everyone who can reach the bot may run commands with its permissions.
 
 **Different teams need different mom instances.** If some team members shouldn't have access to certain tools or credentials:
 
