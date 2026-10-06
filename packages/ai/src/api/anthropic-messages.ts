@@ -180,10 +180,19 @@ function getAnthropicCompat(
 		sendSessionAffinityHeaders: model.compat?.sendSessionAffinityHeaders ?? false,
 		supportsCacheControlOnTools: model.compat?.supportsCacheControlOnTools ?? true,
 		supportsTemperature: model.compat?.supportsTemperature ?? true,
-		allowEmptySignature: model.compat?.allowEmptySignature ?? false,
+		allowEmptySignature: model.compat?.allowEmptySignature ?? defaultAllowEmptySignature(model),
 		supportsStrictTools: model.compat?.supportsStrictTools ?? false,
 		supportsToolReferences: model.compat?.supportsToolReferences ?? defaultSupportsToolReferences(model),
 	};
+}
+
+/**
+ * Default for `allowEmptySignature`. OpenCode Qwen 3.8 Flash emits and accepts thinking
+ * blocks with empty signatures (#10047). Upstream marks it in the generated catalog; phi
+ * applies it here so the fix does not depend on regenerating the model data.
+ */
+function defaultAllowEmptySignature(model: Model<"anthropic-messages">): boolean {
+	return (model.provider === "opencode" || model.provider === "opencode-go") && model.id === "qwen3.8-flash";
 }
 
 /**

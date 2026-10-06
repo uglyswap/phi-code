@@ -72,6 +72,12 @@ describe("environment API keys", () => {
 		expect(getEnvApiKey("github-copilot")).toBe("copilot-token");
 	});
 
+	it("accepts OPENCODE_GO_API_KEY as a fallback for opencode-go only", () => {
+		expect(getEnvApiKey("opencode-go", { OPENCODE_GO_API_KEY: "go-key" })).toBe("go-key");
+		expect(getEnvApiKey("opencode-go", { OPENCODE_API_KEY: "main", OPENCODE_GO_API_KEY: "go-key" })).toBe("main");
+		expect(getEnvApiKey("opencode", { OPENCODE_GO_API_KEY: "go-key" })).toBeUndefined();
+	});
+
 	it("resolves ZAI China Coding Plan credentials from ZAI_CODING_CN_API_KEY", () => {
 		process.env.ZAI_CODING_CN_API_KEY = "zai-coding-cn-token";
 

@@ -327,6 +327,18 @@ describe("AgentHarness tools", () => {
 			expect(getOrThrow(await context.env.readTextFile("edit.txt"))).toBe("ALPHA\nbeta\nGAMMA\ndelta\n");
 		});
 
+		it("accepts a single edit object instead of an array (#7835)", () => {
+			const prepare = createEditTool().prepareArguments;
+			expect(prepare?.({ path: "a.txt", edits: { oldText: "a", newText: "b" } })).toEqual({
+				path: "a.txt",
+				edits: [{ oldText: "a", newText: "b" }],
+			});
+			expect(prepare?.({ path: "a.txt", edits: JSON.stringify({ oldText: "a", newText: "b" }) })).toEqual({
+				path: "a.txt",
+				edits: [{ oldText: "a", newText: "b" }],
+			});
+		});
+
 		it("matches all edits against the original and rejects overlaps", async () => {
 			const context = createContext();
 			getOrThrow(await context.env.writeFile("edit.txt", "one\ntwo\nthree\n"));

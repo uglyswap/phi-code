@@ -45,6 +45,12 @@ export interface EditToolDetails {
 	firstChangedLine?: number;
 }
 
+function isSingleEdit(value: unknown): value is Edit {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const edit = value as Record<string, unknown>;
+	return typeof edit.oldText === "string" && typeof edit.newText === "string";
+}
+
 function prepareEditArguments(input: unknown): EditToolInput {
 	if (!input || typeof input !== "object") return input as EditToolInput;
 	const args = input as Record<string, unknown>;
@@ -52,7 +58,11 @@ function prepareEditArguments(input: unknown): EditToolInput {
 		try {
 			const parsed: unknown = JSON.parse(args.edits);
 			if (Array.isArray(parsed)) args.edits = parsed;
+			else if (isSingleEdit(parsed)) args.edits = [parsed];
 		} catch {}
+	} else if (isSingleEdit(args.edits)) {
+		// Some models (GLM, Qwen, DeepSeek) send one edit object instead of an array (#7835).
+		args.edits = [args.edits];
 	}
 
 	const legacy = args as LegacyEditToolInput;

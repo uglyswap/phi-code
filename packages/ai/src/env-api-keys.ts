@@ -76,6 +76,11 @@ function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
 		return [ANTHROPIC_AUTH_TOKEN_ENV, ANTHROPIC_OAUTH_TOKEN_ENV, ANTHROPIC_API_KEY_ENV];
 	}
 
+	// phi documented OPENCODE_GO_API_KEY for the Go plan; keep it as a fallback alias.
+	if (provider === "opencode-go") {
+		return ["OPENCODE_API_KEY", "OPENCODE_GO_API_KEY"];
+	}
+
 	const envMap: Record<string, string> = {
 		"ant-ling": "ANT_LING_API_KEY",
 		"qwen-token-plan": "QWEN_TOKEN_PLAN_API_KEY",

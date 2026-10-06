@@ -732,18 +732,13 @@ describe("Models runtime", () => {
 		expect(await credentials.read("p1")).toEqual({ type: "api_key", key: "first" });
 	});
 
-	it("passes cancellation to OAuth refresh and preserves the previous credential", async () => {
+	// A started refresh may already have rotated the refresh token at the provider, so it must be
+	// persisted even when the request is cancelled (otherwise: refresh_token_invalidated).
+	it("persists an OAuth refresh that started before the request was cancelled", async () => {
 		const credentials = new InMemoryCredentialStore();
 		const previous: OAuthCredential = { type: "oauth", access: "old", refresh: "old-refresh", expires: 0 };
 		await credentials.modify("p1", async () => previous);
-		let startRefresh: (() => void) | undefined;
-		let finishRefresh: ((credential: typeof previous) => void) | undefined;
-		const refreshStarted = new Promise<void>((resolve) => {
-			startRefresh = resolve;
-		});
-		const blockedRefresh = new Promise<typeof previous>((resolve) => {
-			finishRefresh = resolve;
-		});
+		const controller = new AbortController();
 		let receivedSignal: AbortSignal | undefined;
 		const models = createModels({ credentials });
 		models.setProvider(
@@ -751,27 +746,23 @@ describe("Models runtime", () => {
 				id: "p1",
 				auth: {
 					oauth: testOAuth({
-						refresh: async (_credential, signal) => {
+						refresh: async (credential, signal) => {
 							receivedSignal = signal;
-							startRefresh?.();
-							return blockedRefresh;
+							// The provider has rotated old-refresh by the time the request is cancelled.
+							controller.abort();
+							return { ...credential, access: "new", refresh: "new-refresh", expires: Date.now() + 60_000 };
 						},
 					}),
 				},
 			}),
 		);
-		const controller = new AbortController();
-		const auth = models.getAuth("p1", { signal: controller.signal });
-		await refreshStarted;
-		controller.abort();
 
-		await expect(auth).rejects.toMatchObject({ name: "AbortError" });
+		await expect(models.getAuth("p1", { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
 		expect(receivedSignal).toBeInstanceOf(AbortSignal);
-		expect(receivedSignal?.aborted).toBe(true);
-		expect(receivedSignal?.reason).toBe(controller.signal.reason);
-		finishRefresh?.({ ...previous, access: "new", expires: Date.now() + 60_000 });
-		await new Promise((resolve) => setTimeout(resolve, 0));
-		expect(await credentials.read("p1")).toEqual(previous);
+		expect(receivedSignal?.aborted).toBe(false);
+		await vi.waitFor(async () => {
+			expect(await credentials.read("p1")).toMatchObject({ refresh: "new-refresh" });
+		});
 	});
 
 	it("resolves auth: stored credential owns the provider, ambient only when nothing stored", async () => {

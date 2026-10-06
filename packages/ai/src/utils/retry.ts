@@ -28,6 +28,8 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	"overloaded",
 	"rate.?limit",
 	"too many requests",
+	"currently experiencing high demand",
+	"model is at capacity",
 	// Word boundaries: a bare "500" also matches request ids, model names and token
 	// counts, which turned unrelated permanent failures into silent retry loops.
 	"\\b429\\b",
@@ -35,6 +37,8 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	"\\b502\\b",
 	"\\b503\\b",
 	"\\b504\\b",
+	// Cloudflare "520 status code (no body)" for origin-side failures (#9627).
+	"\\b520\\b",
 	"\\b524\\b",
 	"service.?unavailable",
 	"server.?error",
@@ -76,6 +80,9 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	"stream ended before message_stop",
 	"stream ended before a terminal response event",
 	"http2 request did not get a response",
+	// Node ERR_HTTP2_STREAM_CANCEL: the HTTP/2 session died before the request was
+	// sent, e.g. after the Bedrock SDK's 5-minute session timeout (#10379).
+	"pending stream has been canceled",
 
 	// Provider-requested retry delay cap failures should flow through the outer
 	// retry policy so callers can surface/abort the backoff (#1123).
@@ -93,6 +100,7 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 
 /**
  * Retry policy: bounded attempts with exponential backoff (`baseDelayMs * 2^(attempt-1)`).
+ * `maxAgentDelayMs` caps each computed delay and defaults to 60 seconds.
  * Matches `settings.retry` (`enabled`, `maxRetries`, `baseDelayMs`) in coding-agent; kept
  * here so the classifier and the policy-driven retry loop live together and stay reusable
  * by the SDK and other callers.
@@ -103,6 +111,21 @@ export interface RetryPolicy {
 	maxRetries: number;
 	/** Base delay in ms. Per-attempt delay is `baseDelayMs * 2^(attempt-1)` before jitter. */
 	baseDelayMs: number;
+	/** Optional cap for agent-level retry delays in ms. Defaults to 60 seconds. */
+	maxAgentDelayMs?: number;
+}
+
+export const DEFAULT_MAX_AGENT_RETRY_DELAY_MS = 60_000;
+
+/**
+ * Exponential backoff delay for a 1-indexed retry attempt, capped by `maxAgentDelayMs`
+ * (default {@link DEFAULT_MAX_AGENT_RETRY_DELAY_MS}) so large retry budgets never sleep
+ * for hours.
+ */
+export function retryDelayMs(policy: Pick<RetryPolicy, "baseDelayMs" | "maxAgentDelayMs">, attempt: number): number {
+	const delay = policy.baseDelayMs * 2 ** Math.max(0, attempt - 1);
+	const safeDelay = Number.isSafeInteger(delay) ? delay : Number.MAX_SAFE_INTEGER;
+	return Math.min(safeDelay, policy.maxAgentDelayMs ?? DEFAULT_MAX_AGENT_RETRY_DELAY_MS);
 }
 
 /** Optional callbacks emitted by {@link retryAssistantCall} around each retry. */
@@ -195,7 +218,7 @@ export async function retryAssistantCall(
 
 		attempt++;
 		lastRetry = { attempt, errorMessage: response.errorMessage || "Unknown error" };
-		const delayMs = policy!.baseDelayMs * 2 ** (attempt - 1);
+		const delayMs = retryDelayMs(policy!, attempt);
 		await callbacks?.onRetryScheduled?.(attempt, maxAttempts, delayMs, lastRetry.errorMessage);
 
 		// Normalize aborts during retry backoff to the same AssistantMessage shape as

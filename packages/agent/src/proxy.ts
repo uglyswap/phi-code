@@ -181,9 +181,20 @@ export function streamProxy(model: Model<any>, context: Context, options: ProxyS
 			reader = response.body!.getReader();
 			const decoder = new TextDecoder();
 			let buffer = "";
-			// Track whether the server sent a terminal (done/error) event so we can
-			// synthesize one if the connection closes cleanly without it.
-			let sawTerminal = false;
+			// Track whether the server sent a terminal (done/error) event.
+			let sawTerminalEvent = false;
+
+			const processLine = (line: string): void => {
+				if (!line.startsWith("data: ")) return;
+				const data = line.slice(6).trim();
+				if (!data) return;
+				const proxyEvent = JSON.parse(data) as ProxyAssistantMessageEvent;
+				const event = processProxyEvent(proxyEvent, partial);
+				if (event) {
+					if (event.type === "done" || event.type === "error") sawTerminalEvent = true;
+					stream.push(event);
+				}
+			};
 
 			while (true) {
 				const { done, value } = await reader.read();
@@ -198,19 +209,7 @@ export function streamProxy(model: Model<any>, context: Context, options: ProxyS
 				buffer = lines.pop() || "";
 
 				for (const line of lines) {
-					if (line.startsWith("data: ")) {
-						const data = line.slice(6).trim();
-						if (data) {
-							const proxyEvent = JSON.parse(data) as ProxyAssistantMessageEvent;
-							const event = processProxyEvent(proxyEvent, partial);
-							if (event) {
-								if (event.type === "done" || event.type === "error") {
-									sawTerminal = true;
-								}
-								stream.push(event);
-							}
-						}
-					}
+					processLine(line);
 				}
 			}
 
@@ -218,15 +217,25 @@ export function streamProxy(model: Model<any>, context: Context, options: ProxyS
 				throw new Error("Request aborted by user");
 			}
 
-			// Guard against a truncated stream that closed without a terminal SSE.
-			// Without this, result() would hang forever since end() does not resolve
-			// the final result when no terminal event was pushed.
-			if (!sawTerminal) {
-				partial.stopReason = "stop";
+			// The final event may not be newline-terminated; flush the decoder and
+			// process whatever is left in the buffer.
+			buffer += decoder.decode();
+			if (buffer) {
+				processLine(buffer);
+			}
+
+			if (!sawTerminalEvent) {
+				// A clean EOF without a done/error event means the server dropped the
+				// response mid-stream. Surface it as an error: reporting the truncated
+				// partial as a successful "stop" would silently commit an incomplete
+				// answer (and its unfinished tool calls). Without a terminal event,
+				// result() would also never resolve.
+				partial.stopReason = "error";
+				partial.errorMessage = "Connection closed by proxy server before the response completed";
 				stream.push({
-					type: "done",
-					reason: partial.stopReason as Extract<StopReason, "stop" | "length" | "toolUse">,
-					message: partial,
+					type: "error",
+					reason: "error",
+					error: partial,
 				});
 			}
 

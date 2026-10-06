@@ -520,6 +520,17 @@ async function executeToolCallsParallel(
 		}
 
 		finalizedCalls.push(async () => {
+			// A later call's preflight (e.g. a tool_call hook calling ctx.abort()) can abort the
+			// batch after this call was prepared: do not start it (#8935).
+			if (signal?.aborted) {
+				const finalized = {
+					toolCall,
+					result: createErrorToolResult("Operation aborted"),
+					isError: true,
+				} satisfies FinalizedToolCallOutcome;
+				await emitToolExecutionEnd(finalized, emit);
+				return finalized;
+			}
 			const executed = await executePreparedToolCall(preparation, signal, emit);
 			const finalized = await finalizeExecutedToolCall(
 				currentContext,
