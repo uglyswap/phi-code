@@ -18,11 +18,10 @@
 
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "phi-code";
-import { isDestructiveCommand, runParallel } from "phi-code";
+import { getAgentDir, isDestructiveCommand, runParallel } from "phi-code";
 import type { Api, Model } from "phi-code-ai";
 import { type AgentDef, loadAgentDef } from "./providers/agent-def.ts";
 import { runCandidateFanout } from "./providers/candidate-fanout.ts";
@@ -682,7 +681,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	function loadSkillContent(name: string): string | null {
 		const dirs = [
 			join(process.cwd(), ".phi", "skills"),
-			join(homedir(), ".phi", "agent", "skills"),
+			join(getAgentDir(), "skills"),
 			join(__dirname, "..", "..", "skills"),
 		];
 		for (const dir of dirs) {
@@ -703,7 +702,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	 * Each phase now reads outputs from previous phases and writes structured outputs.
 	 */
 	function buildPhases(description: string, tsOverride?: string): OrchestratorPhase[] {
-		const routingPath = join(homedir(), ".phi", "agent", "routing.json");
+		const routingPath = join(getAgentDir(), "routing.json");
 		let routing: any = { routes: {}, default: { model: "default" } };
 		try {
 			routing = JSON.parse(readFileSync(routingPath, "utf-8"));
@@ -1298,7 +1297,7 @@ Tag the note with relevant keywords for vector search.
 	// resolvePhaseOutcome) but never the /plan-specific agent_end path.
 
 	function routeFor(routeKey: string): { preferred: string; fallback: string } {
-		const routingPath = join(homedir(), ".phi", "agent", "routing.json");
+		const routingPath = join(getAgentDir(), "routing.json");
 		try {
 			const routing = JSON.parse(readFileSync(routingPath, "utf-8"));
 			const route = routing.routes?.[routeKey];
@@ -1396,7 +1395,7 @@ Tag the note with relevant keywords for vector search.
 	/** Read ~/.phi/agent/routing.json (shape shared with routeFor). */
 	function readRoutingConfig(): RoutingLike {
 		try {
-			return JSON.parse(readFileSync(join(homedir(), ".phi", "agent", "routing.json"), "utf-8")) as RoutingLike;
+			return JSON.parse(readFileSync(join(getAgentDir(), "routing.json"), "utf-8")) as RoutingLike;
 		} catch {
 			return {};
 		}

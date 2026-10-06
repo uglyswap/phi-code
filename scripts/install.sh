@@ -84,6 +84,21 @@ SRC="$TMP/extract/phi"
 # aside first and replaced by rename, which works while an old phi is running.
 mkdir -p "$INSTALL_ROOT"
 mv "$SRC/phi" "$TMP/phi.bin"
+# Unlink every file about to be replaced first: cp writes into the existing
+# inode, which corrupts the native modules (libonnxruntime, sharp, ast-grep,
+# clipboard *.node) mapped by a phi that is still running. A running process
+# keeps the unlinked inode; the copy gets a new one.
+(cd "$SRC" && find . \( -type f -o -type l \) -print) | while IFS= read -r file; do
+	rm -f "$INSTALL_ROOT/$file"
+done
+# Directories shipped by the archive (node_modules, extensions, theme, ...) are
+# replaced wholesale so files of older releases do not pile up. Removing them is
+# safe while phi runs: open files keep their unlinked inodes.
+for dir in "$SRC"/*/; do
+	[ -d "$dir" ] || continue
+	name="$(basename "$dir")"
+	rm -rf "${INSTALL_ROOT:?}/$name"
+done
 cp -R "$SRC/." "$INSTALL_ROOT/"
 cp "$TMP/phi.bin" "$INSTALL_ROOT/.phi.new"
 chmod +x "$INSTALL_ROOT/.phi.new"

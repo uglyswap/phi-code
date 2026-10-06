@@ -83,6 +83,53 @@ jobs:
             --offline-model-data \
             --out "${GITHUB_WORKSPACE}/packages/coding-agent/binaries"
 
+      # The extensions' npm dependencies ship next to the executable and are
+      # loaded natively by the compiled Bun runtime. Load the heaviest ones
+      # (transformers -> onnxruntime-node, sharp, ast-grep) from inside the
+      # linux-x64 binary, through an extension like the bundled ones, so a
+      # pruned native file or a resolver regression fails the release here.
+      # @phi-code-admin/browser is loaded too (its camofox server is installed
+      # on first use, see packages/browser/src/server-runtime.ts).
+      - name: Smoke-test linux-x64 binary
+        run: |
+          set -euo pipefail
+
+          bin="${GITHUB_WORKSPACE}/packages/coding-agent/binaries/linux-x64/phi"
+          smoke_home="$(mktemp -d)"
+          trap 'rm -rf "${smoke_home}"' EXIT
+          cat > "${smoke_home}/smoke-extension.ts" <<'EOF'
+          import { createRequire } from "node:module";
+          import { dirname, join } from "node:path";
+
+          export default function () {
+            const req = createRequire(join(dirname(process.execPath), "node_modules", "sigma-memory", "package.json"));
+            const fromTransformers = createRequire(req.resolve("@huggingface/transformers"));
+            if (typeof req("@huggingface/transformers").pipeline !== "function") throw new Error("transformers: no pipeline()");
+            if (typeof fromTransformers("onnxruntime-node").InferenceSession?.create !== "function") throw new Error("onnxruntime-node: no InferenceSession");
+            if (!fromTransformers("sharp").versions?.vips) throw new Error("sharp: no libvips");
+            const sg = req("@ast-grep/napi");
+            if (sg.parse(sg.Lang.TypeScript, "const a = 1;").root().kind() !== "program") throw new Error("ast-grep: parse failed");
+            // The browser extension's API ships; its server is installed with the system npm on first use.
+            const browser = req("@phi-code-admin/browser");
+            if (typeof browser.configureServerRuntime !== "function" || typeof browser.ensureServer !== "function") throw new Error("@phi-code-admin/browser: no first-use server install");
+            console.log("PHI_BINARY_SMOKE_OK");
+          }
+          EOF
+
+          "${bin}" --version
+          "${bin}" --help > /dev/null
+          # No provider is configured: the run ends with "No API key", after
+          # every bundled extension and the smoke extension have loaded.
+          set +e
+          output="$(cd "${smoke_home}" && HOME="${smoke_home}" PHI_CODING_AGENT_DIR="${smoke_home}/agent" PHI_OFFLINE=1 \
+            "${bin}" -e "${smoke_home}/smoke-extension.ts" -p "smoke" < /dev/null 2>&1)"
+          set -e
+          echo "${output}"
+          if grep -q "Failed to load extension" <<<"${output}" || ! grep -q "PHI_BINARY_SMOKE_OK" <<<"${output}"; then
+            echo "::error::The linux-x64 binary failed to load its extensions' dependencies."
+            exit 1
+          fi
+
       - name: Prepare GitHub release payload
         run: |
           set -euo pipefail

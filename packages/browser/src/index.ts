@@ -27,6 +27,9 @@ import { statSync } from "node:fs";
 import { createRequire } from "node:module";
 import * as net from "node:net";
 import * as path from "node:path";
+import { ensureRuntimeServerEntry, type ProgressListener } from "./server-runtime.ts";
+
+export type { ProgressListener } from "./server-runtime.ts";
 
 const require = createRequire(import.meta.url);
 
@@ -144,23 +147,88 @@ export function resolveNodeExecutable(
 	);
 }
 
-function resolveServerEntry(): string {
+let runtimeInstallDir: string | undefined;
+const progressListeners = new Set<ProgressListener>();
+
+function emitProgress(message: string): void {
+	for (const listener of progressListeners) {
+		try {
+			listener(message);
+		} catch {
+			// a broken listener must not break the boot
+		}
+	}
+}
+
+/**
+ * Where to install the camofox-browser server on first use when it is not
+ * installed next to this package (phi's standalone Bun executable ships this
+ * package without it: the server needs the system Node and native modules
+ * built for it). Without it, a missing server is an error, as before.
+ */
+export function configureServerRuntime(options: { installDir?: string }): void {
+	runtimeInstallDir = options.installDir;
+}
+
+async function resolveServerEntry(nodeExecutable: string): Promise<string> {
 	// The vendored camofox-browser ships its Express entry as `server.js`
 	// (declared as the `main` field). createRequire resolves the package
 	// to that file even when consumers install us via npm/pnpm/yarn.
-	return require.resolve("@phi-code-admin/camofox-browser");
+	try {
+		return require.resolve("@phi-code-admin/camofox-browser");
+	} catch (error) {
+		if (!runtimeInstallDir) throw error;
+	}
+	return await ensureRuntimeServerEntry({ installDir: runtimeInstallDir, nodeExecutable, onProgress: emitProgress });
+}
+
+function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+	if (!signal) return promise;
+	signal.throwIfAborted();
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => reject(signal.reason);
+		signal.addEventListener("abort", onAbort, { once: true });
+		promise.then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort);
+				resolve(value);
+			},
+			(error: unknown) => {
+				signal.removeEventListener("abort", onAbort);
+				reject(error);
+			},
+		);
+	});
+}
+
+export interface EnsureServerOptions {
+	/** Stops waiting (the shared boot, e.g. a first-use install, goes on). */
+	signal?: AbortSignal;
+	/** Progress of a first-use runtime install, while this call waits. */
+	onProgress?: ProgressListener;
 }
 
 /**
  * Boot (or reuse) the camofox-browser server. Idempotent across calls.
  */
-export async function ensureServer(): Promise<{ baseUrl: string }> {
+export async function ensureServer(options: EnsureServerOptions = {}): Promise<{ baseUrl: string }> {
+	const { signal, onProgress } = options;
+	signal?.throwIfAborted();
+	if (onProgress) progressListeners.add(onProgress);
+	try {
+		return await abortable(bootServer(), signal);
+	} finally {
+		if (onProgress) progressListeners.delete(onProgress);
+	}
+}
+
+async function bootServer(): Promise<{ baseUrl: string }> {
 	if (bootPromise) return bootPromise;
 
 	bootPromise = (async () => {
 		const nodeExecutable = resolveNodeExecutable();
+		const entry = await resolveServerEntry(nodeExecutable);
 		const port = await findAvailablePort();
-		const entry = resolveServerEntry();
 		const cwd = path.dirname(entry);
 
 		const env: NodeJS.ProcessEnv = {
@@ -902,4 +970,5 @@ export type BrowserApi = {
 	listTabs: typeof listTabs;
 	ensureServer: typeof ensureServer;
 	closeAll: typeof closeAll;
+	configureServerRuntime: typeof configureServerRuntime;
 };

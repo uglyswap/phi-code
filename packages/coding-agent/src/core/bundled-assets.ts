@@ -48,6 +48,7 @@ export const BUNDLED_EXTENSION_DEPS = [
 	"@ast-grep/napi",
 	"cross-spawn",
 	"ignore",
+	"@phi-code-admin/browser",
 ] as const;
 
 export function readBundledAssetsStamp(agentDir: string = getAgentDir()): string | undefined {

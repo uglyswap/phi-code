@@ -17,7 +17,7 @@ import { existsSync } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import type { ExtensionAPI } from "phi-code";
+import { type ExtensionAPI, getAgentDir } from "phi-code";
 import {
 	buildRoutingConfig,
 	configureAssignments,
@@ -27,14 +27,18 @@ import {
 } from "./setup.ts";
 
 const phiDir = join(homedir(), ".phi");
-const agentDir = join(phiDir, "agent");
-const agentsDir = join(agentDir, "agents");
 const memoryDir = join(phiDir, "memory");
 
+// Resolved per call (not at module load) so PHI_CODING_AGENT_DIR is honored.
+function agentsDir(): string {
+	return join(getAgentDir(), "agents");
+}
+
 async function ensureDirs(): Promise<void> {
+	const agentDir = getAgentDir();
 	for (const dir of [
 		agentDir,
-		agentsDir,
+		agentsDir(),
 		join(agentDir, "skills"),
 		join(agentDir, "extensions"),
 		memoryDir,
@@ -51,7 +55,7 @@ async function copyBundledAgents(): Promise<void> {
 		const files = await readdir(bundledDir);
 		for (const file of files) {
 			if (!file.endsWith(".md")) continue;
-			const dest = join(agentsDir, file);
+			const dest = join(agentsDir(), file);
 			if (!existsSync(dest)) {
 				await copyFile(join(bundledDir, file), dest);
 			}
@@ -149,7 +153,7 @@ export default function initExtension(pi: ExtensionAPI) {
 				// Show the current per-role assignment as the starting point.
 				let current: { routes?: Record<string, { preferredModel?: string; fallback?: string }> } = {};
 				try {
-					current = JSON.parse(await readFile(join(agentDir, "routing.json"), "utf-8"));
+					current = JSON.parse(await readFile(join(getAgentDir(), "routing.json"), "utf-8"));
 				} catch {
 					/* no routing config yet */
 				}

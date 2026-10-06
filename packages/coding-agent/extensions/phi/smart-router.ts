@@ -9,9 +9,8 @@
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI } from "phi-code";
+import { type ExtensionAPI, getAgentDir } from "phi-code";
 import type { RoutingConfig } from "sigma-agents";
 import { SmartRouter } from "sigma-agents";
 import { resolveModelRef } from "./providers/orchestrator-helpers.ts";
@@ -37,7 +36,7 @@ interface ExtensionConfig {
 // ─── Extension ───────────────────────────────────────────────────────────
 
 export default function smartRouterExtension(pi: ExtensionAPI) {
-	const configDir = join(homedir(), ".phi", "agent");
+	const configDir = getAgentDir();
 	const configPath = join(configDir, "routing.json");
 
 	let router = new SmartRouter(SmartRouter.defaultConfig());

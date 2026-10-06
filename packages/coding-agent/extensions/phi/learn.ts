@@ -8,14 +8,16 @@
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI } from "phi-code";
+import { type ExtensionAPI, getAgentDir } from "phi-code";
 
 // Write to the global skills dir so both the core skill system (/skill:<name>)
-// and the sigma-skills hint engine pick it up.
-const MANAGED_SKILLS_DIR = join(homedir(), ".phi", "agent", "skills");
+// and the sigma-skills hint engine pick it up. Resolved per call so
+// PHI_CODING_AGENT_DIR is honored.
+export function managedSkillsDir(): string {
+	return join(getAgentDir(), "skills");
+}
 
 function slugify(name: string): string {
 	return name
@@ -56,7 +58,7 @@ export default function (pi: ExtensionAPI) {
 							isError: true,
 						};
 					}
-					const dir = join(MANAGED_SKILLS_DIR, slug);
+					const dir = join(managedSkillsDir(), slug);
 					mkdirSync(dir, { recursive: true });
 					const description =
 						p.lesson

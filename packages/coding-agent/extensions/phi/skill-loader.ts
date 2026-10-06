@@ -22,9 +22,8 @@
  */
 
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI } from "phi-code";
+import { type ExtensionAPI, getAgentDir } from "phi-code";
 import type { SkillsConfig } from "sigma-skills";
 import { SkillLoader, SkillScanner } from "sigma-skills";
 
@@ -33,9 +32,10 @@ export default function skillLoaderExtension(pi: ExtensionAPI) {
 	// from extensions/phi/); postinstall copies them to ~/.phi/agent/skills
 	// (== globalDir) in the installed layout. Probe both (the scanner dedupes
 	// by skill name).
-	const bundledCandidates = [join(__dirname, "..", "..", "skills"), join(homedir(), ".phi", "agent", "skills")];
+	const agentDir = getAgentDir();
+	const bundledCandidates = [join(__dirname, "..", "..", "skills"), join(agentDir, "skills")];
 	const cwd = process.cwd();
-	const globalDir = join(homedir(), ".phi", "agent", "skills");
+	const globalDir = join(agentDir, "skills");
 	const config: SkillsConfig = {
 		globalDir,
 		projectDir: join(cwd, ".phi", "skills"),
@@ -49,7 +49,7 @@ export default function skillLoaderExtension(pi: ExtensionAPI) {
 			join(cwd, ".codex", "skills"),
 			join(cwd, ".github", "skills"),
 		],
-		managedDir: join(homedir(), ".phi", "agent", "managed-skills"),
+		managedDir: join(agentDir, "managed-skills"),
 	};
 	// Project skill folders (.phi/.claude/.agents/.codex/.github under the
 	// project) are repository content: their descriptions end up in the user

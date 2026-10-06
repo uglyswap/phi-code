@@ -54,7 +54,8 @@ for (const { src, dest, label } of copies) {
 // Create node_modules with symlinks to the actual packages. Includes the sigma
 // packages plus the non-phi-internal deps the bundled extensions import directly
 // (zod + the MCP SDK for the mcp extension, @ast-grep/napi for the ast-grep
-// extension, cross-spawn for lsp, ignore for ast-grep). typebox and phi-code* resolve via the loader's module aliases, so
+// extension, cross-spawn for lsp, ignore for ast-grep, @phi-code-admin/browser
+// for the browser extension). typebox and phi-code* resolve via the loader's module aliases, so
 // they are not listed here. Any new bundled-extension dependency that is not
 // phi-internal and not typebox must be added to this list.
 const extensionDeps = [
@@ -66,6 +67,7 @@ const extensionDeps = [
   "@ast-grep/napi",
   "cross-spawn",
   "ignore",
+  "@phi-code-admin/browser",
 ];
 const extensionsNodeModules = join(agentDir, "extensions", "node_modules");
 mkdirSync(extensionsNodeModules, { recursive: true });

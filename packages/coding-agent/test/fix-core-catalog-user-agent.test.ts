@@ -21,10 +21,13 @@ describe("fix-core pi.dev model catalog User-Agent", () => {
 		expect(PI_USER_AGENT_RE.test(getPiUserAgent("0.99.1"))).toBe(false);
 	});
 
-	it("tracks the phi-code-ai package version (the upstream model schema phi implements)", () => {
+	it("tracks the phi-code-ai version line (the upstream model schema phi implements)", () => {
 		const aiPackage = JSON.parse(readFileSync(new URL("../../ai/package.json", import.meta.url), "utf-8")) as {
 			version: string;
 		};
-		expect(PI_MODEL_CATALOG_COMPAT_VERSION).toBe(aiPackage.version);
+		// phi ships its own patch releases of phi-code-ai on the upstream 0.84.x line: the
+		// schema is identified by major.minor, so an upstream merge (0.85+) must move it.
+		const minorLine = (version: string) => version.split(".").slice(0, 2).join(".");
+		expect(minorLine(PI_MODEL_CATALOG_COMPAT_VERSION)).toBe(minorLine(aiPackage.version));
 	});
 });

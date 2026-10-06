@@ -70,9 +70,7 @@
 	],
 	"exclude": [
 		"node_modules",
-		"dist",
-		"extensions/phi/web-search.ts",
-		"extensions/phi/memory.ts"
+		"dist"
 	],
-	"_note": "Typecheck for phi extensions (NOT covered by tsconfig.build, loaded via jiti at runtime). @phi-code-admin/browser maps to its sources so browser.ts typechecks without building packages/browser. web-search/memory are excluded for pre-existing optional-dep / ontology type-debt; run check:ext before changing the orchestrator or adding commands."
+	"_note": "Typecheck for phi extensions (NOT covered by tsconfig.build, loaded via jiti at runtime). @phi-code-admin/browser maps to its sources so browser.ts typechecks without building packages/browser. sigma-memory (memory.ts) resolves through its published dist/*.d.ts via node_modules (no source mapping): rebuild packages/sigma-memory after changing its API; run check:ext before changing the orchestrator or adding commands."
 }

@@ -32,6 +32,29 @@ interface SearchResponse {
 	triedProviders: string[];
 }
 
+/** Subset of the Brave Search API response actually read here (untrusted JSON). */
+interface BraveSearchResponse {
+	web?: { results?: Array<{ title?: string; url?: string; description?: string }> };
+}
+
+// Minimal local shapes of the optional deps (@mozilla/readability, jsdom): they are
+// not dependencies of this package, so their published types are not available.
+interface ReadabilityArticle {
+	textContent?: string | null;
+}
+type ReadabilityConstructor = new (document: unknown) => { parse(): ReadabilityArticle | null };
+type JsdomConstructor = new (html: string, options: { url: string }) => { window: { document: unknown } };
+
+/**
+ * Read a named constructor export from a dynamically imported module. Only checks
+ * that it is a function: the shape is the documented public API of the package.
+ */
+function getConstructorExport<T>(mod: unknown, name: string): T | undefined {
+	if (typeof mod !== "object" || mod === null) return undefined;
+	const value: unknown = Reflect.get(mod, name);
+	return typeof value === "function" ? (value as T) : undefined;
+}
+
 // ─── Rotating User-Agents ───
 
 const USER_AGENTS = [
@@ -476,11 +499,11 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 
 		const { text: json, truncated: jsonTruncated } = await readBodyCapped(response);
 		if (jsonTruncated) throw new Error(`Brave API response exceeds ${MAX_RESPONSE_BYTES} bytes`);
-		const data = JSON.parse(json) as any;
-		if (!data.web?.results) return [];
+		const data: BraveSearchResponse = JSON.parse(json);
+		if (!Array.isArray(data?.web?.results)) return [];
 
 		return data.web.results.map(
-			(r: any): SearchResult => ({
+			(r): SearchResult => ({
 				title: r.title || "No title",
 				url: r.url || "",
 				description: r.description || "",
@@ -519,8 +542,10 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 						triedProviders,
 					};
 				}
-			} catch (error: any) {
-				console.warn(`[web-search] ${provider.name} failed: ${error?.message || error}`);
+			} catch (error) {
+				console.warn(
+					`[web-search] ${provider.name} failed: ${error instanceof Error ? error.message : String(error)}`,
+				);
 			}
 		}
 
@@ -532,22 +557,27 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 	// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 	// Lazy-loaded optional deps (installed by user if they want better extraction)
-	let _Readability: any = null;
-	let _JSDOM: any = null;
+	let _Readability: ReadabilityConstructor | null = null;
+	let _JSDOM: JsdomConstructor | null = null;
 	let _readabilityChecked = false;
 
 	async function tryLoadReadability(): Promise<boolean> {
-		if (_readabilityChecked) return !!_Readability;
+		if (_readabilityChecked) return !!(_Readability && _JSDOM);
 		_readabilityChecked = true;
 		try {
 			// Optional deps that are not declared in package.json: non-literal specifiers keep
 			// the typecheck independent of whether the user installed them.
 			const readabilitySpecifier = "@mozilla/readability";
 			const jsdomSpecifier = "jsdom";
-			const readabilityMod = await import(readabilitySpecifier);
-			_Readability = readabilityMod.Readability;
-			const jsdomMod = await import(jsdomSpecifier);
-			_JSDOM = jsdomMod.JSDOM;
+			const readability = getConstructorExport<ReadabilityConstructor>(
+				await import(readabilitySpecifier),
+				"Readability",
+			);
+			const jsdom = getConstructorExport<JsdomConstructor>(await import(jsdomSpecifier), "JSDOM");
+			// Both are required: a half-loaded pair must not report success.
+			if (!readability || !jsdom) return false;
+			_Readability = readability;
+			_JSDOM = jsdom;
 			return true;
 		} catch {
 			return false;

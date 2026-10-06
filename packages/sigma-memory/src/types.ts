@@ -2,6 +2,13 @@ export interface MemoryConfig {
 	memoryDir: string; // ~/.phi/memory/
 	projectMemoryDir: string; // .phi/memory/ (in the current project)
 	ontologyPath: string; // ~/.phi/memory/ontology/graph.jsonl
+	/**
+	 * Cache directory for the embedding model downloaded by
+	 * @huggingface/transformers. Defaults to <memoryDir>/models. Without it the
+	 * library caches under its own node_modules folder, which is wiped by every
+	 * update and unwritable for a global (sudo) npm install.
+	 */
+	modelCacheDir?: string;
 }
 
 export interface SearchResult {
@@ -18,19 +25,26 @@ export interface VectorSearchResult {
 	score: number; // cosine similarity 0-1
 }
 
+/** Entity types suggested to the model; the store accepts any non-empty type string. */
+export type KnownOntologyEntityType =
+	| "Person"
+	| "Project"
+	| "Device"
+	| "Account"
+	| "Document"
+	| "Service"
+	| "Concept"
+	| "Library"
+	| "Module"
+	| "Tool";
+
+// `string & {}` keeps editor completion for the known types while matching what
+// the store actually persists (tools also propose types such as "Database").
+export type OntologyEntityType = KnownOntologyEntityType | (string & {});
+
 export interface OntologyEntity {
 	id: string;
-	type:
-		| "Person"
-		| "Project"
-		| "Device"
-		| "Account"
-		| "Document"
-		| "Service"
-		| "Concept"
-		| "Library"
-		| "Module"
-		| "Tool";
+	type: OntologyEntityType;
 	name: string;
 	properties: Record<string, string>;
 	createdAt: string;
@@ -82,17 +96,7 @@ export interface MemoryStatus {
 export interface OntologyEntityEntry {
 	kind: "entity";
 	id: string;
-	type:
-		| "Person"
-		| "Project"
-		| "Device"
-		| "Account"
-		| "Document"
-		| "Service"
-		| "Concept"
-		| "Library"
-		| "Module"
-		| "Tool";
+	type: OntologyEntityType;
 	name: string;
 	properties: Record<string, string>;
 	createdAt: string;

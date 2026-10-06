@@ -661,7 +661,7 @@ function clearBrowserIdleTimer() {
 
 // Detects errors that retrying cannot recover from (e.g., Camoufox binary
 // missing because postinstall was skipped). The user must run
-// `npx camoufox-js fetch` and restart; looping on this wastes resources
+// `npx -y @phi-code-admin/camoufox-js fetch` and restart; looping on this wastes resources
 // and buries the actionable error under noise.
 //
 // Sentinel: matches the human-readable message thrown by camoufox-js's
@@ -677,7 +677,8 @@ function camoufoxInstallRemediation() {
   if (CONFIG.camoufoxExecutablePath) {
     return 'verify CAMOUFOX_EXECUTABLE points to a Camoufox bundle with properties.json, version.json, and fontconfig/';
   }
-  return 'run `npx camoufox-js fetch` then restart the server';
+  // PHI-VENDOR: the unscoped camoufox-js package downloads into its own cache, not phi's.
+  return 'run `npx -y @phi-code-admin/camoufox-js fetch` then restart the server';
 }
 
 function scheduleBrowserWarmRetry(delayMs = 5000) {

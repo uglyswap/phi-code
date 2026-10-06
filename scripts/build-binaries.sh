@@ -12,10 +12,14 @@
 #   --skip-build         Skip the package build
 #   --skip-extension-deps Do not ship the bundled extensions' npm dependencies
 #                        (sigma-*, MCP SDK, zod, ...): smaller archives, but the
-#                        memory/agents/skills/mcp/ast-grep/lsp extensions fail to load
+#                        memory/agents/skills/mcp/ast-grep/lsp/browser extensions fail to load
 #   --offline-model-data Build with bundled model data instead of refreshing it
 #   --platform <name>    Build only for specified platform (darwin-arm64, darwin-x64, linux-x64, linux-arm64, windows-x64, windows-arm64)
 #   --out <dir>          Output directory (default: packages/coding-agent/binaries)
+#   --prune-extension-deps <dir>
+#                        Only prune an already staged extension dependency
+#                        prefix (<dir>/package.json + <dir>/node_modules) for
+#                        --platform, then exit (used by the tests)
 #
 # Output:
 #   packages/coding-agent/binaries/
@@ -37,6 +41,7 @@ SKIP_EXTENSION_DEPS=false
 OFFLINE_MODEL_DATA=false
 PLATFORM=""
 OUTPUT_DIR=""
+PRUNE_ONLY_DIR=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -62,6 +67,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --platform)
             PLATFORM="$2"
+            shift 2
+            ;;
+        --prune-extension-deps)
+            PRUNE_ONLY_DIR="$2"
             shift 2
             ;;
         --out)
@@ -93,6 +102,297 @@ if [[ -z "$OUTPUT_DIR" ]]; then
 fi
 if [[ "$OUTPUT_DIR" != /* ]]; then
     OUTPUT_DIR="$(pwd)/$OUTPUT_DIR"
+fi
+
+# Shrink the extension dependencies staged for one target platform (prefix
+# $2 holding package.json + node_modules) without losing a runtime feature.
+# Unpruned, they weigh ~430 MB, mostly onnxruntime-node's binaries for every
+# OS (sigma-memory -> @huggingface/transformers). Every rule is explicit and
+# checked; the build fails when an expected native binary or entry file is
+# missing, or when an assumption behind a rule no longer holds:
+#   - onnxruntime-node: keep only bin/napi-v3/<os>/<arch>.
+#   - onnxruntime-web: dropped. transformers' Node builds (the "node" export
+#     condition, used by Node and Bun) mark it "(ignored)"; only the browser
+#     build imports it. Checked below on the shipped Node entry files.
+#   - tar, global-agent: only onnxruntime-node's postinstall downloader
+#     (script/install.js) uses them, and install scripts never run here.
+#   - @phi-code-admin/camofox-browser, @phi-code-admin/camoufox-js: the
+#     browser server runs under the system Node (native modules built for its
+#     ABI); @phi-code-admin/browser installs it with npm on first use.
+#   - packages unreachable from the declared dependencies once those edges are
+#     cut (onnxruntime-web's own tree), or built for another os/cpu/libc.
+#   - @huggingface/transformers/dist and sql.js/dist: keep only the files
+#     their package.json "exports" select in Node (+ sql-wasm.wasm).
+#   - every package except sigma-*: source maps, .d.ts and .tsbuildinfo.
+#   - linux: libonnxruntime.so.1 is a byte copy of libonnxruntime.so.1.<ver>
+#     in the npm tarball (a symlink upstream); restored as a symlink.
+prune_extension_deps() {
+    local platform="$1"
+    local staging="$2"
+    node - "$platform" "$staging" <<'PRUNE_EXTENSION_DEPS'
+const fs = require("fs");
+const path = require("path");
+
+const [platform, staging] = process.argv.slice(2);
+const fail = (message) => {
+    console.error(`prune-extension-deps (${platform}): ${message}`);
+    process.exit(1);
+};
+const OS = { darwin: "darwin", linux: "linux", windows: "win32" }[platform.split("-")[0]];
+const ARCH = platform.split("-")[1];
+const LIBC = OS === "linux" ? "glibc" : undefined;
+if (!OS || !ARCH) fail("unknown platform");
+const nodeModules = path.join(staging, "node_modules");
+if (!fs.existsSync(nodeModules)) fail(`${nodeModules} does not exist`);
+
+// Native packages the target needs: missing ones fail the build.
+const NATIVE_PACKAGES = {
+    "darwin-arm64": ["@img/sharp-darwin-arm64", "@img/sharp-libvips-darwin-arm64", "@ast-grep/napi-darwin-arm64"],
+    "darwin-x64": ["@img/sharp-darwin-x64", "@img/sharp-libvips-darwin-x64", "@ast-grep/napi-darwin-x64"],
+    "linux-x64": ["@img/sharp-linux-x64", "@img/sharp-libvips-linux-x64", "@ast-grep/napi-linux-x64-gnu"],
+    "linux-arm64": ["@img/sharp-linux-arm64", "@img/sharp-libvips-linux-arm64", "@ast-grep/napi-linux-arm64-gnu"],
+    "windows-x64": ["@img/sharp-win32-x64", "@ast-grep/napi-win32-x64-msvc"],
+    "windows-arm64": ["@img/sharp-win32-arm64", "@ast-grep/napi-win32-arm64-msvc"],
+}[platform];
+if (!NATIVE_PACKAGES) fail("no native package list for this platform");
+// Dependency edges never followed at runtime (see the comment above).
+const DROPPED_PACKAGES = new Set(["onnxruntime-web"]);
+const DROPPED_EDGES = {
+    "onnxruntime-node": new Set(["tar", "global-agent"]),
+    // The camofox-browser server runs under the system Node with native
+    // modules built for it: @phi-code-admin/browser installs it on first use
+    // (packages/browser/src/server-runtime.ts). Checked below.
+    "@phi-code-admin/browser": new Set(["@phi-code-admin/camofox-browser", "@phi-code-admin/camoufox-js"]),
+};
+// Imports a package makes without declaring them (resolved through hoisting).
+const UNDECLARED_EDGES = { "@huggingface/transformers": ["onnxruntime-common"] };
+
+const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
+const rm = (target) => fs.rmSync(target, { recursive: true, force: true });
+
+// All installed package directories, nested node_modules included.
+function listPackages(dir, out = []) {
+    if (!fs.existsSync(dir)) return out;
+    for (const entry of fs.readdirSync(dir)) {
+        if (entry.startsWith(".")) continue;
+        const full = path.join(dir, entry);
+        if (entry.startsWith("@")) {
+            for (const scoped of fs.readdirSync(full)) {
+                const pkgDir = path.join(full, scoped);
+                out.push(pkgDir);
+                listPackages(path.join(pkgDir, "node_modules"), out);
+            }
+        } else {
+            out.push(full);
+            listPackages(path.join(full, "node_modules"), out);
+        }
+    }
+    return out;
+}
+
+// Node's lookup: <dir>/node_modules/<name>, then each parent up to staging.
+function resolvePackage(name, fromDir) {
+    let dir = fromDir;
+    for (;;) {
+        const candidate = path.join(dir, "node_modules", name);
+        if (fs.existsSync(path.join(candidate, "package.json"))) return candidate;
+        if (path.resolve(dir) === path.resolve(staging)) return undefined;
+        const parent = path.dirname(dir);
+        if (parent === dir) return undefined;
+        dir = path.basename(parent) === "node_modules" ? path.dirname(parent) : parent;
+        if (path.basename(dir).startsWith("@")) dir = path.dirname(path.dirname(dir));
+    }
+}
+
+function matchesTarget(pkg) {
+    const allows = (list, value) => {
+        if (!Array.isArray(list) || list.length === 0 || value === undefined) return true;
+        if (list.includes(`!${value}`)) return false;
+        const positive = list.filter((entry) => !entry.startsWith("!"));
+        return positive.length === 0 || positive.includes(value);
+    };
+    return allows(pkg.os, OS) && allows(pkg.cpu, ARCH) && allows(pkg.libc, LIBC);
+}
+
+function checkAssumptions() {
+    const transformersDir = path.join(nodeModules, "@huggingface", "transformers");
+    const entries = transformersNodeEntries(transformersDir);
+    for (const entry of entries) {
+        const source = fs.readFileSync(path.join(transformersDir, entry), "utf8");
+        if (/(?:from\s*|require\(\s*|import\(\s*)["']onnxruntime-web["']/.test(source)) {
+            fail(`${entry} now imports onnxruntime-web: it can no longer be dropped`);
+        }
+    }
+    // @phi-code-admin/browser may only locate the server (require.resolve),
+    // never load it: it is not shipped, but installed on first use.
+    if (readJson(path.join(staging, "package.json")).dependencies?.["@phi-code-admin/browser"]) {
+        const browserDist = path.join(nodeModules, "@phi-code-admin", "browser", "dist");
+        if (!fs.existsSync(path.join(browserDist, "server-runtime.js"))) {
+            fail("@phi-code-admin/browser has no dist/server-runtime.js: it cannot install its server on first use");
+        }
+        for (const file of fs.readdirSync(browserDist).filter((f) => f.endsWith(".js"))) {
+            const source = fs.readFileSync(path.join(browserDist, file), "utf8");
+            if (/(?:from\s*|require\(\s*|import\(\s*)["']@phi-code-admin\/camou?fox-/.test(source)) {
+                fail(`@phi-code-admin/browser/dist/${file} loads the camofox server packages: they can no longer be dropped`);
+            }
+        }
+    }
+    const ortDist = path.join(nodeModules, "onnxruntime-node", "dist");
+    for (const file of fs.readdirSync(ortDist).filter((f) => f.endsWith(".js"))) {
+        const source = fs.readFileSync(path.join(ortDist, file), "utf8");
+        if (/require\(\s*["'](?:tar|global-agent)["']\s*\)/.test(source)) {
+            fail(`onnxruntime-node/dist/${file} now requires tar/global-agent at runtime`);
+        }
+    }
+}
+
+function transformersNodeEntries(transformersDir) {
+    const pkgFile = path.join(transformersDir, "package.json");
+    if (!fs.existsSync(pkgFile)) fail("@huggingface/transformers is not installed");
+    const node = readJson(pkgFile).exports?.node;
+    const entries = [node?.import?.default, node?.require?.default].filter((entry) => typeof entry === "string");
+    if (entries.length === 0) fail("@huggingface/transformers has no exports.node entry");
+    for (const entry of entries) {
+        if (!fs.existsSync(path.join(transformersDir, entry))) fail(`@huggingface/transformers/${entry} is missing`);
+    }
+    return entries.map((entry) => path.normalize(entry));
+}
+
+function pruneUnreachable() {
+    const keep = new Set();
+    const queue = [];
+    const visit = (name, fromDir, required) => {
+        if (DROPPED_PACKAGES.has(name)) return;
+        const dir = resolvePackage(name, fromDir);
+        if (!dir) {
+            if (required) fail(`dependency ${name} (from ${path.relative(staging, fromDir) || "root"}) is not installed`);
+            return;
+        }
+        if (keep.has(dir)) return;
+        if (!matchesTarget(readJson(path.join(dir, "package.json")))) return;
+        keep.add(dir);
+        queue.push(dir);
+    };
+    const root = readJson(path.join(staging, "package.json"));
+    for (const name of Object.keys(root.dependencies || {})) visit(name, staging, true);
+    while (queue.length > 0) {
+        const dir = queue.shift();
+        const pkg = readJson(path.join(dir, "package.json"));
+        const dropped = DROPPED_EDGES[pkg.name] || new Set();
+        const follow = (deps, required) => {
+            for (const name of Object.keys(deps || {})) if (!dropped.has(name)) visit(name, dir, required);
+        };
+        follow(pkg.dependencies, true);
+        follow(pkg.optionalDependencies, false);
+        follow(pkg.peerDependencies, false);
+        for (const name of UNDECLARED_EDGES[pkg.name] || []) visit(name, dir, true);
+    }
+    const removed = [];
+    for (const dir of listPackages(nodeModules)) {
+        if (keep.has(dir) || !fs.existsSync(dir)) continue;
+        // A kept package nested below a removed one cannot exist: resolution
+        // only walks up, so its parent was visited first.
+        removed.push(path.relative(nodeModules, dir).split(path.sep).join("/"));
+        rm(dir);
+    }
+    for (const scope of fs.readdirSync(nodeModules).filter((e) => e.startsWith("@"))) {
+        const scopeDir = path.join(nodeModules, scope);
+        if (fs.readdirSync(scopeDir).length === 0) rm(scopeDir);
+    }
+    console.log(`Removed ${removed.length} packages not loaded at runtime: ${removed.join(", ")}`);
+}
+
+function pruneOnnxruntimeNode() {
+    const napiDir = path.join(nodeModules, "onnxruntime-node", "bin", "napi-v3");
+    const target = path.join(napiDir, OS, ARCH);
+    if (!fs.existsSync(path.join(target, "onnxruntime_binding.node"))) {
+        fail(`onnxruntime-node has no binding for ${OS}/${ARCH}`);
+    }
+    for (const os of fs.readdirSync(napiDir)) {
+        if (os !== OS) {
+            rm(path.join(napiDir, os));
+            continue;
+        }
+        for (const arch of fs.readdirSync(path.join(napiDir, os))) if (arch !== ARCH) rm(path.join(napiDir, os, arch));
+    }
+    if (OS === "linux") {
+        const versioned = fs.readdirSync(target).find((f) => /^libonnxruntime\.so\.\d+\.\d+\.\d+$/.test(f));
+        const soname = path.join(target, "libonnxruntime.so.1");
+        if (versioned && fs.existsSync(soname) && !fs.lstatSync(soname).isSymbolicLink()) {
+            const a = fs.readFileSync(soname);
+            const b = fs.readFileSync(path.join(target, versioned));
+            if (a.equals(b)) {
+                rm(soname);
+                try {
+                    fs.symlinkSync(versioned, soname);
+                } catch (error) {
+                    // Only reachable when staging a linux target on a host
+                    // without symlink support (Windows without privilege).
+                    console.warn(`Keeping a copy of libonnxruntime.so.1: ${error.message}`);
+                    fs.writeFileSync(soname, a);
+                }
+            }
+        }
+    }
+}
+
+function keepOnly(dir, keepFiles, label) {
+    for (const file of keepFiles) if (!fs.existsSync(path.join(dir, file))) fail(`${label}/${file} is missing`);
+    for (const file of fs.readdirSync(dir)) if (!keepFiles.includes(file)) rm(path.join(dir, file));
+}
+
+function pruneEntryVariants() {
+    const transformersDir = path.join(nodeModules, "@huggingface", "transformers");
+    const entries = transformersNodeEntries(transformersDir);
+    if (!entries.every((entry) => path.dirname(entry) === "dist")) fail("transformers Node entries moved out of dist/");
+    keepOnly(path.join(transformersDir, "dist"), entries.map((entry) => path.basename(entry)), "@huggingface/transformers/dist");
+
+    const sqlDir = path.join(nodeModules, "sql.js");
+    const sqlEntry = readJson(path.join(sqlDir, "package.json")).exports?.["."]?.default;
+    if (typeof sqlEntry !== "string" || path.dirname(path.normalize(sqlEntry)) !== "dist") fail("sql.js exports changed");
+    const sqlJs = path.basename(sqlEntry);
+    // sql-wasm.js loads the .wasm with the same basename from its own directory.
+    keepOnly(path.join(sqlDir, "dist"), [sqlJs, sqlJs.replace(/\.js$/, ".wasm")], "sql.js/dist");
+}
+
+function pruneDevFiles(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            if (/^sigma-/.test(entry.name) && path.basename(dir) === "node_modules") continue;
+            pruneDevFiles(full);
+        } else if (/\.(?:map|d\.ts|d\.mts|d\.cts|tsbuildinfo)$/.test(entry.name)) {
+            rm(full);
+        }
+    }
+}
+
+function checkNativePackages() {
+    const isNative = (name) => /\.(?:node|dll|dylib|so(?:\.\d+)*)$/.test(name);
+    const hasNative = (dir) =>
+        fs.readdirSync(dir, { withFileTypes: true }).some((e) => (e.isDirectory() ? hasNative(path.join(dir, e.name)) : isNative(e.name)));
+    for (const name of NATIVE_PACKAGES) {
+        const dir = path.join(nodeModules, name);
+        if (!fs.existsSync(dir) || !hasNative(dir)) fail(`native package ${name} is missing`);
+    }
+}
+
+checkAssumptions();
+pruneUnreachable();
+pruneOnnxruntimeNode();
+pruneEntryVariants();
+pruneDevFiles(nodeModules);
+checkNativePackages();
+PRUNE_EXTENSION_DEPS
+}
+
+if [[ -n "$PRUNE_ONLY_DIR" ]]; then
+    if [[ -z "$PLATFORM" ]]; then
+        echo "--prune-extension-deps requires --platform"
+        exit 1
+    fi
+    prune_extension_deps "$PLATFORM" "$PRUNE_ONLY_DIR"
+    exit 0
 fi
 
 if [[ "$SKIP_INSTALL" == "false" ]]; then
@@ -180,10 +480,16 @@ for platform in "${PLATFORMS[@]}"; do
     #
     # Disable cwd bunfig.toml autoload so project preload scripts cannot crash the
     # standalone binary before pi starts (see #7684).
+    #
+    # --compile-autoload-package-json: without it (Bun's default for compiled
+    # executables), the runtime resolver ignores package.json files on disk, so
+    # a module loaded natively from the archive's node_modules cannot import
+    # its own dependencies ("Cannot find package 'onnxruntime-common'", sharp ->
+    # detect-libc, MCP SDK -> ajv). Checked with Bun 1.3.14 and 1.4.2.
     if [[ "$platform" == windows-* ]]; then
-        bun build --compile --no-compile-autoload-bunfig --target="$bun_target" ./dist/bun/cli.js ./src/utils/image-resize-worker.ts --outfile "$OUTPUT_DIR/$platform/phi.exe"
+        bun build --compile --no-compile-autoload-bunfig --compile-autoload-package-json --target="$bun_target" ./dist/bun/cli.js ./src/utils/image-resize-worker.ts --outfile "$OUTPUT_DIR/$platform/phi.exe"
     else
-        bun build --compile --no-compile-autoload-bunfig --target="$bun_target" ./dist/bun/cli.js ./src/utils/image-resize-worker.ts --outfile "$OUTPUT_DIR/$platform/phi"
+        bun build --compile --no-compile-autoload-bunfig --compile-autoload-package-json --target="$bun_target" ./dist/bun/cli.js ./src/utils/image-resize-worker.ts --outfile "$OUTPUT_DIR/$platform/phi"
     fi
 done
 
@@ -191,16 +497,17 @@ done
 # executable (only typebox and phi-code* are, via the loader's virtual modules).
 # Keep this list in sync with BUNDLED_EXTENSION_DEPS in src/core/bundled-assets.ts
 # and extensionDeps in scripts/postinstall.cjs.
-EXTENSION_DEPS=(sigma-memory sigma-agents sigma-skills zod @modelcontextprotocol/sdk @ast-grep/napi cross-spawn ignore)
-# Workspace packages are packed from the local build so the archive ships the
-# exact code this release was built from (build:phi has built their dist/).
-EXTENSION_WORKSPACE_DEPS=(sigma-memory sigma-agents sigma-skills)
+EXTENSION_DEPS=(sigma-memory sigma-agents sigma-skills zod @modelcontextprotocol/sdk @ast-grep/napi cross-spawn ignore @phi-code-admin/browser)
+# Workspace packages (directories under packages/) are packed from the local
+# build so the archive ships the exact code this release was built from
+# (the build has built their dist/).
+EXTENSION_WORKSPACE_DIRS=(sigma-memory sigma-agents sigma-skills browser)
 EXTENSION_TARBALLS_DIR=""
 if [[ "$SKIP_EXTENSION_DEPS" == "false" ]]; then
     echo "==> Packing workspace extension dependencies..."
     EXTENSION_TARBALLS_DIR=$(mktemp -d)
-    for package in "${EXTENSION_WORKSPACE_DEPS[@]}"; do
-        (cd "../$package" && npm pack --ignore-scripts --pack-destination "$EXTENSION_TARBALLS_DIR" >/dev/null)
+    for package_dir in "${EXTENSION_WORKSPACE_DIRS[@]}"; do
+        (cd "../$package_dir" && npm pack --ignore-scripts --pack-destination "$EXTENSION_TARBALLS_DIR" >/dev/null)
     done
 fi
 
@@ -238,8 +545,15 @@ stage_extension_deps() {
         }
         fs.writeFileSync(path.join(process.env.PHI_EXT_STAGING, "package.json"), JSON.stringify({ private: true, dependencies: out }, null, 2));
     ' "${EXTENSION_DEPS[@]}"
+    # Linux releases target glibc (Bun's linux builds). Without --libc, npm uses
+    # the build host's libc and, on a non-Linux host, skips every libc-tagged
+    # package (@ast-grep/napi-linux-*-gnu, @img/sharp-linux-*).
+    local libc_args=()
+    if [[ "$npm_os" == "linux" ]]; then
+        libc_args=(--libc=glibc)
+    fi
     npm install --prefix "$staging" --omit=dev --ignore-scripts --no-audit --no-fund --package-lock=false \
-        --os="$npm_os" --cpu="$npm_cpu"
+        --os="$npm_os" --cpu="$npm_cpu" ${libc_args[@]+"${libc_args[@]}"}
 }
 
 echo "==> Creating release archives..."
@@ -308,6 +622,7 @@ for platform in "${PLATFORMS[@]}"; do
         echo "Staging extension dependencies for $platform..."
         ext_staging=$(mktemp -d)
         stage_extension_deps "$platform" "$ext_staging"
+        prune_extension_deps "$platform" "$ext_staging"
         rm -rf "$ext_staging/node_modules/.bin"
         cp -R "$ext_staging/node_modules/." "$OUTPUT_DIR/$platform/node_modules/"
         rm -rf "$ext_staging"

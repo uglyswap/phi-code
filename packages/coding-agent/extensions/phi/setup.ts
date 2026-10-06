@@ -21,11 +21,17 @@
  *  - Storage chmod 0600 garantit la sécurité au repos
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
-import { ApiKeyStore, type ExtensionAPI, type ExtensionUIContext, getApiKeyStore, getConfigWatcher } from "phi-code";
+import {
+	ApiKeyStore,
+	type ExtensionAPI,
+	type ExtensionUIContext,
+	getAgentDir,
+	getApiKeyStore,
+	getConfigWatcher,
+} from "phi-code";
 import {
 	ALIBABA_ENV_VAR,
 	ALIBABA_PROVIDERS,
@@ -180,7 +186,7 @@ export function buildRoutingConfig(
 }
 
 export async function writeRoutingConfig(routing: RoutingConfigOut): Promise<string> {
-	const dir = join(homedir(), ".phi", "agent");
+	const dir = getAgentDir();
 	await mkdir(dir, { recursive: true });
 	const path = join(dir, "routing.json");
 	await writeFile(
@@ -545,6 +551,30 @@ export async function configureAssignments(
 
 // ─── Extension ───────────────────────────────────────────────────────────
 
+/**
+ * Settings keys phi writes by itself before the user chose anything:
+ * scripts/postinstall.cjs writes `quietStartup` on every fresh install and the
+ * interactive mode records `lastChangelogVersion` on its first start.
+ */
+const AUTOMATIC_SETTINGS_KEYS = new Set(["quietStartup", "lastChangelogVersion"]);
+
+/**
+ * Whether settings.json holds anything the user chose. The mere existence of the
+ * file (the old test) meant the first-run wizard was never offered after
+ * `npm install -g`, since the postinstall creates it.
+ */
+export function hasUserSettings(settingsPath: string): boolean {
+	if (!existsSync(settingsPath)) return false;
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(settingsPath, "utf-8"));
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return true;
+		return Object.keys(parsed).some((key) => !AUTOMATIC_SETTINGS_KEYS.has(key));
+	} catch {
+		// Unreadable or hand-edited: treat as configured, never nag.
+		return true;
+	}
+}
+
 // One-time global guard so a stray async rejection inside the wizard never kills the TUI.
 let setupUnhandledGuard = false;
 function installSetupUnhandledRejectionGuard(): void {
@@ -741,13 +771,17 @@ export default function setupExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	// First-run detection: no settings.json and no stored API keys means this
+	// First-run detection: no user settings and no stored API keys means this
 	// is a fresh install. Offer the wizard once, only in interactive TUI mode.
 	pi.on("session_start", async (_event, ctx) => {
 		try {
-			if (!ctx.hasUI) return;
-			const settingsPath = join(homedir(), ".phi", "agent", "settings.json");
-			if (existsSync(settingsPath)) return;
+			// hasUI is also true in RPC mode, where session_start runs before the
+			// stdin reader is attached: a confirm() there can never be answered and
+			// the RPC session hangs forever.
+			if (!ctx.hasUI || ctx.mode !== "tui") return;
+			if (hasUserSettings(join(getAgentDir(), "settings.json"))) return;
+			// A provider already usable (env key, auth.json, models.json) is a configuration.
+			if (ctx.modelRegistry.getAvailable().length > 0) return;
 			const store = getApiKeyStore();
 			if (store.listProviders().length > 0) return;
 			const answer = await ctx.ui.confirm(

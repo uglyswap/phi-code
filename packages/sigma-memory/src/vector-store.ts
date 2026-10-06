@@ -17,10 +17,13 @@ const esmImport = new Function("specifier", "return import(specifier)") as (spec
  * ERR_MODULE_NOT_FOUND) so callers can report that only vector search is
  * unavailable; notes and ontology search keep working without it.
  */
-async function loadTransformersPipeline(): Promise<(...args: any[]) => Promise<any>> {
-	let mod: { pipeline?: unknown };
+async function loadTransformersPipeline(
+	loadModule: () => Promise<unknown>,
+	modelCacheDir: string | undefined,
+): Promise<(...args: any[]) => Promise<any>> {
+	let mod: { pipeline?: unknown; env?: { cacheDir?: string } };
 	try {
-		mod = await esmImport("@huggingface/transformers");
+		mod = (await loadModule()) as typeof mod;
 	} catch (error) {
 		throw new Error(
 			`Vector search unavailable: cannot load @huggingface/transformers (${error instanceof Error ? error.message : String(error)}). Reinstall phi-code to restore it; full-text note search still works.`,
@@ -29,7 +32,24 @@ async function loadTransformersPipeline(): Promise<(...args: any[]) => Promise<a
 	if (typeof mod.pipeline !== "function") {
 		throw new Error("Vector search unavailable: @huggingface/transformers does not export pipeline().");
 	}
+	// The library's default cache is <its own package dir>/.cache: wiped by
+	// every update and unwritable (EACCES) for a global sudo npm install. Point
+	// it at a stable per-user directory before any model is loaded.
+	if (modelCacheDir && mod.env && typeof mod.env === "object") {
+		mod.env.cacheDir = modelCacheDir;
+	}
 	return mod.pipeline as (...args: any[]) => Promise<any>;
+}
+
+export interface VectorStoreOptions {
+	/** Directory where the embedding model is cached (created on first model load). */
+	modelCacheDir?: string;
+	/**
+	 * Loader for the @huggingface/transformers module. Defaults to a native
+	 * dynamic import; tests inject a fake module to stay offline.
+	 * @internal
+	 */
+	loadTransformers?: () => Promise<unknown>;
 }
 
 // The vector store initializes and loads its embedding model in the background
@@ -69,8 +89,13 @@ export class VectorStore {
 	private pending: Array<(db: Database) => void> = [];
 	private batchDepth = 0;
 
-	constructor(dbPath: string) {
+	private readonly modelCacheDir: string | undefined;
+	private readonly loadTransformers: () => Promise<unknown>;
+
+	constructor(dbPath: string, options: VectorStoreOptions = {}) {
 		this.dbPath = dbPath;
+		this.modelCacheDir = options.modelCacheDir;
+		this.loadTransformers = options.loadTransformers ?? (() => esmImport("@huggingface/transformers"));
 	}
 
 	/**
@@ -244,9 +269,13 @@ export class VectorStore {
 			// resolves from this module's own (real) location, not from the cwd,
 			// in Node, Bun and the compiled Bun binary (verified through jiti and
 			// the ~/.phi/agent/extensions/node_modules link).
-			const createPipeline = await loadTransformersPipeline();
+			if (this.modelCacheDir) mkdirSync(this.modelCacheDir, { recursive: true });
+			const createPipeline = await loadTransformersPipeline(this.loadTransformers, this.modelCacheDir);
 
-			this.pipeline = await createPipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", { dtype });
+			this.pipeline = await createPipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", {
+				dtype,
+				...(this.modelCacheDir ? { cache_dir: this.modelCacheDir } : {}),
+			});
 
 			vlog("[VectorStore] Embedding model loaded.");
 		})();

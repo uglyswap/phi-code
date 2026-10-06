@@ -33,7 +33,9 @@ export class SigmaMemory {
 		// Initialize managers
 		this.notes = new NotesManager(this.config);
 		this.ontology = new OntologyManager(this.config);
-		this.vectors = new VectorStore(join(this.config.memoryDir, "vectors.db"));
+		this.vectors = new VectorStore(join(this.config.memoryDir, "vectors.db"), {
+			modelCacheDir: this.config.modelCacheDir ?? join(this.config.memoryDir, "models"),
+		});
 	}
 
 	/**

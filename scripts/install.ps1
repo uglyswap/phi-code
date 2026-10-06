@@ -55,13 +55,55 @@ try {
     if (-not (Test-Path (Join-Path $Extract "package.json"))) { throw "Archive did not contain package.json" }
 
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-    # A running phi.exe cannot be overwritten but can be renamed: move it aside.
+    $InstallDir = (Get-Item -LiteralPath $InstallDir).FullName
     $Exe = Join-Path $InstallDir "phi.exe"
-    $OldExe = Join-Path $InstallDir "phi.exe.old"
-    if (Test-Path $OldExe) { Remove-Item -Force $OldExe -ErrorAction SilentlyContinue }
-    if (Test-Path $Exe) { Move-Item -Force $Exe $OldExe }
-    Copy-Item -Path (Join-Path $Extract "*") -Destination $InstallDir -Recurse -Force
-    if (Test-Path $OldExe) { Remove-Item -Force $OldExe -ErrorAction SilentlyContinue }
+    # A running phi keeps phi.exe and every native module it loaded locked
+    # (node_modules\**\*.node, onnxruntime.dll, libvips, native\...): they
+    # cannot be overwritten but can be renamed. Each locked file is moved aside
+    # as <name>.<id>.phi-old, and leftovers are deleted by the next install once
+    # no phi process uses them any more. A bulk Copy-Item stopped at the first
+    # locked file and left the install without phi.exe.
+    Get-ChildItem -LiteralPath $InstallDir -Recurse -Force -File -Filter "*.phi-old" -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+    $LegacyOldExe = Join-Path $InstallDir "phi.exe.old"
+    if (Test-Path -LiteralPath $LegacyOldExe) { Remove-Item -LiteralPath $LegacyOldExe -Force -ErrorAction SilentlyContinue }
+
+    $ExtractRoot = (Get-Item -LiteralPath $Extract).FullName.TrimEnd('\')
+    # phi.exe last, so an interrupted update never leaves the directory without it.
+    $Files = @(Get-ChildItem -LiteralPath $ExtractRoot -Recurse -Force -File |
+        Sort-Object { if ($_.FullName -eq (Join-Path $ExtractRoot "phi.exe")) { 1 } else { 0 } })
+    foreach ($File in $Files) {
+        $Dest = Join-Path $InstallDir $File.FullName.Substring($ExtractRoot.Length + 1)
+        [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($Dest)) | Out-Null
+        try {
+            [System.IO.File]::Copy($File.FullName, $Dest, $true)
+        } catch [System.IO.IOException], [System.UnauthorizedAccessException] {
+            if (-not [System.IO.File]::Exists($Dest)) { throw }
+            $Aside = "$Dest.$([Guid]::NewGuid().ToString('N')).phi-old"
+            [System.IO.File]::Move($Dest, $Aside)
+            [System.IO.File]::Copy($File.FullName, $Dest, $true)
+        }
+    }
+    # Drop files left by older releases (e.g. the unpruned onnxruntime binaries of
+    # previous archives), but only inside the directories this archive ships
+    # (node_modules, extensions, theme, ...): top-level files of a shared install
+    # directory are never touched. Locked leftovers are moved aside like above.
+    $Shipped = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($File in $Files) { [void]$Shipped.Add($File.FullName.Substring($ExtractRoot.Length + 1)) }
+    $ShippedDirs = @(Get-ChildItem -LiteralPath $ExtractRoot -Force -Directory | ForEach-Object { $_.Name })
+    foreach ($Dir in $ShippedDirs) {
+        $Target = Join-Path $InstallDir $Dir
+        if (-not (Test-Path -LiteralPath $Target)) { continue }
+        Get-ChildItem -LiteralPath $Target -Recurse -Force -File -ErrorAction SilentlyContinue | ForEach-Object {
+            $Relative = $_.FullName.Substring($InstallDir.TrimEnd('\').Length + 1)
+            if ($Shipped.Contains($Relative) -or $_.Name -like "*.phi-old") { return }
+            try {
+                Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop
+            } catch {
+                try { [System.IO.File]::Move($_.FullName, "$($_.FullName).$([Guid]::NewGuid().ToString('N')).phi-old") } catch {}
+            }
+        }
+    }
     Write-Host "Installed phi to $InstallDir"
 
     $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")

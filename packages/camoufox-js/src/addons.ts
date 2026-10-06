@@ -158,16 +158,27 @@ export async function maybeDownloadAddons(
 		// failed download (e.g. offline first launch). Pushing it made every later
 		// launch fail with InvalidAddonPath; drop it and retry the download, and
 		// never keep a partial extraction, so the failure stays transient.
+		// PHI-VENDOR: extract into a private staging dir and publish it with an
+		// atomic rename, so concurrent launches never see (or delete) a half
+		// extracted addon; the loser of the rename race reuses the winner's copy.
+		const stagingPath = `${addonPath}.tmp-${process.pid}-${Date.now()}`;
 		try {
-			fs.rmSync(addonPath, { recursive: true, force: true });
-			await downloadAndExtract(addons[addonName], addonPath, addonName);
-			if (!isExtractedAddon(addonPath)) {
+			// Re-check right before removing: another launch may have just published it.
+			if (!isExtractedAddon(addonPath)) fs.rmSync(addonPath, { recursive: true, force: true });
+			await downloadAndExtract(addons[addonName], stagingPath, addonName);
+			if (!isExtractedAddon(stagingPath)) {
 				throw new Error("archive has no manifest.json");
+			}
+			try {
+				fs.renameSync(stagingPath, addonPath);
+			} catch (renameError) {
+				if (!isExtractedAddon(addonPath)) throw renameError;
 			}
 			addonsList.push(addonPath);
 		} catch (e) {
-			fs.rmSync(addonPath, { recursive: true, force: true });
 			console.error(`Failed to download and extract ${addonName}: ${e}`);
+		} finally {
+			fs.rmSync(stagingPath, { recursive: true, force: true });
 		}
 	}
 }

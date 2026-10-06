@@ -17,17 +17,28 @@
  *
  * Lifecycle:
  *   - Lazy boot: the Camoufox server starts on the first tool call.
+ *   - Standalone binary: the server is not shipped (it runs under the system
+ *     Node.js >= 22); the first tool call installs it with npm into
+ *     <agentDir>/runtime/browser and reports the progress.
  *   - `session_shutdown`: best-effort `closeAll()` to avoid zombie Firefox.
  *   - PHI_BROWSER_DISABLED=1 disables the whole extension at startup (the
  *     user keeps the legacy `web_search` / `fetch_url` only).
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Type } from "@sinclair/typebox";
-import { type AgentToolResult, type ExtensionAPI, formatDimensionNote, resizeImage } from "phi-code";
+import {
+	type AgentToolResult,
+	type AgentToolUpdateCallback,
+	type ExtensionAPI,
+	type ExtensionContext,
+	formatDimensionNote,
+	getAgentDir,
+	resizeImage,
+} from "phi-code";
 
 // PHI-VENDOR: dynamic import so phi-code keeps starting even when the
 // vendored browser stack isn't installed (e.g. binaries unavailable for
@@ -48,8 +59,17 @@ let cachedApi: BrowserApi | undefined;
  * bundled `node_modules`) finds the package every time.
  */
 function browserPackageFromPhi(): string | undefined {
-	const cliPath = process.argv[1];
-	if (!cliPath) return undefined;
+	const argvPath = process.argv[1];
+	if (!argvPath) return undefined;
+	// On Linux/macOS a global install runs phi through the bin symlink
+	// (/usr/local/bin/phi): process.argv[1] is that link, whose directory has
+	// no node_modules. Resolve from the real cli.js inside the package instead.
+	let cliPath = argvPath;
+	try {
+		cliPath = realpathSync(argvPath);
+	} catch {
+		// keep argv[1]
+	}
 	try {
 		const req = createRequire(pathToFileURL(cliPath));
 		return req.resolve("@phi-code-admin/browser");
@@ -67,7 +87,15 @@ function browserPackageFromPhi(): string | undefined {
 	return undefined;
 }
 
-async function getBrowserApi(): Promise<BrowserApi> {
+/**
+ * Where the camofox-browser server is installed on first use when phi does
+ * not ship it (standalone Bun executable): a stable, per-agent-dir location.
+ */
+export function browserRuntimeDir(): string {
+	return join(getAgentDir(), "runtime", "browser");
+}
+
+async function loadBrowserApi(): Promise<BrowserApi> {
 	if (cachedApi) return cachedApi;
 
 	// 1. Try the standard dynamic import first. This works when the extension
@@ -95,6 +123,34 @@ async function getBrowserApi(): Promise<BrowserApi> {
 		//    the user can fix their install and the next tool call retries.
 		throw firstErr instanceof Error ? firstErr : new Error(String(firstErr));
 	}
+}
+
+/**
+ * Load the API and boot the server before the call, reporting the progress of
+ * a first-use runtime install (minutes: npm + the Camoufox download) as a
+ * partial tool result, and on stderr when there is no UI (print mode).
+ */
+async function getBrowserApi(
+	signal?: AbortSignal,
+	onUpdate?: AgentToolUpdateCallback<undefined>,
+	ctx?: ExtensionContext,
+): Promise<BrowserApi> {
+	const api = await loadBrowserApi();
+	// Feature checks (`in` first: reading a missing export of a module
+	// namespace mock throws): an older @phi-code-admin/browser has neither.
+	if ("configureServerRuntime" in api && typeof api.configureServerRuntime === "function") {
+		api.configureServerRuntime({ installDir: browserRuntimeDir() });
+	}
+	if ("ensureServer" in api && typeof api.ensureServer === "function") {
+		await api.ensureServer({
+			signal,
+			onProgress: (message) => {
+				onUpdate?.({ content: [{ type: "text", text: message }], details: undefined });
+				if (ctx && !ctx.hasUI) process.stderr.write(`[phi browser] ${message}\n`);
+			},
+		});
+	}
+	return api;
 }
 
 function isDisabled(): boolean {
@@ -188,8 +244,8 @@ export default function browserExtension(pi: ExtensionAPI) {
 			),
 			timeoutMs: Type.Optional(Type.Number({ description: "Budget for the extra waitUntil wait (default 10000)" })),
 		}),
-		execute: async (_toolCallId, params, signal) => {
-			const api = await getBrowserApi();
+		execute: async (_toolCallId, params, signal, onUpdate, ctx) => {
+			const api = await getBrowserApi(signal, onUpdate, ctx);
 			return textResult(await api.navigate({ ...params, signal }));
 		},
 	});
@@ -217,8 +273,8 @@ export default function browserExtension(pi: ExtensionAPI) {
 			url: Type.Optional(Type.String()),
 			mode: Type.Optional(Type.Union([Type.Literal("readability"), Type.Literal("html"), Type.Literal("text")])),
 		}),
-		execute: async (_toolCallId, params, signal) => {
-			const api = await getBrowserApi();
+		execute: async (_toolCallId, params, signal, onUpdate, ctx) => {
+			const api = await getBrowserApi(signal, onUpdate, ctx);
 			return textResult(await api.extract({ ...params, signal }));
 		},
 	});
@@ -238,8 +294,8 @@ export default function browserExtension(pi: ExtensionAPI) {
 			tabId: Type.String(),
 			fullPage: Type.Optional(Type.Boolean()),
 		}),
-		execute: async (_toolCallId, params, signal) => {
-			const api = await getBrowserApi();
+		execute: async (_toolCallId, params, signal, onUpdate, ctx) => {
+			const api = await getBrowserApi(signal, onUpdate, ctx);
 			const shot = await api.screenshot({ ...params, signal });
 			return { content: await screenshotContent(shot), details: undefined };
 		},
@@ -262,8 +318,8 @@ export default function browserExtension(pi: ExtensionAPI) {
 			query: Type.String(),
 			engine: Type.Optional(Type.Union([Type.Literal("google"), Type.Literal("duckduckgo"), Type.Literal("bing")])),
 		}),
-		execute: async (_toolCallId, params, signal) => {
-			const api = await getBrowserApi();
+		execute: async (_toolCallId, params, signal, onUpdate, ctx) => {
+			const api = await getBrowserApi(signal, onUpdate, ctx);
 			return textResult(await api.search({ ...params, signal }));
 		},
 	});
@@ -286,8 +342,8 @@ export default function browserExtension(pi: ExtensionAPI) {
 			ref: Type.Optional(Type.String()),
 			selector: Type.Optional(Type.String()),
 		}),
-		execute: async (_toolCallId, params, signal) => {
-			const api = await getBrowserApi();
+		execute: async (_toolCallId, params, signal, onUpdate, ctx) => {
+			const api = await getBrowserApi(signal, onUpdate, ctx);
 			return textResult(await api.click({ ...params, signal }));
 		},
 	});
@@ -313,8 +369,8 @@ export default function browserExtension(pi: ExtensionAPI) {
 			pressEnter: Type.Optional(Type.Boolean()),
 			delayMs: Type.Optional(Type.Number({ description: "Delay between key presses (key-by-key mode)" })),
 		}),
-		execute: async (_toolCallId, params, signal) => {
-			const api = await getBrowserApi();
+		execute: async (_toolCallId, params, signal, onUpdate, ctx) => {
+			const api = await getBrowserApi(signal, onUpdate, ctx);
 			return textResult(await api.type({ ...params, signal }));
 		},
 	});
@@ -335,8 +391,8 @@ export default function browserExtension(pi: ExtensionAPI) {
 			direction: Type.Union([Type.Literal("up"), Type.Literal("down"), Type.Literal("left"), Type.Literal("right")]),
 			amount: Type.Optional(Type.Number({ description: "Pixels to scroll (default 500)" })),
 		}),
-		execute: async (_toolCallId, params, signal) => {
-			const api = await getBrowserApi();
+		execute: async (_toolCallId, params, signal, onUpdate, ctx) => {
+			const api = await getBrowserApi(signal, onUpdate, ctx);
 			return textResult(await api.scroll({ ...params, signal }));
 		},
 	});
@@ -360,8 +416,8 @@ export default function browserExtension(pi: ExtensionAPI) {
 				Type.Number({ description: "Character offset of the next chunk (from a previous call)" }),
 			),
 		}),
-		execute: async (_toolCallId, params, signal) => {
-			const api = await getBrowserApi();
+		execute: async (_toolCallId, params, signal, onUpdate, ctx) => {
+			const api = await getBrowserApi(signal, onUpdate, ctx);
 			const res = await api.snapshot({ ...params, signal });
 			return { content: [{ type: "text", text: snapshotText(res) }], details: undefined };
 		},
@@ -379,8 +435,8 @@ export default function browserExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({
 			tabId: Type.String(),
 		}),
-		execute: async (_toolCallId, params, signal) => {
-			const api = await getBrowserApi();
+		execute: async (_toolCallId, params, signal, onUpdate, ctx) => {
+			const api = await getBrowserApi(signal, onUpdate, ctx);
 			return textResult(await api.closeTab({ ...params, signal }));
 		},
 	});
@@ -397,8 +453,8 @@ export default function browserExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({
 			userId: Type.Optional(Type.String()),
 		}),
-		execute: async (_toolCallId, params, signal) => {
-			const api = await getBrowserApi();
+		execute: async (_toolCallId, params, signal, onUpdate, ctx) => {
+			const api = await getBrowserApi(signal, onUpdate, ctx);
 			return textResult(await api.listTabs({ ...params, signal }));
 		},
 	});

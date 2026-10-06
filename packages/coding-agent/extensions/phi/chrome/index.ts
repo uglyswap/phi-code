@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync
 import { mkdir, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname, join, resolve } from "node:path";
-import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "phi-code";
+import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext, getAgentDir } from "phi-code";
 import { Type } from "typebox";
 
 /**
@@ -2194,10 +2194,10 @@ Usage rules:
 			label: "Chrome Screenshot",
 			description:
 				"Capture a screenshot of an existing Chrome tab via the companion extension and save it to disk. Chrome's extension screenshot API requires the target tab to be the active tab in its window. Runs in the background by default (the tab is briefly activated within its window for the capture, then the previous active tab is restored); pass background=false to focus Chrome so the user can watch.",
-			promptSnippet: "Capture Chrome screenshots and save them under .pi/chrome-screenshots by default.",
+			promptSnippet: "Capture Chrome screenshots and save them under .phi/chrome-screenshots by default.",
 			parameters: Type.Object({
 				path: Type.Optional(
-					Type.String({ description: "Output path. Defaults to .pi/chrome-screenshots/<timestamp>.<format>." }),
+					Type.String({ description: "Output path. Defaults to .phi/chrome-screenshots/<timestamp>.<format>." }),
 				),
 				format: Type.Optional(StringEnum(imageFormatValues)),
 				quality: Type.Optional(Type.Number({ description: "JPEG quality 0-100." })),
@@ -2223,7 +2223,7 @@ Usage rules:
 				const cwd = workspaceCwd(ctx);
 				const defaultPath = join(
 					cwd,
-					".pi",
+					CONFIG_DIR_NAME,
 					"chrome-screenshots",
 					`${new Date().toISOString().replace(/[:.]/g, "-")}.${format}`,
 				);

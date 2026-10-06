@@ -16,8 +16,8 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { getAgentDir } from "phi-code";
 
 export type AgentSource = "project" | "global" | "bundled";
 
@@ -78,7 +78,7 @@ function readAgentFile(filePath: string, source: AgentSource): AgentDef | null {
 export function agentSearchDirs(cwd: string = process.cwd()): Array<{ dir: string; source: AgentSource }> {
 	return [
 		{ dir: join(cwd, ".phi", "agents"), source: "project" },
-		{ dir: join(homedir(), ".phi", "agent", "agents"), source: "global" },
+		{ dir: join(getAgentDir(), "agents"), source: "global" },
 		{ dir: join(__dirname, "..", "..", "..", "agents"), source: "bundled" },
 	];
 }

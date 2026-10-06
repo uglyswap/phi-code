@@ -24,8 +24,8 @@ import { readFileSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI } from "phi-code";
-import { SigmaMemory } from "sigma-memory";
+import { type ExtensionAPI, getAgentDir } from "phi-code";
+import { type OntologyEntity, SigmaMemory } from "sigma-memory";
 
 /**
  * Build a unique, human-readable filename for a single memory fact.
@@ -206,9 +206,25 @@ function isNoteLine(data: unknown): data is { file: string; line: number; conten
 	);
 }
 
+/** Ontology types are free-form (sigma-memory accepts any non-empty type); callers reject empty ones first. */
+function toEntityType(value: string): OntologyEntity["type"] {
+	return value;
+}
+
+/** Resolve an entity reference by exact ID first, then by case-insensitive name. */
+function findEntityByIdOrName(sigmaMemory: SigmaMemory, ref: string): OntologyEntity | undefined {
+	const byId = sigmaMemory.ontology.findEntity({ id: ref })[0];
+	if (byId) return byId;
+	const key = ref.toLowerCase();
+	return sigmaMemory.ontology.findEntity({}).find((e) => e.name.toLowerCase() === key);
+}
+
 export default function memoryExtension(pi: ExtensionAPI) {
 	// Initialize sigma-memory with embedded vector store
-	const sigmaMemory = new SigmaMemory();
+	// Cache the embedding model under the agent dir (honors PHI_CODING_AGENT_DIR)
+	// instead of node_modules/@huggingface/transformers/.cache, which is wiped on
+	// every update and unwritable for a global sudo install.
+	const sigmaMemory = new SigmaMemory({ modelCacheDir: join(getAgentDir(), "cache", "models") });
 
 	// Initialize memory + vector store (lazy model download on first search).
 	// Tools that touch the vector store must await this: calling vectors.* before
@@ -535,17 +551,18 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-			const p = params as any;
+			const p = params;
 			try {
 				if (p.type === "entity") {
 					if (!p.entityType || !p.name) {
 						return {
 							content: [{ type: "text", text: "Entity requires 'entityType' and 'name'" }],
+							details: { error: "missing-fields", type: p.type },
 							isError: true,
 						};
 					}
 					const id = sigmaMemory.ontology.addEntity({
-						type: p.entityType,
+						type: toEntityType(p.entityType),
 						name: p.name,
 						properties: p.properties || {},
 					});
@@ -557,30 +574,29 @@ export default function memoryExtension(pi: ExtensionAPI) {
 					if (!p.from || !p.to || !p.relationType) {
 						return {
 							content: [{ type: "text", text: "Relation requires 'from', 'to', and 'relationType'" }],
+							details: { error: "missing-fields", type: p.type },
 							isError: true,
 						};
 					}
 
-					// Try finding source entity by ID first, then by name
-					let sourceEntity = sigmaMemory.ontology.findEntity({ id: p.from })[0];
+					// Endpoints are given by ID or by (case-insensitive) name. An unknown
+					// reference (typo, entity never added) is a normal runtime case:
+					// report it as a tool error instead of dereferencing undefined.
+					const sourceEntity = findEntityByIdOrName(sigmaMemory, p.from);
 					if (!sourceEntity) {
-						// Try finding by name (case-insensitive)
-						const allEntities = sigmaMemory.ontology.findEntity({});
-						sourceEntity = allEntities.find((e) => e.name.toLowerCase() === p.from.toLowerCase());
-						if (!sourceEntity) {
-							return { content: [{ type: "text", text: `Source entity not found: ${p.from}` }], isError: true };
-						}
+						return {
+							content: [{ type: "text", text: `Source entity not found: ${p.from}` }],
+							details: { error: "source-not-found", from: p.from },
+							isError: true,
+						};
 					}
-
-					// Try finding target entity by ID first, then by name
-					let targetEntity = sigmaMemory.ontology.findEntity({ id: p.to })[0];
+					const targetEntity = findEntityByIdOrName(sigmaMemory, p.to);
 					if (!targetEntity) {
-						// Try finding by name (case-insensitive)
-						const allEntities = sigmaMemory.ontology.findEntity({});
-						targetEntity = allEntities.find((e) => e.name.toLowerCase() === p.to.toLowerCase());
-						if (!targetEntity) {
-							return { content: [{ type: "text", text: `Target entity not found: ${p.to}` }], isError: true };
-						}
+						return {
+							content: [{ type: "text", text: `Target entity not found: ${p.to}` }],
+							details: { error: "target-not-found", to: p.to },
+							isError: true,
+						};
 					}
 
 					const id = sigmaMemory.ontology.addRelation({
@@ -599,9 +615,17 @@ export default function memoryExtension(pi: ExtensionAPI) {
 						details: { id, from: sourceEntity.id, to: targetEntity.id, type: p.relationType },
 					};
 				}
-				return { content: [{ type: "text", text: "Type must be 'entity' or 'relation'" }], isError: true };
+				return {
+					content: [{ type: "text", text: "Type must be 'entity' or 'relation'" }],
+					details: { error: "invalid-type" },
+					isError: true,
+				};
 			} catch (error) {
-				return { content: [{ type: "text", text: `Ontology error: ${error}` }], isError: true };
+				return {
+					content: [{ type: "text", text: `Ontology error: ${error}` }],
+					details: { error: String(error) },
+					isError: true,
+				};
 			}
 		},
 	});
@@ -634,11 +658,10 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-			// params are validated against this tool's TypeBox schema before execute()
-			const p = params as unknown as {
-				entities?: Array<{ entityType?: string; name?: string; properties?: Record<string, string> }>;
-				relations?: Array<{ fromName?: string; toName?: string; relationType?: string }>;
-			};
+			// params are validated against this tool's TypeBox schema before execute(),
+			// but an empty string still passes Type.String(): empty names/types are
+			// skipped and reported below instead of being persisted.
+			const p = params;
 			try {
 				// Deliberately NOT ontology.addBatch(): addBatch always creates new
 				// entities (duplicates on re-run) and throws on the first unresolved
@@ -658,14 +681,12 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				const unresolved: string[] = [];
 				const errors: string[] = [];
 
-				const resolveName = (name: unknown): string | undefined => {
-					const key = String(name ?? "").toLowerCase();
+				const resolveName = (name: string): string | undefined => {
+					const key = name.toLowerCase();
 					const direct = byName.get(key);
 					if (direct) return direct;
 					// fall back to the library's substring search for near-exact names
-					const partial = sigmaMemory.ontology
-						.findEntity({ name: String(name ?? "") })
-						.find((e) => e.name.toLowerCase() === key);
+					const partial = sigmaMemory.ontology.findEntity({ name }).find((e) => e.name.toLowerCase() === key);
 					if (partial) byName.set(key, partial.id);
 					return partial?.id;
 				};
@@ -677,16 +698,24 @@ export default function memoryExtension(pi: ExtensionAPI) {
 						reusedEntities.push(e.name);
 						continue;
 					}
+					if (!e.entityType) {
+						errors.push(`entity "${e.name}": 'entityType' is required`);
+						continue;
+					}
 					const id = sigmaMemory.ontology.addEntity({
-						type: e.entityType,
+						type: toEntityType(e.entityType),
 						name: e.name,
 						properties: e.properties || {},
 					});
-					byName.set(String(e.name).toLowerCase(), id);
+					byName.set(e.name.toLowerCase(), id);
 					entityIds.push(id);
 				}
 
 				for (const r of p.relations || []) {
+					if (!r.relationType) {
+						errors.push(`${r.fromName} -[?]-> ${r.toName}: 'relationType' is required`);
+						continue;
+					}
 					const from = resolveName(r.fromName);
 					const to = resolveName(r.toName);
 					if (!from || !to) {
@@ -727,7 +756,11 @@ export default function memoryExtension(pi: ExtensionAPI) {
 					details: { entityIds, relationIds, reusedEntities, reusedRelations, unresolved, errors },
 				};
 			} catch (error) {
-				return { content: [{ type: "text", text: `Ontology batch error: ${error}` }], isError: true };
+				return {
+					content: [{ type: "text", text: `Ontology batch error: ${error}` }],
+					details: { error: String(error) },
+					isError: true,
+				};
 			}
 		},
 	});
@@ -762,29 +795,36 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-			const p = params as any;
+			const p = params;
+			const details = { action: p.action };
 			try {
 				switch (p.action) {
 					case "find": {
 						const results = sigmaMemory.ontology.findEntity({ type: p.entityType, name: p.name });
-						if (results.length === 0) return { content: [{ type: "text", text: "No entities found." }] };
+						if (results.length === 0) return { content: [{ type: "text", text: "No entities found." }], details };
 						const text = results
 							.map((e) => `- **${e.name}** (${e.type}) ID:\`${e.id}\` ${JSON.stringify(e.properties)}`)
 							.join("\n");
-						return { content: [{ type: "text", text: `Found ${results.length} entities:\n${text}` }] };
+						return { content: [{ type: "text", text: `Found ${results.length} entities:\n${text}` }], details };
 					}
 					case "relations": {
-						if (!p.entityId) return { content: [{ type: "text", text: "'entityId' required" }], isError: true };
+						if (!p.entityId)
+							return { content: [{ type: "text", text: "'entityId' required" }], details, isError: true };
 						const rels = sigmaMemory.ontology.findRelations(p.entityId);
-						if (rels.length === 0) return { content: [{ type: "text", text: "No relations found." }] };
+						if (rels.length === 0) return { content: [{ type: "text", text: "No relations found." }], details };
 						const text = rels.map((r) => `- \`${r.from}\` → **${r.type}** → \`${r.to}\``).join("\n");
-						return { content: [{ type: "text", text: `Found ${rels.length} relations:\n${text}` }] };
+						return { content: [{ type: "text", text: `Found ${rels.length} relations:\n${text}` }], details };
 					}
 					case "path": {
 						if (!p.fromId || !p.toId)
-							return { content: [{ type: "text", text: "'fromId' and 'toId' required" }], isError: true };
+							return {
+								content: [{ type: "text", text: "'fromId' and 'toId' required" }],
+								details,
+								isError: true,
+							};
 						const path = sigmaMemory.ontology.queryPath(p.fromId, p.toId);
-						if (!path) return { content: [{ type: "text", text: "No path found between these entities." }] };
+						if (!path)
+							return { content: [{ type: "text", text: "No path found between these entities." }], details };
 						// each step carries the relation that *leads to* its entity, so the
 						// label belongs between the previous entity and this one
 						const text = path
@@ -792,7 +832,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 								i === 0 || !s.relation ? s.entity.name : `[${s.relation.type}] → ${s.entity.name}`,
 							)
 							.join(" → ");
-						return { content: [{ type: "text", text: `Path: ${text}` }] };
+						return { content: [{ type: "text", text: `Path: ${text}` }], details };
 					}
 					case "stats": {
 						const stats = sigmaMemory.ontology.stats();
@@ -800,20 +840,21 @@ export default function memoryExtension(pi: ExtensionAPI) {
 						let text = `**Ontology Stats:**\n- Entities: ${graph.entities.length}\n- Relations: ${graph.relations.length}\n`;
 						text += `\nBy type:\n`;
 						for (const [type, count] of Object.entries(stats.entitiesByType)) text += `  - ${type}: ${count}\n`;
-						return { content: [{ type: "text", text }] };
+						return { content: [{ type: "text", text }], details };
 					}
 					case "graph": {
 						const graph = sigmaMemory.ontology.export();
-						return { content: [{ type: "text", text: JSON.stringify(graph, null, 2) }] };
+						return { content: [{ type: "text", text: JSON.stringify(graph, null, 2) }], details };
 					}
 					default:
 						return {
 							content: [{ type: "text", text: "Action must be: find, relations, path, stats, graph" }],
+							details,
 							isError: true,
 						};
 				}
 			} catch (error) {
-				return { content: [{ type: "text", text: `Ontology query error: ${error}` }], isError: true };
+				return { content: [{ type: "text", text: `Ontology query error: ${error}` }], details, isError: true };
 			}
 		},
 	});
@@ -884,7 +925,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		// Skip during /plan orchestration: the orchestrator manages its own
 		// systemPrompt per phase via the same hook. Conflicting overrides would
 		// override the orchestrator's agent personas.
-		if ((globalThis as any).__phiOrchestrationActive) {
+		if ((globalThis as { __phiOrchestrationActive?: unknown }).__phiOrchestrationActive) {
 			return {};
 		}
 		const userPrompt = (event.prompt ?? "").trim();
