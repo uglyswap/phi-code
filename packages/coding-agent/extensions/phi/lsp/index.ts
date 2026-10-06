@@ -4,15 +4,15 @@
  * Registers the `lsp` tool: diagnostics, definition, references, hover via the
  * project's language server (typescript-language-server, pyright, gopls,
  * rust-analyzer). Servers are spawned lazily and reused for the session.
- * If no server binary is installed for a language, the tool says so instead of
- * failing.
+ * If no server binary is installed for a language, the tool returns an error
+ * result naming the missing server (the host process never crashes).
  */
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "phi-code";
-import { LspClient, serverForFile } from "./client.ts";
+import { LspClient, pathToUri, serverForFile, uriToDisplayPath } from "./client.ts";
 
 const clients = new Map<string, LspClient>();
 
@@ -38,17 +38,29 @@ async function clientFor(file: string, cwd: string): Promise<LspClient | undefin
 	if (!spec) return undefined;
 	const key = `${spec.command}:${cwd}`;
 	let client = clients.get(key);
+	if (client && !client.alive) {
+		// The server died or never started: drop it so the next call retries a fresh spawn.
+		client.dispose();
+		clients.delete(key);
+		client = undefined;
+	}
 	if (!client) {
-		client = new LspClient(spec, `file://${cwd}`);
+		client = new LspClient(spec, pathToUri(cwd));
 		clients.set(key, client);
-		await client.initialize();
+		try {
+			await client.initialize();
+		} catch (error) {
+			client.dispose();
+			clients.delete(key);
+			throw error;
+		}
 	}
 	return client;
 }
 
 function formatLocation(loc: unknown): string {
 	const l = loc as { uri?: string; range?: { start: { line: number; character: number } } };
-	const path = (l.uri ?? "").replace(/^file:\/\//, "");
+	const path = uriToDisplayPath(l.uri ?? "");
 	const line = (l.range?.start.line ?? 0) + 1;
 	return `${path}:${line}`;
 }
@@ -108,7 +120,20 @@ export default function (pi: ExtensionAPI) {
 				const uri = await client.openDocument(file, readFileSync(file, "utf8"), languageIdFor(file));
 				try {
 					if (p.action === "diagnostics") {
-						const diagnostics = (await client.waitForDiagnostics(uri)) as Array<{
+						const { received, diagnostics: raw } = await client.waitForDiagnostics(uri);
+						if (!received) {
+							// No publishDiagnostics arrived in time: the file is NOT known to be clean.
+							return {
+								content: [
+									{
+										type: "text",
+										text: `No diagnostics received for ${p.path} before the timeout (the language server may still be indexing). This does not mean the file is clean; retry or run the build/type checker.`,
+									},
+								],
+								details: { action: p.action, count: 0, received: false },
+							};
+						}
+						const diagnostics = raw as Array<{
 							range: { start: { line: number; character: number } };
 							severity?: number;
 							message: string;
@@ -117,7 +142,7 @@ export default function (pi: ExtensionAPI) {
 						if (diagnostics.length === 0) {
 							return {
 								content: [{ type: "text", text: `No diagnostics for ${p.path} (clean).` }],
-								details: { action: p.action, count: 0 },
+								details: { action: p.action, count: 0, received: true },
 							};
 						}
 						const lines = diagnostics.slice(0, 50).map((d) => {
@@ -126,7 +151,7 @@ export default function (pi: ExtensionAPI) {
 						});
 						return {
 							content: [{ type: "text", text: lines.join("\n") }],
-							details: { action: p.action, count: diagnostics.length },
+							details: { action: p.action, count: diagnostics.length, received: true },
 						};
 					}
 

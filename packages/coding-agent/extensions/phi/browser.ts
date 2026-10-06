@@ -4,16 +4,16 @@
  * Registers 10 browser tools backed by the bundled Camoufox stack
  * (`@phi-code-admin/browser`):
  *
- *   browser_navigate     — open/follow a URL
- *   browser_extract      — readability extraction (works on SPAs)
- *   browser_screenshot   — PNG capture, base64 in the tool result
- *   browser_search       — DDG/Google search macro
- *   browser_click        — click by accessibility ref or CSS selector
- *   browser_type         — type text into focused/targeted element
- *   browser_scroll       — page/element scroll
- *   browser_snapshot     — accessibility tree with refs for follow-up tools
- *   browser_close_tab    — release a single tab
- *   browser_list_tabs    — list open tabs for the current session
+ *   browser_navigate     : open/follow a URL
+ *   browser_extract      : main-text extraction heuristic (works on SPAs)
+ *   browser_screenshot   : PNG capture, returned as an image block
+ *   browser_search       : DDG/Google search macro
+ *   browser_click        : click by accessibility ref or CSS selector
+ *   browser_type         : type text into focused/targeted element
+ *   browser_scroll       : mouse-wheel scroll
+ *   browser_snapshot     : accessibility tree with refs for follow-up tools
+ *   browser_close_tab    : release a single tab
+ *   browser_list_tabs    : list open tabs for the current session
  *
  * Lifecycle:
  *   - Lazy boot: the Camoufox server starts on the first tool call.
@@ -27,7 +27,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI } from "phi-code";
+import { type AgentToolResult, type ExtensionAPI, formatDimensionNote, resizeImage } from "phi-code";
 
 // PHI-VENDOR: dynamic import so phi-code keeps starting even when the
 // vendored browser stack isn't installed (e.g. binaries unavailable for
@@ -106,6 +106,57 @@ function jsonResult(value: unknown): string {
 	return typeof value === "string" ? value : JSON.stringify(value, null, 2);
 }
 
+type ToolContent = AgentToolResult<unknown>["content"];
+
+function textResult(value: unknown): AgentToolResult<undefined> {
+	return { content: [{ type: "text", text: jsonResult(value) }], details: undefined };
+}
+
+/**
+ * Turn a PNG screenshot into an image content block the model can see,
+ * downscaled to the inline image limits (a full-page capture easily exceeds
+ * them). Base64 in a text block would be invisible to the model and cost tens
+ * of thousands of tokens.
+ */
+export async function screenshotContent(shot: {
+	tabId: string;
+	mimeType: string;
+	bytesBase64: string;
+}): Promise<ToolContent> {
+	const resized = await resizeImage(Buffer.from(shot.bytesBase64, "base64"), shot.mimeType);
+	if (!resized) {
+		return [
+			{
+				type: "text",
+				text: `Screenshot of tab ${shot.tabId} omitted: it could not be resized below the inline image size limit. Retry without fullPage.`,
+			},
+		];
+	}
+	const note = formatDimensionNote(resized);
+	return [
+		{ type: "text", text: `Screenshot of tab ${shot.tabId}${note ? ` ${note}` : ""}` },
+		{ type: "image", data: resized.data, mimeType: resized.mimeType },
+	];
+}
+
+/** Render a snapshot as plain text (no JSON escaping of the tree) with a pagination hint. */
+export function snapshotText(res: {
+	url?: string;
+	snapshot?: string;
+	refsCount?: number;
+	totalChars?: number;
+	hasMore?: boolean;
+	nextOffset?: number | null;
+}): string {
+	const header = [`url: ${res.url ?? "?"}`, `refs: ${res.refsCount ?? 0}`];
+	if (res.hasMore && typeof res.nextOffset === "number") {
+		header.push(
+			`truncated: ${res.totalChars ?? "?"} chars in total, call browser_snapshot again with offset=${res.nextOffset} for the next chunk`,
+		);
+	}
+	return `${header.join("\n")}\n\n${res.snapshot ?? ""}`;
+}
+
 export default function browserExtension(pi: ExtensionAPI) {
 	if (isDisabled()) {
 		// Keep startup quiet — the user opted out.
@@ -115,36 +166,42 @@ export default function browserExtension(pi: ExtensionAPI) {
 	// ─── browser_navigate ─────────────────────────────────────────────
 	pi.registerTool({
 		name: "browser_navigate",
+		label: "Browser Navigate",
 		description:
 			"Open a URL in a real anti-detect Firefox browser (Camoufox). " +
 			"Use this as the FIRST STEP whenever you need to interact with a page " +
 			"(click, fill a form, take a screenshot) or when a previous `fetch_url` " +
 			"returned empty/minimal content (sign that the page is JavaScript-rendered " +
 			"or behind bot protection like Cloudflare). " +
-			"Returns `tabId` to chain with `browser_extract` / `browser_snapshot` / " +
-			"`browser_click` / `browser_type` / `browser_screenshot` / `browser_scroll`. " +
+			"Returns `tabId` (to chain with `browser_extract` / `browser_snapshot` / " +
+			"`browser_click` / `browser_type` / `browser_screenshot` / `browser_scroll`) and the final `url`. " +
+			"Without `tabId`, opens a new tab. Always waits for DOMContentLoaded (30 s max); " +
+			'`waitUntil: "load"` also waits for the document to complete, `"networkidle"` additionally ' +
+			"for the network to go quiet (5 s max); `timeoutMs` bounds that extra wait. " +
 			"Slower than `fetch_url` (~3-5s boot on first call) — do not use for plain " +
 			"static HTML pages where `fetch_url` already works.",
 		parameters: Type.Object({
 			url: Type.String({ description: "Full URL (https://...)" }),
-			tabId: Type.Optional(Type.String()),
+			tabId: Type.Optional(Type.String({ description: "Existing tab to navigate; omit to open a new tab" })),
 			waitUntil: Type.Optional(
 				Type.Union([Type.Literal("load"), Type.Literal("domcontentloaded"), Type.Literal("networkidle")]),
 			),
-			timeoutMs: Type.Optional(Type.Number()),
+			timeoutMs: Type.Optional(Type.Number({ description: "Budget for the extra waitUntil wait (default 10000)" })),
 		}),
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
 			const api = await getBrowserApi();
-			const res = await api.navigate(params);
-			return { content: [{ type: "text", text: jsonResult(res) }] };
+			return textResult(await api.navigate({ ...params, signal }));
 		},
 	});
 
 	// ─── browser_extract ──────────────────────────────────────────────
 	pi.registerTool({
 		name: "browser_extract",
+		label: "Browser Extract",
 		description:
-			"Extract readable text from a fully rendered page using Mozilla Readability. " +
+			"Extract the readable text of a fully rendered page (simple in-page heuristic: drops " +
+			"scripts, nav, header, footer, aside and forms, keeps <main>, else <article>, else <body>; " +
+			"text truncated to 50 000 characters, `length` gives the full size). " +
 			"**PREFER THIS OVER `fetch_url`** when the target URL is: " +
 			"(1) a JavaScript SPA (React, Vue, Svelte, Next.js client-side, etc.), " +
 			"(2) behind Cloudflare / Akamai / PerimeterX bot protection, " +
@@ -152,47 +209,49 @@ export default function browserExtension(pi: ExtensionAPI) {
 			"or a noscript fallback). Also use this when you've already called " +
 			"`browser_navigate` and want the page content. " +
 			"Either pass `tabId` (continues in an existing tab) or `url` (opens a fresh " +
-			"tab and extracts in one call). Slower than `fetch_url` — keep `fetch_url` as " +
+			'tab and extracts in one call). `mode: "text"` returns the whole body text, `"html"` the raw HTML. ' +
+			"Slower than `fetch_url`: keep `fetch_url` as " +
 			"the default for plain static pages, docs, blog posts, etc.",
 		parameters: Type.Object({
 			tabId: Type.Optional(Type.String()),
 			url: Type.Optional(Type.String()),
 			mode: Type.Optional(Type.Union([Type.Literal("readability"), Type.Literal("html"), Type.Literal("text")])),
 		}),
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
 			const api = await getBrowserApi();
-			const res = await api.extract(params);
-			return { content: [{ type: "text", text: jsonResult(res) }] };
+			return textResult(await api.extract({ ...params, signal }));
 		},
 	});
 
 	// ─── browser_screenshot ───────────────────────────────────────────
 	pi.registerTool({
 		name: "browser_screenshot",
+		label: "Browser Screenshot",
 		description:
-			"Capture a PNG screenshot of an open tab. Use this whenever the user asks " +
+			"Capture a PNG screenshot of an open tab and return it as an image you can see. Use this whenever the user asks " +
 			'to *see* a page, when a visual proof is requested (e.g. "show me what ' +
 			'this looks like", "is the layout broken", "did the bot detection page ' +
 			'trigger?"), or to confirm a UI state after `browser_click` / ' +
 			"`browser_type`. Requires a `tabId` from a prior `browser_navigate`. " +
-			"Returns the image as base64 under `bytesBase64` with `mimeType: image/png`.",
+			"Large captures (especially `fullPage`) are downscaled.",
 		parameters: Type.Object({
 			tabId: Type.String(),
 			fullPage: Type.Optional(Type.Boolean()),
 		}),
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
 			const api = await getBrowserApi();
-			const res = await api.screenshot(params);
-			return { content: [{ type: "text", text: jsonResult(res) }] };
+			const shot = await api.screenshot({ ...params, signal });
+			return { content: await screenshotContent(shot), details: undefined };
 		},
 	});
 
 	// ─── browser_search ───────────────────────────────────────────────
 	pi.registerTool({
 		name: "browser_search",
+		label: "Browser Search",
 		description:
 			"Search the web *through* a real anti-detect Firefox browser, then return " +
-			"the readability extraction of the results page. " +
+			"the `browser_extract` text of the results page. " +
 			"**Fallback for `web_search`** — use this only when `web_search` " +
 			"rate-limited, returned a CAPTCHA / 429 / 403, or you specifically need " +
 			"the rendered search engine UI (e.g. featured snippets, knowledge cards, " +
@@ -203,112 +262,115 @@ export default function browserExtension(pi: ExtensionAPI) {
 			query: Type.String(),
 			engine: Type.Optional(Type.Union([Type.Literal("google"), Type.Literal("duckduckgo"), Type.Literal("bing")])),
 		}),
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
 			const api = await getBrowserApi();
-			const res = await api.search(params);
-			return { content: [{ type: "text", text: jsonResult(res) }] };
+			return textResult(await api.search({ ...params, signal }));
 		},
 	});
 
 	// ─── browser_click ────────────────────────────────────────────────
 	pi.registerTool({
 		name: "browser_click",
+		label: "Browser Click",
 		description:
-			"Click an element on an open tab — buttons, links, checkboxes, modal " +
+			"Left-click an element on an open tab: buttons, links, checkboxes, modal " +
 			"close icons, etc. Use this for any interactive workflow: accepting " +
 			"cookies, dismissing popups, opening menus, submitting forms (alongside " +
 			"`browser_type`), pagination, etc. Resolve the target with either " +
 			"`ref` (from `browser_snapshot`, semantically stable across renders — " +
 			"PREFERRED) or `selector` (CSS, fragile if the site changes). Requires " +
-			"a `tabId` from `browser_navigate`. No interactive equivalent exists in " +
-			"`fetch_url` / `web_search` — this tool is only available via the bundled " +
-			"browser.",
+			"a `tabId` from `browser_navigate`. Returns the `url` after the click. " +
+			"Right/middle clicks are not supported.",
 		parameters: Type.Object({
 			tabId: Type.String(),
 			ref: Type.Optional(Type.String()),
 			selector: Type.Optional(Type.String()),
-			button: Type.Optional(Type.Union([Type.Literal("left"), Type.Literal("right"), Type.Literal("middle")])),
 		}),
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
 			const api = await getBrowserApi();
-			const res = await api.click(params);
-			return { content: [{ type: "text", text: jsonResult(res) }] };
+			return textResult(await api.click({ ...params, signal }));
 		},
 	});
 
 	// ─── browser_type ─────────────────────────────────────────────────
 	pi.registerTool({
 		name: "browser_type",
+		label: "Browser Type",
 		description:
 			"Type text into an input or contenteditable on an open tab — search boxes, " +
 			"login forms, chat composers, etc. Target with `ref` (PREFERRED, from " +
-			"`browser_snapshot`) or `selector` (CSS). Without either, types into the " +
-			"currently focused element. Set `pressEnter: true` to submit a form / " +
+			"`browser_snapshot`) or `selector` (CSS): the field value is replaced. Without either, " +
+			"the text is typed key by key into the currently focused element (focus it first with " +
+			"`browser_click`). `delayMs` types key by key with that delay (for inputs that ignore a " +
+			"direct fill), appending to the current value. Set `pressEnter: true` to submit a form / " +
 			"trigger a search. Combine with `browser_click` for full form workflows " +
-			"(click field → type → click submit). No equivalent in `fetch_url` or " +
-			"`web_search`.",
+			"(click field → type → click submit).",
 		parameters: Type.Object({
 			tabId: Type.String(),
 			text: Type.String(),
 			ref: Type.Optional(Type.String()),
 			selector: Type.Optional(Type.String()),
 			pressEnter: Type.Optional(Type.Boolean()),
-			delayMs: Type.Optional(Type.Number()),
+			delayMs: Type.Optional(Type.Number({ description: "Delay between key presses (key-by-key mode)" })),
 		}),
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
 			const api = await getBrowserApi();
-			const res = await api.type(params);
-			return { content: [{ type: "text", text: jsonResult(res) }] };
+			return textResult(await api.type({ ...params, signal }));
 		},
 	});
 
 	// ─── browser_scroll ───────────────────────────────────────────────
 	pi.registerTool({
 		name: "browser_scroll",
+		label: "Browser Scroll",
 		description:
-			"Scroll an open tab to reveal more content. Essential for infinite-scroll " +
-			"feeds (Twitter/X, Reddit, news sites, e-commerce listings), lazy-loaded " +
-			"images, and dropdowns inside scrollable containers. Defaults to scrolling " +
-			"the page; pass `ref` to scroll inside a specific element. After scrolling, " +
-			"re-run `browser_snapshot` or `browser_extract` to see the newly loaded " +
+			"Scroll an open tab with the mouse wheel to reveal more content. Essential for infinite-scroll " +
+			"feeds (Twitter/X, Reddit, news sites, e-commerce listings) and lazy-loaded " +
+			"images. Scrolls by `amount` pixels (default 500) at the current pointer position, " +
+			"so it scrolls the page or the scrollable area under the last clicked element. " +
+			"After scrolling, re-run `browser_snapshot` or `browser_extract` to see the newly loaded " +
 			"content.",
 		parameters: Type.Object({
 			tabId: Type.String(),
 			direction: Type.Union([Type.Literal("up"), Type.Literal("down"), Type.Literal("left"), Type.Literal("right")]),
-			ref: Type.Optional(Type.String()),
-			pixels: Type.Optional(Type.Number()),
+			amount: Type.Optional(Type.Number({ description: "Pixels to scroll (default 500)" })),
 		}),
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
 			const api = await getBrowserApi();
-			const res = await api.scroll(params);
-			return { content: [{ type: "text", text: jsonResult(res) }] };
+			return textResult(await api.scroll({ ...params, signal }));
 		},
 	});
 
 	// ─── browser_snapshot ─────────────────────────────────────────────
 	pi.registerTool({
 		name: "browser_snapshot",
+		label: "Browser Snapshot",
 		description:
 			"Return the accessibility tree of the current tab — a structured outline of " +
 			"every interactive element (links, buttons, inputs, headings) with a stable " +
-			"`ref` you can pass back to `browser_click` / `browser_type` / " +
-			"`browser_scroll`. **Use this BEFORE clicking or typing** to discover the " +
+			"`[eN]` ref you can pass back to `browser_click` / `browser_type`. " +
+			"**Use this BEFORE clicking or typing** to discover the " +
 			"`ref` of the target element — much more reliable than guessing CSS " +
-			"selectors. Lighter and more semantic than raw HTML. " +
+			"selectors. Lighter and more semantic than raw HTML. Long pages are split into " +
+			"~80 000-character chunks: when the header says so, call again with the given `offset`. " +
 			"Requires a `tabId` from `browser_navigate`.",
 		parameters: Type.Object({
 			tabId: Type.String(),
+			offset: Type.Optional(
+				Type.Number({ description: "Character offset of the next chunk (from a previous call)" }),
+			),
 		}),
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
 			const api = await getBrowserApi();
-			const res = await api.snapshot(params);
-			return { content: [{ type: "text", text: jsonResult(res) }] };
+			const res = await api.snapshot({ ...params, signal });
+			return { content: [{ type: "text", text: snapshotText(res) }], details: undefined };
 		},
 	});
 
 	// ─── browser_close_tab ────────────────────────────────────────────
 	pi.registerTool({
 		name: "browser_close_tab",
+		label: "Browser Close Tab",
 		description:
 			"Close a single browser tab once you no longer need it. " +
 			"**Always call this at the end of a browsing workflow** to free memory — " +
@@ -317,28 +379,27 @@ export default function browserExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({
 			tabId: Type.String(),
 		}),
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
 			const api = await getBrowserApi();
-			const res = await api.closeTab(params);
-			return { content: [{ type: "text", text: jsonResult(res) }] };
+			return textResult(await api.closeTab({ ...params, signal }));
 		},
 	});
 
 	// ─── browser_list_tabs ────────────────────────────────────────────
 	pi.registerTool({
 		name: "browser_list_tabs",
+		label: "Browser List Tabs",
 		description:
 			"List all open tabs in the current browser session with their URL, title, " +
 			"and `tabId`. Use this to recover a `tabId` if you lost track of which tab " +
 			"holds which page (e.g. across multi-step workflows that opened several " +
-			"tabs). Cheap — no Firefox interaction required.",
+			"tabs). Cheap: no navigation involved.",
 		parameters: Type.Object({
 			userId: Type.Optional(Type.String()),
 		}),
-		execute: async (_toolCallId, params) => {
+		execute: async (_toolCallId, params, signal) => {
 			const api = await getBrowserApi();
-			const res = await api.listTabs(params);
-			return { content: [{ type: "text", text: jsonResult(res) }] };
+			return textResult(await api.listTabs({ ...params, signal }));
 		},
 	});
 

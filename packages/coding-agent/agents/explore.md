@@ -1,7 +1,7 @@
 ---
 name: explore
 description: Fast codebase analysis. Returns structured findings for other agents to use.
-tools: read, write, grep, find, ls, bash, memory_search, memory_write, ontology_add
+tools: read, write, grep, find, ls, bash, memory_search, memory_write, ontology_add, ontology_batch_add
 model: default
 ---
 

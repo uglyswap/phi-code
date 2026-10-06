@@ -1,7 +1,7 @@
 import { randomBytes } from "crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from "fs";
 import { dirname } from "path";
-import { lockSync } from "proper-lockfile";
+import { withFileLockSync } from "./file-lock.ts";
 import type {
 	MemoryConfig,
 	OntologyDeleteEntry,
@@ -124,34 +124,10 @@ export class OntologyManager {
 	/**
 	 * Run fn while holding an exclusive lock on the graph file so concurrent
 	 * processes (two phi instances writing memory at once) cannot interleave
-	 * partial JSONL lines. proper-lockfile has no sync retry support, so
-	 * contention is handled with a short bounded spin; appends take
-	 * microseconds and contention is rare, and a lock left by a crashed
-	 * process goes stale after 5s and is taken over.
+	 * partial JSONL lines. See withFileLockSync (same mechanism as vectors.db).
 	 */
 	private withGraphLock<T>(fn: () => T): T {
-		const deadline = Date.now() + 2_000;
-		for (;;) {
-			let release: (() => void) | undefined;
-			try {
-				// realpath:false — the graph file may not exist before the first append.
-				release = lockSync(this.graphPath, { realpath: false, stale: 5_000 });
-			} catch (error) {
-				if ((error as NodeJS.ErrnoException).code === "ELOCKED" && Date.now() < deadline) {
-					const until = Date.now() + 15;
-					while (Date.now() < until) {
-						// bounded spin-wait between lock attempts (sync context, no timers)
-					}
-					continue;
-				}
-				throw error;
-			}
-			try {
-				return fn();
-			} finally {
-				release();
-			}
-		}
+		return withFileLockSync(this.graphPath, fn);
 	}
 
 	private appendToFile(entry: OntologyJSONLEntry): void {

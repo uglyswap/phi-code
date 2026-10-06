@@ -10,11 +10,11 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+	buildSessionContext,
 	convertToLlm,
 	type ExtensionAPI,
 	type ExtensionCommandContext,
 	type ExtensionContext,
-	type SessionEntry,
 } from "phi-code";
 import type { AssistantMessage, Message, StopReason, UserMessage } from "phi-code-ai";
 // completeSimple moved to the compat entrypoint in pi 0.84 (the loader maps the
@@ -67,11 +67,17 @@ interface BtwState {
 	snapshots: Map<string, { messages: Message[] }>;
 }
 
-function branchToMessages(branch: SessionEntry[]): Message[] {
-	const agentMessages = branch
-		.filter((e): e is SessionEntry & { type: "message" } => e.type === "message")
-		.map((e) => e.message);
-	return convertToLlm(agentMessages);
+/**
+ * Messages the main model would see for the current leaf. Uses the resolved,
+ * compaction-aware context (compaction summary + kept messages, branch
+ * summaries, custom messages) instead of the raw root-to-leaf `getBranch()`
+ * path, which still contains every pre-compaction message.
+ */
+export function sessionToMessages(
+	sessionManager: Pick<ExtensionContext["sessionManager"], "getEntries" | "getLeafId">,
+): Message[] {
+	const { messages } = buildSessionContext(sessionManager.getEntries(), sessionManager.getLeafId());
+	return convertToLlm(messages);
 }
 
 // ---------------------------------------------------------------------------
@@ -182,8 +188,7 @@ function readBranchMessages(ctx: ExtensionContext): Message[] {
 	const cached = getSnapshot(ctx);
 	if (cached) return cached.messages;
 	// Cold start (no message_end fired yet) — fall back to live read
-	const branch = ctx.sessionManager.getBranch() as SessionEntry[];
-	return branchToMessages(branch);
+	return sessionToMessages(ctx.sessionManager);
 }
 
 function buildBtwMessages(ctx: ExtensionContext, userMessage: UserMessage): Message[] {
@@ -278,8 +283,7 @@ export function registerMessageEndSnapshot(pi: ExtensionAPI): void {
 		const msg = event.message;
 		if (msg.role !== "assistant") return;
 		if ((msg as AssistantMessage).stopReason === "toolUse") return;
-		const branch = ctx.sessionManager.getBranch() as SessionEntry[];
-		setSnapshot(ctx, { messages: branchToMessages(branch) });
+		setSnapshot(ctx, { messages: sessionToMessages(ctx.sessionManager) });
 	});
 }
 

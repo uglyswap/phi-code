@@ -957,6 +957,12 @@ async function groupTab(tab, title, color) {
 }
 
 async function dispatch(action, params) {
+  if (typeof action === "string" && action.startsWith("page.")) {
+    // The agent is driving this tab: allow early capture on its next navigations
+    // (still limited to tabs in a Pi group, see shouldEarlyCapture).
+    const tab = await getTabByParams({ ...params, joinSessionGroup: false }).catch(() => null);
+    if (tab) await requestEarlyCapture(tab.id).catch(() => undefined);
+  }
   switch (action) {
     case "tab.version":
       return {
@@ -1389,14 +1395,69 @@ async function unregisterInitScript(tabId) {
   await cdp(tabId, "Page.removeScriptToEvaluateOnNewDocument", { identifier }).catch(() => undefined);
 }
 
-// Always inject early console/network capture at document_start on every navigation.
-// Catches console messages, errors, and network requests that fire during page load,
-// before chrome_snapshot or chrome_evaluate install the instrumentation normally.
+// Early console/network capture at document_start. Catches console messages, errors,
+// and network requests (including response bodies) that fire during page load, before
+// chrome_snapshot or chrome_evaluate install the instrumentation normally.
 // The function installEarlyCapture sets __piChromeWrapped flags so the post-hoc
 // installPiChromeInstrumentation() call is idempotent.
+//
+// Privacy: capture is NOT installed on every tab. It only runs on navigations of a tab
+// (1) on which the agent has already run a page.* action through the bridge (capture
+// requested; page actions are only relayed while /chrome authorize is granted), and
+// (2) that is still in a Pi tab group. Ordinary browsing is never instrumented.
+const CAPTURE_TABS_STORAGE_KEY = "piEarlyCaptureTabs";
+let captureTabsCache = null; // Set<number>, mirrored in chrome.storage.session (survives SW restarts)
+
+async function loadCaptureTabs() {
+  if (captureTabsCache) return captureTabsCache;
+  let ids = [];
+  try {
+    const stored = await chrome.storage.session.get(CAPTURE_TABS_STORAGE_KEY);
+    if (Array.isArray(stored[CAPTURE_TABS_STORAGE_KEY])) ids = stored[CAPTURE_TABS_STORAGE_KEY];
+  } catch {
+    // storage.session unavailable: fall back to the in-memory set only
+  }
+  captureTabsCache = new Set(ids.filter((id) => typeof id === "number"));
+  return captureTabsCache;
+}
+
+async function saveCaptureTabs(tabs) {
+  try {
+    await chrome.storage.session.set({ [CAPTURE_TABS_STORAGE_KEY]: Array.from(tabs) });
+  } catch {
+    // best-effort persistence
+  }
+}
+
+// Called for every page.* action relayed by the bridge: the agent is driving this tab.
+async function requestEarlyCapture(tabId) {
+  if (typeof tabId !== "number") return;
+  const tabs = await loadCaptureTabs();
+  if (tabs.has(tabId)) return;
+  tabs.add(tabId);
+  await saveCaptureTabs(tabs);
+}
+
+async function shouldEarlyCapture(tabId) {
+  const tabs = await loadCaptureTabs();
+  if (!tabs.has(tabId)) return false;
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  const group = tab ? await groupRecord(tab.groupId) : null;
+  return Boolean(group?.piGroup);
+}
+
+if (chrome.tabs && chrome.tabs.onRemoved) {
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    loadCaptureTabs().then((tabs) => {
+      if (tabs.delete(tabId)) return saveCaptureTabs(tabs);
+    }).catch(() => undefined);
+  });
+}
+
 if (chrome.webNavigation && chrome.webNavigation.onCommitted) {
-  chrome.webNavigation.onCommitted.addListener((details) => {
+  chrome.webNavigation.onCommitted.addListener(async (details) => {
     if (details.frameId !== 0) return;
+    if (!(await shouldEarlyCapture(details.tabId).catch(() => false))) return;
     chrome.scripting.executeScript({
       target: { tabId: details.tabId, frameIds: [0] },
       world: "MAIN",

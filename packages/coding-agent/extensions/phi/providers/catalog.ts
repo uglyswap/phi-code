@@ -13,7 +13,10 @@ import { OPENCODE_GO_AUTH_URL, OPENCODE_GO_ENV_VAR } from "./opencode-go.ts";
 export interface ProviderCatalogEntry {
 	id: string;
 	displayName: string;
+	/** Env var the runtime provider reads (checked first). */
 	envVar: string;
+	/** Legacy env var names also accepted, after envVar. */
+	envVarAliases?: string[];
 	baseUrl: string;
 	api: string;
 	/** Known model ids used as offline fallback by the wizards. */
@@ -50,7 +53,10 @@ export function getProviderCatalog(): ProviderCatalogEntry[] {
 		{
 			id: "opencode-go",
 			displayName: "OpenCode Go (zen)",
-			envVar: OPENCODE_GO_ENV_VAR,
+			// The built-in opencode-go provider reads OPENCODE_API_KEY; the
+			// historical OPENCODE_GO_API_KEY is still accepted as an alias.
+			envVar: "OPENCODE_API_KEY",
+			envVarAliases: [OPENCODE_GO_ENV_VAR],
 			baseUrl: "https://opencode.ai/zen/go/v1",
 			api: "openai-completions",
 			staticModels: [],
@@ -130,4 +136,20 @@ export function getProviderCatalog(): ProviderCatalogEntry[] {
 			probeUrl: "http://localhost:1234/v1/models",
 		},
 	];
+}
+
+/**
+ * The API key a catalog entry finds in the environment: its primary env var,
+ * then its legacy aliases. Returns the variable name too (for status lines;
+ * never the value).
+ */
+export function catalogEnvKey(
+	entry: Pick<ProviderCatalogEntry, "envVar" | "envVarAliases">,
+	env: NodeJS.ProcessEnv = process.env,
+): { name: string; value: string } | undefined {
+	for (const name of [entry.envVar, ...(entry.envVarAliases ?? [])]) {
+		const value = env[name]?.trim();
+		if (value) return { name, value };
+	}
+	return undefined;
 }

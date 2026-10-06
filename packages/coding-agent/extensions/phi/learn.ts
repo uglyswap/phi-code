@@ -2,9 +2,9 @@
  * Learn Extension - auto-apprentissage (omp-style)
  *
  * Registers the `learn` tool: capture a durable lesson. Facts go to sigma-memory
- * (memory_write); procedures can be promoted to a managed skill written to
- * ~/.phi/agent/managed-skills/<name>/SKILL.md, which the skill scanner picks up
- * (lowest precedence source).
+ * (memory_write); procedures can be promoted to a skill written to
+ * ~/.phi/agent/skills/<name>/SKILL.md (the global skills dir), where both the
+ * core skill system (/skill:<name>) and the sigma-skills hint engine find it.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -31,7 +31,7 @@ export default function (pi: ExtensionAPI) {
 		label: "Learn",
 		permissionTier: "write",
 		description:
-			"Capture a durable lesson learned during this session. Set promote_to_skill=true when the lesson is a reusable procedure (it becomes a managed skill auto-loaded in future sessions). Facts and preferences stay in memory instead (use memory_write).",
+			"Capture a durable lesson learned during this session. Set promote_to_skill=true when the lesson is a reusable procedure (it becomes a global skill in ~/.phi/agent/skills, auto-loaded in future sessions). Facts and preferences stay in memory instead (use memory_write).",
 		promptGuidelines: [
 			"After overcoming a non-obvious error or discovering a reusable procedure, call learn so future sessions benefit.",
 			"Promote to skill only reusable procedures (trigger conditions + numbered steps + pitfalls), not one-off facts.",
@@ -40,7 +40,7 @@ export default function (pi: ExtensionAPI) {
 			name: Type.String({ description: "Short lesson/skill name (will be slugified)" }),
 			lesson: Type.String({ description: "The lesson: what happened, what to do differently, steps if procedural" }),
 			promote_to_skill: Type.Optional(
-				Type.Boolean({ description: "Write as a managed skill in ~/.phi/agent/managed-skills/ (default false)" }),
+				Type.Boolean({ description: "Write as a skill in ~/.phi/agent/skills/<name>/SKILL.md (default false)" }),
 			),
 		}),
 
@@ -65,7 +65,9 @@ export default function (pi: ExtensionAPI) {
 							?.slice(0, 200) ?? p.name;
 					writeFileSync(
 						join(dir, "SKILL.md"),
-						`---\nname: ${slug}\ndescription: ${description.replace(/"/g, "'")}\n---\n\n# ${p.name}\n\n${p.lesson}\n`,
+						// JSON.stringify yields a valid YAML double-quoted scalar: a ":" or
+						// "#" in the lesson's first line no longer breaks the frontmatter.
+						`---\nname: ${slug}\ndescription: ${JSON.stringify(description)}\n---\n\n# ${p.name}\n\n${p.lesson}\n`,
 					);
 					return {
 						content: [

@@ -1196,15 +1196,21 @@ Usage rules:
 
 	const onboardHandler = async (ctx: ExtensionContext) => {
 		const extensionPath = browserExtensionPath();
+		// Only macOS gets automation (open Chrome, reveal in Finder, copy to clipboard); elsewhere the
+		// user opens chrome://extensions manually (Chrome refuses chrome:// URLs passed by other apps).
+		const automated = process.platform === "darwin";
+		const manualSteps = `In Chrome, open chrome://extensions, then:\n  1. Turn on 'Developer mode' (top-right toggle).\n  2. Click 'Load unpacked' and choose this folder:\n     ${extensionPath}`;
 		const proceed = await ctx.ui.confirm(
 			"Install the pi-chrome Chrome extension?",
-			`This opens Chrome's extensions page and reveals the folder pi-chrome needs you to load.\n\nWhen the windows open, in Chrome:\n  1. Turn on 'Developer mode' (top-right toggle).\n  2. Click 'Load unpacked' and choose the folder that just opened in Finder, or paste this path:\n     ${extensionPath}\n\nPress Enter to continue, or Esc to cancel.`,
+			!automated
+				? `${manualSteps}\n\nPress Enter to continue, or Esc to cancel.`
+				: `This opens Chrome's extensions page and reveals the folder pi-chrome needs you to load.\n\nWhen the windows open, in Chrome:\n  1. Turn on 'Developer mode' (top-right toggle).\n  2. Click 'Load unpacked' and choose the folder that just opened in Finder, or paste this path:\n     ${extensionPath}\n\nPress Enter to continue, or Esc to cancel.`,
 		);
 		if (!proceed) {
 			ctx.ui.notify("Cancelled. You can run /chrome onboard again whenever you're ready.", "info");
 			return;
 		}
-		if (process.platform === "darwin") {
+		if (automated) {
 			await pi
 				.exec("open", ["-a", "Google Chrome", "chrome://extensions"], { cwd: workspaceCwd(ctx), timeout: 5_000 })
 				.catch(() => undefined);
@@ -1219,7 +1225,9 @@ Usage rules:
 				.catch(() => undefined);
 		}
 		ctx.ui.notify(
-			"Chrome and Finder should be open. The extension folder path is on your clipboard. After you click 'Load unpacked' and pick it, run /chrome doctor to confirm everything is connected.",
+			automated
+				? "Chrome and Finder should be open. The extension folder path is on your clipboard. After you click 'Load unpacked' and pick it, run /chrome doctor to confirm everything is connected."
+				: `${manualSteps}\nThen run /chrome doctor to confirm everything is connected.`,
 			"info",
 		);
 	};

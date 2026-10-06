@@ -79,6 +79,8 @@ function attachDownloadListener(tabState, tabId, log, pluginEvents, userId) {
 
     try {
       await download.saveAs(filePath);
+      // PHI-VENDOR: downloads land in the shared temp dir; make them owner-only.
+      await fs.chmod(filePath, 0o600);
       const stat = await fs.stat(filePath);
       bytes = stat.size;
     } catch (err) {

@@ -9,9 +9,14 @@
  *   - AbortSignal → SDK's built-in cancellation (notifications/cancelled)
  *   - Protocol error vs tool execution error distinction
  *   - Activate/deactivate pattern (register once, toggle on server state change)
- *   - Image/audio/resource content → text description passthrough
+ *   - Image content → image blocks (supported formats); audio/other → text placeholder
+ *   - Long text output truncated (20 KB) with the full text in an owner-only temp file
  */
 
+import { createHash } from "node:crypto";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { CallToolResultSchema, ListToolsResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { ExtensionAPI } from "phi-code";
@@ -191,51 +196,125 @@ const MAX_TOOL_NAME_LEN = 64;
  * Build a Pi-compatible tool name.
  * Format: <prefix>_<server>_<tool>
  * Rules: [a-zA-Z0-9_], max 64 chars.
- * If truncation is needed, the last 8 chars are replaced with a hash to avoid collisions.
+ * Sanitizing can map different tools to one name (`read-file`/`read_file`, or servers
+ * `my-srv`/`my_srv`). When the name is too long, or `isTaken` reports it is used by
+ * another MCP tool, a hash of (server, tool) replaces the end so names stay unique.
  */
-export function buildToolName(prefix: string, serverName: string, toolName: string): string {
+export function buildToolName(
+	prefix: string,
+	serverName: string,
+	toolName: string,
+	isTaken: (name: string) => boolean = () => false,
+): string {
 	const raw = `${prefix}_${serverName}_${toolName}`;
 	const safe = raw.replace(/[^a-zA-Z0-9_]/g, "_");
-	if (safe.length <= MAX_TOOL_NAME_LEN) return safe;
-	// Truncate with hash suffix to prevent collisions on long names
-	const hash = Math.abs(safe.split("").reduce((acc, c) => ((acc << 5) - acc + c.charCodeAt(0)) | 0, 0))
-		.toString(36)
-		.slice(0, 8);
-	return `${safe.slice(0, MAX_TOOL_NAME_LEN - 9)}_${hash}`;
+	if (safe.length <= MAX_TOOL_NAME_LEN && !isTaken(safe)) return safe;
+	const hash = createHash("sha256").update(`${serverName}\0${toolName}`).digest("hex").slice(0, 8);
+	return `${safe.slice(0, MAX_TOOL_NAME_LEN - hash.length - 1)}_${hash}`;
 }
 
 // ─── Content Conversion ───────────────────────────────────────────────────────
 
 type PiTextContent = { type: "text"; text: string };
+type PiImageContent = { type: "image"; data: string; mimeType: string };
+export type PiToolContent = PiTextContent | PiImageContent;
 
-function convertMcpContent(items: unknown[]): PiTextContent[] {
-	return items.map((item: any) => {
-		if (!item || typeof item !== "object") {
-			return { type: "text", text: String(item) };
-		}
-		switch (item.type) {
-			case "text":
-				return { type: "text", text: String(item.text ?? "") };
-			case "image":
-				return {
+/** Image formats every supported provider accepts inline; others stay a text placeholder. */
+const SUPPORTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+function toImageBlock(data: unknown, mimeType: unknown): PiImageContent | undefined {
+	if (typeof data !== "string" || !data || typeof mimeType !== "string") return undefined;
+	const mime = mimeType.toLowerCase();
+	return SUPPORTED_IMAGE_TYPES.has(mime) ? { type: "image", data, mimeType: mime } : undefined;
+}
+
+function convertMcpItem(item: unknown): PiToolContent {
+	if (!item || typeof item !== "object") {
+		return { type: "text", text: String(item) };
+	}
+	const block = item as Record<string, unknown>;
+	switch (block.type) {
+		case "text":
+			return { type: "text", text: String(block.text ?? "") };
+		case "image":
+			return (
+				toImageBlock(block.data, block.mimeType) ?? {
 					type: "text",
-					text: `[Image: ${item.mimeType ?? "unknown"}, base64 encoded]`,
-				};
-			case "audio":
-				return {
-					type: "text",
-					text: `[Audio: ${item.mimeType ?? "unknown"}, base64 encoded]`,
-				};
-			case "resource": {
-				const r = item.resource;
-				if (r?.text) return { type: "text", text: r.text };
-				if (r?.blob) return { type: "text", text: `[Resource blob: ${r.uri}]` };
-				return { type: "text", text: `[Resource: ${r?.uri ?? "unknown"}]` };
-			}
-			default:
-				return { type: "text", text: JSON.stringify(item) };
+					text: `[Image: ${String(block.mimeType ?? "unknown")}, unsupported format omitted]`,
+				}
+			);
+		case "audio":
+			return { type: "text", text: `[Audio: ${String(block.mimeType ?? "unknown")}, omitted]` };
+		case "resource_link":
+			return { type: "text", text: `${String(block.name ?? "resource")}: ${String(block.uri ?? "")}` };
+		case "resource": {
+			const r = block.resource as Record<string, unknown> | undefined;
+			if (typeof r?.text === "string") return { type: "text", text: r.text };
+			const image = toImageBlock(r?.blob, r?.mimeType);
+			if (image) return image;
+			if (r?.blob) return { type: "text", text: `[Resource blob: ${String(r.uri)}]` };
+			return { type: "text", text: `[Resource: ${String(r?.uri ?? "unknown")}]` };
 		}
-	});
+		default:
+			return { type: "text", text: JSON.stringify(item) };
+	}
+}
+
+/** Convert MCP content blocks: text stays text, supported images become image blocks. */
+export function convertMcpContent(items: unknown[]): PiToolContent[] {
+	return items.map(convertMcpItem);
+}
+
+// ─── Output Limit ─────────────────────────────────────────────────────────────
+
+/** Model-facing text of one MCP result beyond this is cut in the middle (same limit as pi). */
+export const MCP_OUTPUT_MAX_BYTES = 20 * 1024;
+
+/** Write the full output to an owner-only temp file and return its path. */
+async function saveFullOutput(text: string): Promise<string> {
+	const dir = await mkdtemp(join(tmpdir(), "phi-mcp-")); // created 0700
+	const path = join(dir, "output.txt");
+	await writeFile(path, text, { encoding: "utf8", mode: 0o600 });
+	return path;
+}
+
+/** Keep the first and last `half` bytes of `text` (UTF-8), dropping the middle. */
+function cutMiddle(text: string, maxBytes: number): string {
+	const bytes = Buffer.from(text, "utf8");
+	const half = Math.floor(maxBytes / 2);
+	// Decoding may split a multi-byte character at the cut: it shows as U+FFFD, harmless.
+	const head = bytes.subarray(0, half).toString("utf8");
+	const tail = bytes.subarray(bytes.length - half).toString("utf8");
+	const omitted = bytes.length - 2 * half;
+	return `${head}\n\n[... ${omitted} bytes omitted ...]\n\n${tail}`;
+}
+
+/**
+ * Keep the text of a result within MCP_OUTPUT_MAX_BYTES: long text becomes one
+ * block with its start and end, followed by the path of a temp file holding the
+ * full text. Images are kept after it.
+ */
+export async function limitMcpContent(
+	content: PiToolContent[],
+	saveOutput: (text: string) => Promise<string> = saveFullOutput,
+): Promise<{ content: PiToolContent[]; fullOutputPath?: string }> {
+	const combined = content
+		.filter((c): c is PiTextContent => c.type === "text")
+		.map((c) => c.text)
+		.join("\n");
+	if (Buffer.byteLength(combined, "utf8") <= MCP_OUTPUT_MAX_BYTES) return { content };
+
+	let fullOutputPath: string | undefined;
+	let where: string;
+	try {
+		fullOutputPath = await saveOutput(combined);
+		where = `[Output truncated. Full output: ${fullOutputPath} (read it with offset/limit)]`;
+	} catch (err) {
+		where = `[Output truncated. Could not save the full output: ${err instanceof Error ? err.message : String(err)}]`;
+	}
+	const text = `${cutMiddle(combined, MCP_OUTPUT_MAX_BYTES)}\n\n${where}`;
+	const images = content.filter((c): c is PiImageContent => c.type === "image");
+	return { content: [{ type: "text", text }, ...images], ...(fullOutputPath && { fullOutputPath }) };
 }
 
 // ─── Tool Listing ─────────────────────────────────────────────────────────────
@@ -295,6 +374,11 @@ export class ToolBridge {
 	private readonly pi: PiExtensionAPI;
 	/** Tracks which Pi tool names belong to which MCP server. */
 	private readonly serverToolNames = new Map<string, Set<string>>();
+	/**
+	 * Owner of each Pi tool name across ALL servers, as "<server>\0<tool>".
+	 * Used to give colliding names a hash suffix instead of overwriting another tool.
+	 */
+	private readonly toolOwners = new Map<string, string>();
 
 	constructor(settings: Settings, pi: PiExtensionAPI) {
 		this.settings = settings;
@@ -328,16 +412,25 @@ export class ToolBridge {
 		// Build the set of currently valid Pi tool names for this server
 		const currentToolNames = new Set<string>();
 
+		// This server's previous names are re-assigned below (same order => same names).
+		for (const name of registeredForServer) this.toolOwners.delete(name);
+		const seenTools = new Set<string>();
+
 		for (const tool of tools) {
-			const piName = buildToolName(this.settings.toolPrefix, serverName, tool.name);
-			// Detect collision: two different MCP tools mapping to the same Pi name
-			// (e.g. "my-tool" and "my_tool" both sanitize to "my_tool")
-			if (currentToolNames.has(piName)) {
-				console.warn(
-					`[pi-mcp] Tool name collision: "${tool.name}" maps to "${piName}" which is already taken. ` +
-						`The later tool definition will overwrite the earlier one.`,
-				);
+			if (seenTools.has(tool.name)) {
+				// The server listed the same tool twice: keep the first definition.
+				console.warn(`[pi-mcp] Server "${serverName}" lists tool "${tool.name}" twice, ignoring the duplicate.`);
+				continue;
 			}
+			seenTools.add(tool.name);
+			// Sanitizing can map different tools ("read-file"/"read_file", or servers
+			// "my-srv"/"my_srv") to one Pi name: a taken name gets a hash suffix.
+			const owner = `${serverName}\0${tool.name}`;
+			const piName = buildToolName(this.settings.toolPrefix, serverName, tool.name, (name) => {
+				const current = this.toolOwners.get(name);
+				return current !== undefined && current !== owner;
+			});
+			this.toolOwners.set(piName, owner);
 			currentToolNames.add(piName);
 			// Always re-register — on reconnect the client reference changes and
 			// Pi's registerTool overwrites by name, so this is idempotent.
@@ -365,6 +458,7 @@ export class ToolBridge {
 	/** Remove all tracking data for a server (called when config changes remove a server). */
 	removeServer(serverName: string): void {
 		this._deactivateServerTools(serverName);
+		for (const name of this.serverToolNames.get(serverName) ?? []) this.toolOwners.delete(name);
 		this.serverToolNames.delete(serverName);
 	}
 
@@ -415,15 +509,19 @@ export class ToolBridge {
 						{ timeout: timeoutMs, ...(signal ? { signal } : {}) },
 					);
 
-					const content = convertMcpContent(result.content as unknown[]);
+					const { content, fullOutputPath } = await limitMcpContent(
+						convertMcpContent(result.content as unknown[]),
+					);
 
 					// Tool execution errors (isError: true) — distinct from protocol errors
 					if (result.isError) {
-						const errorText = content.map((c) => c.text).join("\n");
+						const errorText = content
+							.map((c) => (c.type === "text" ? c.text : `[Image: ${c.mimeType}]`))
+							.join("\n");
 						throw new McpError(errorText || "Tool reported an error", serverName, "tool");
 					}
 
-					return { content, details: {} };
+					return { content, details: fullOutputPath ? { fullOutputPath } : {} };
 				} catch (err) {
 					if (err instanceof McpError) throw err;
 					// Protocol-level errors (JSON-RPC error response, timeout, etc.)

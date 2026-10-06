@@ -65,7 +65,15 @@ export async function downloadAndExtract(
 	name: string,
 ): Promise<void> {
 	const buffer = await webdl(url, `Downloading addon (${name})`, false);
+	// PHI-VENDOR: create the target only once the download succeeded, so an
+	// offline first launch does not leave an empty addon dir behind.
+	fs.mkdirSync(extractPath, { recursive: true });
 	await unzip(buffer, extractPath, `Extracting addon (${name})`, false);
+}
+
+/** PHI-VENDOR: an addon dir is usable only once extracted (manifest.json present). */
+function isExtractedAddon(addonPath: string): boolean {
+	return fs.existsSync(join(addonPath, "manifest.json"));
 }
 
 /**
@@ -93,16 +101,24 @@ export async function maybeDownloadAddons(
 	for (const addonName in addons) {
 		const addonPath = getAddonPath(addonName);
 
-		if (fs.existsSync(addonPath)) {
+		if (isExtractedAddon(addonPath)) {
 			addonsList.push(addonPath);
 			continue;
 		}
 
+		// PHI-VENDOR: a dir without manifest.json is the leftover of an earlier
+		// failed download (e.g. offline first launch). Pushing it made every later
+		// launch fail with InvalidAddonPath; drop it and retry the download, and
+		// never keep a partial extraction, so the failure stays transient.
 		try {
-			fs.mkdirSync(addonPath, { recursive: true });
+			fs.rmSync(addonPath, { recursive: true, force: true });
 			await downloadAndExtract(addons[addonName], addonPath, addonName);
+			if (!isExtractedAddon(addonPath)) {
+				throw new Error("archive has no manifest.json");
+			}
 			addonsList.push(addonPath);
 		} catch (e) {
+			fs.rmSync(addonPath, { recursive: true, force: true });
 			console.error(`Failed to download and extract ${addonName}: ${e}`);
 		}
 	}

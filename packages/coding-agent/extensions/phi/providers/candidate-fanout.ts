@@ -30,7 +30,8 @@ export interface CandidateOutcome {
 	error?: string;
 }
 
-const CANDIDATE_TOOLS = ["read", "grep", "glob", "ls", "find", "edit", "write", "bash", "sandbox_run"];
+// No "glob": phi has no such tool (find covers it).
+const CANDIDATE_TOOLS = ["read", "grep", "ls", "find", "edit", "write", "bash", "sandbox_run"];
 const HARD_CONCURRENCY = 2;
 const DEFAULT_TIMEOUT_MS = 12 * 60 * 1000;
 

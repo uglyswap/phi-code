@@ -22,7 +22,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "phi-code";
-import { runParallel } from "phi-code";
+import { isDestructiveCommand, runParallel } from "phi-code";
+import type { Api, Model } from "phi-code-ai";
 import { type AgentDef, loadAgentDef } from "./providers/agent-def.ts";
 import { runCandidateFanout } from "./providers/candidate-fanout.ts";
 import { diffChangedLines } from "./providers/candidate-select.ts";
@@ -38,13 +39,7 @@ import {
 	parseFailingState,
 	type VerifiedCandidate,
 } from "./providers/debug-contract.ts";
-import {
-	decideEscalation,
-	parseReproCmd,
-	pickCandidateModels,
-	type RoutingLike,
-	shotBudgetMs,
-} from "./providers/escalation.ts";
+import { decideEscalation, parseReproCmd, pickCandidateModels, type RoutingLike } from "./providers/escalation.ts";
 import { passed, runCommand, tail } from "./providers/execution.ts";
 import {
 	defaultExplorerSpecs,
@@ -53,6 +48,7 @@ import {
 	READONLY_EXPLORER_TOOLS,
 	runExplorer,
 } from "./providers/explore-fanout.ts";
+import { composePhaseSystemPrompt, resolveModelRef } from "./providers/orchestrator-helpers.ts";
 import {
 	analyzePhaseMessages,
 	buildNextBrief,
@@ -72,6 +68,9 @@ import { discoverTargetedTests, fsSeamsFor } from "./providers/test-discovery.ts
 import { looksLikeBugReport, triage } from "./providers/triage.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────
+
+/** Wall-clock budget of the /fix single shot (measured: a real shot runs 8 to 18 min). */
+const FIX_SHOT_BUDGET_MS = 25 * 60 * 1000;
 
 interface TaskDef {
 	title: string;
@@ -362,6 +361,13 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	// invocation count (reset at orchestration start, flushed at finish).
 	let runPhaseRecords: PhaseRecord[] = [];
 	let sandboxExecCount = 0;
+	// Generic driver: the last phase that completed (its effective verdict), so
+	// the final headline is honest: a FAIL or a missing VERIFY verdict must
+	// never end as "finished" green (only BLOCKED used to stop the run).
+	let lastGenericPhase: { key: string; label: string; verdict: string | null } | null = null;
+	// True while the driver runs its async end-of-queue steps (oracle /
+	// arbitration): a duplicate agent_end must not finish the run meanwhile.
+	let genericFinalizing = false;
 	// Cumulative sandbox execution time this orchestration (drift guard #2) and
 	// its budget; per-call cap (#4) is tightenable for batch harnesses via env.
 	let sandboxExecMs = 0;
@@ -483,6 +489,19 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 		return sessionSandbox.sandbox;
 	}
 
+	/**
+	 * The bash tool's destructive-command gate, applied to commands the
+	 * orchestration runs ON THE HOST (local sandbox backend): sandbox_run and the
+	 * driver's oracle/arbitration runs of model-declared reproductions would
+	 * otherwise bypass it. Docker runs are left alone (container paths such as
+	 * /work would be misread as outside the workspace). Returns the block reason.
+	 */
+	function hostGuardReason(command: string, sandbox: Sandbox, cwd: string): string | undefined {
+		if (!orchestrationActive || sandbox.backend !== "local") return undefined;
+		const verdict = isDestructiveCommand(command, cwd);
+		return verdict?.blocked ? (verdict.reason ?? "destructive command") : undefined;
+	}
+
 	pi.registerTool({
 		name: "sandbox_run",
 		label: "Sandbox Run",
@@ -520,8 +539,21 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 					details: { verdict: "BUDGET_EXHAUSTED", budgetMs: SANDBOX_BUDGET_MS, usedMs: sandboxExecMs },
 				};
 			}
-			if (orchestrationActive) sandboxExecCount++;
 			const sandbox = getSessionSandbox(cwd);
+			const blockedReason = hostGuardReason(p.command, sandbox, cwd);
+			if (blockedReason) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Command blocked by safety gate: ${blockedReason}\nThis guard is active only during autonomous orchestration.`,
+						},
+					],
+					details: { verdict: "BLOCKED_BY_GUARD", reason: blockedReason },
+					isError: true,
+				};
+			}
+			if (orchestrationActive) sandboxExecCount++;
 			// Guard #4: per-call cap, tightenable for batch harnesses via env.
 			const result = await sandbox.execAsync(p.command, {
 				timeoutMs: Math.max(1, Math.min(SANDBOX_MAX_TIMEOUT_S, p.timeoutSeconds ?? 300)) * 1000,
@@ -1019,24 +1051,8 @@ Tag the note with relevant keywords for vector search.
 		return phases;
 	}
 
-	/**
-	 * Resolve a routing.json model reference to an available model.
-	 * Accepts a provider-qualified "provider/id" reference (so the same model id
-	 * offered by several providers can be disambiguated) and falls back to a bare
-	 * "id" for legacy configs. Splits on the FIRST slash only, since some model
-	 * ids themselves contain slashes (e.g. OpenRouter "anthropic/claude-...").
-	 */
-	function resolveModelRef(available: any[], ref: string): any | undefined {
-		if (!ref) return undefined;
-		const slash = ref.indexOf("/");
-		if (slash > 0) {
-			const provider = ref.slice(0, slash);
-			const id = ref.slice(slash + 1);
-			const qualified = available.find((m: any) => m.provider === provider && m.id === id);
-			if (qualified) return qualified;
-		}
-		return available.find((m: any) => m.id === ref);
-	}
+	// resolveModelRef ("provider/id" or bare id) lives in orchestrator-helpers.ts,
+	// shared with the smart router.
 
 	/**
 	 * Switch model for the current phase.
@@ -1048,7 +1064,7 @@ Tag the note with relevant keywords for vector search.
 		phase: OrchestratorPhase,
 		ctx: any,
 	): Promise<{ modelId: string; warning?: string }> {
-		const available = ctx.modelRegistry?.getAvailable?.() || [];
+		const available: Model<Api>[] = ctx.modelRegistry?.getAvailable?.() || [];
 		// On a retry, resolve the fallback FIRST so we swap to a different model
 		// (ideally another family) rather than re-hitting the one that just failed.
 		const target = phase.useFallback
@@ -1092,14 +1108,18 @@ Tag the note with relevant keywords for vector search.
 			// Restrict tools to agent's allowed tools
 			if (agentDef.tools.length > 0) {
 				// Always include the memory tools and phase_result in orchestration phases.
+				// ontology_batch_add: EXPLORE's instruction requires it. lsp: the
+				// /debug rules recommend it (read-only; ignored when not loaded).
 				const forcedTools = [
 					"memory_search",
 					"memory_write",
 					"memory_read",
 					"ontology_add",
+					"ontology_batch_add",
 					"ontology_query",
 					"phase_result",
 					"sandbox_run",
+					"lsp",
 				];
 				const agentTools = [...agentDef.tools, ...forcedTools.filter((t) => !agentDef.tools.includes(t))];
 				_activeAgentTools = agentTools;
@@ -1414,6 +1434,7 @@ Tag the note with relevant keywords for vector search.
 		orchestrationMode = "plan";
 		fixContext = null;
 		candidateContext = null;
+		lastGenericPhase = null;
 		deactivateAgent();
 		if (phaseTimeoutId) {
 			clearTimeout(phaseTimeoutId);
@@ -1438,7 +1459,7 @@ Tag the note with relevant keywords for vector search.
 	// the project suite in the REAL sandbox. Green → finish at baseline cost.
 	// Red → escalate: enqueue the full /debug pipeline seeded with the red run.
 	// Deterministic — zero model tokens; the verdict comes from exit codes.
-	function runFixOracleAndMaybeEscalate(ctx: any): boolean {
+	async function runFixOracleAndMaybeEscalate(ctx: any): Promise<boolean> {
 		if (orchestrationMode !== "fix" || !fixContext || fixContext.oracleRan) return false;
 		fixContext.oracleRan = true;
 		const cwd = ctx.cwd || process.cwd();
@@ -1498,13 +1519,34 @@ Tag the note with relevant keywords for vector search.
 			return true;
 		}
 
+		// The reproduction may be model-declared (REPRO-CMD): same destructive
+		// gate as the bash tool before running it on the host.
+		const reproBlocked = reproCmd ? hostGuardReason(reproCmd, sandbox, cwd) : undefined;
+		if (reproCmd && reproBlocked) {
+			ctx.ui.notify(
+				`\n🛑 Oracle reproduction \`${reproCmd}\` blocked by the safety gate: ${reproBlocked}`,
+				"warning",
+			);
+			reproCmd = undefined;
+		}
+		const suiteBlocked = suiteCmd ? hostGuardReason(suiteCmd, sandbox, cwd) : undefined;
+		if (suiteCmd && suiteBlocked) {
+			ctx.ui.notify(`\n🛑 Oracle suite \`${suiteCmd}\` blocked by the safety gate: ${suiteBlocked}`, "warning");
+			suiteCmd = undefined;
+		}
+
 		ctx.ui.notify(
 			`\n🧪 **/fix oracle** — running ${[reproCmd && "the reproduction", suiteCmd && "the suite"].filter(Boolean).join(" and ") || "nothing (no runnable check)"} in ${sandbox.describe()}…`,
 			"info",
 		);
-		const repro = reproCmd ? sandbox.exec(reproCmd, { timeoutMs: 10 * 60 * 1000 }) : null;
-		const suite = suiteCmd ? sandbox.exec(suiteCmd, { timeoutMs: 20 * 60 * 1000 }) : null;
-		const decision = decideEscalation(fixContext.state, { repro, suite });
+		// ASYNC runs: they can take up to 10 + 20 min; a sync spawn here froze
+		// the whole TUI (event loop blocked) for that long.
+		const state = fixContext.state;
+		const repro = reproCmd ? await sandbox.execAsync(reproCmd, { timeoutMs: 10 * 60 * 1000 }) : null;
+		const suite = suiteCmd ? await sandbox.execAsync(suiteCmd, { timeoutMs: 20 * 60 * 1000 }) : null;
+		// Cancelled while the oracle ran: nothing left to decide.
+		if (!orchestrationActive) return true;
+		const decision = decideEscalation(state, { repro, suite });
 
 		if (decision.action === "done-green") {
 			finishGenericOrchestration(
@@ -1537,7 +1579,7 @@ Tag the note with relevant keywords for vector search.
 	// REAL sandbox, select the minimal passing candidate (candidate-select), and
 	// leave the WINNER applied. If none passes: never a blank page — the smallest
 	// non-empty candidate is left applied, clearly labelled UNVERIFIED.
-	function runCandidateArbitration(ctx: any): boolean {
+	async function runCandidateArbitration(ctx: any): Promise<boolean> {
 		if (!candidateContext || candidateContext.arbitrated) return false;
 		candidateContext.arbitrated = true;
 		const cc = candidateContext;
@@ -1545,6 +1587,16 @@ Tag the note with relevant keywords for vector search.
 		const sandbox = getSessionSandbox(cwd);
 		const suiteCmd = sandbox.recipe.test?.trim();
 		const nonEmpty = cc.list.filter((c) => c.patch.trim());
+		// The arbitration reproduction comes from a phase handoff (REPRO-CMD):
+		// same destructive gate as the bash tool before running it on the host.
+		const reproBlocked = cc.reproCmd ? hostGuardReason(cc.reproCmd, sandbox, cwd) : undefined;
+		if (cc.reproCmd && reproBlocked) {
+			ctx.ui.notify(
+				`\n🛑 Arbitration reproduction \`${cc.reproCmd}\` blocked by the safety gate: ${reproBlocked}`,
+				"warning",
+			);
+			cc.reproCmd = undefined;
+		}
 
 		if (nonEmpty.length === 0) {
 			finishGenericOrchestration(ctx, `⏸️ **/${orchestrationMode} BLOCKED — no candidate produced a patch.**`);
@@ -1588,11 +1640,18 @@ Tag the note with relevant keywords for vector search.
 					.filter(Boolean);
 				candSuite = discoverTargetedTests(changed, fsSeamsFor(cwd)).command;
 			}
+			if (candSuite && hostGuardReason(candSuite, sandbox, cwd)) candSuite = undefined;
+			// ASYNC runs (up to 10 + 20 min per candidate): never block the event loop.
 			const reproAfter =
-				cc.reproCmd && sandbox.available() ? sandbox.exec(cc.reproCmd, { timeoutMs: 10 * 60 * 1000 }) : null;
-			const suite = candSuite && sandbox.available() ? sandbox.exec(candSuite, { timeoutMs: 20 * 60 * 1000 }) : null;
+				cc.reproCmd && sandbox.available()
+					? await sandbox.execAsync(cc.reproCmd, { timeoutMs: 10 * 60 * 1000 })
+					: null;
+			const suite =
+				candSuite && sandbox.available() ? await sandbox.execAsync(candSuite, { timeoutMs: 20 * 60 * 1000 }) : null;
 			verified.push({ source: cand.source, patch: cand.patch, reproAfter, suite });
 			gitIn(cwd, "checkout -- .");
+			// Cancelled while a candidate ran: the tree is reset, stop here.
+			if (!orchestrationActive) return true;
 			const rp = reproAfter
 				? `repro exit ${reproAfter.exitCode}${reproAfter.timedOut ? " TIMEOUT" : ""}`
 				: "repro n/a";
@@ -1624,12 +1683,44 @@ Tag the note with relevant keywords for vector search.
 		return true;
 	}
 
-	function sendNextGenericPhase(ctx: any) {
+	/**
+	 * Final headline of a run whose phase queue drained normally. Only a VERIFY
+	 * phase that reported PASS is a green finish; a FAIL, a missing verdict or a
+	 * phase skipped on timeout is reported as such (and /runs counts it so).
+	 */
+	function genericCompletionHeadline(): string {
+		const mode = orchestrationMode;
+		const last = lastGenericPhase;
+		if (last?.verdict === "FAIL") {
+			return `❌ **/${mode} finished with FAIL** at ${last.label}: the change is NOT verified green.`;
+		}
+		if (skippedPhases > 0) {
+			return `⚠️ **/${mode} finished UNVERIFIED**: ${skippedPhases} phase(s) skipped on timeout.`;
+		}
+		if (last?.key === "verify" && last.verdict !== "PASS") {
+			return `⚠️ **/${mode} finished UNVERIFIED**: ${last.label} reported no PASS verdict.`;
+		}
+		return `✅ **/${mode} finished.**`;
+	}
+
+	async function sendNextGenericPhase(ctx: any): Promise<void> {
 		if (phaseQueue.length === 0) {
-			if (runCandidateArbitration(ctx)) return;
-			if (runFixOracleAndMaybeEscalate(ctx)) return;
+			if (genericFinalizing) return;
+			genericFinalizing = true;
+			try {
+				if (await runCandidateArbitration(ctx)) return;
+				if (await runFixOracleAndMaybeEscalate(ctx)) return;
+			} catch (err) {
+				finishGenericOrchestration(
+					ctx,
+					`⚠️ **/${orchestrationMode} finished UNVERIFIED**: the driver's verification step failed: ${err instanceof Error ? err.message : String(err)}`,
+				);
+				return;
+			} finally {
+				genericFinalizing = false;
+			}
 			if (phaseQueue.length === 0) {
-				finishGenericOrchestration(ctx, `✅ **/${orchestrationMode} finished.**`);
+				finishGenericOrchestration(ctx, genericCompletionHeadline());
 				return;
 			}
 		}
@@ -1680,7 +1771,7 @@ Tag the note with relevant keywords for vector search.
 						skippedPhases++;
 						ctx.ui.notify(`\n⏰ **Phase timed out again** — skipping to next phase.`, "warning");
 					}
-					sendNextGenericPhase(ctx);
+					void sendNextGenericPhase(ctx);
 				}
 			}, phaseBudget);
 		});
@@ -1699,7 +1790,7 @@ Tag the note with relevant keywords for vector search.
 		if (!phasePending) {
 			// Route through sendNextGenericPhase so the /fix oracle still runs on
 			// this (duplicate-event) completion path instead of being bypassed.
-			if (phaseQueue.length === 0) sendNextGenericPhase(ctx);
+			if (phaseQueue.length === 0) await sendNextGenericPhase(ctx);
 			return;
 		}
 		if (phaseTimeoutId) {
@@ -1755,7 +1846,7 @@ Tag the note with relevant keywords for vector search.
 				`\n🔁 **Transient provider error** in ${currentPhase.label} — retrying once on the fallback model.`,
 				"warning",
 			);
-			sendNextGenericPhase(ctx);
+			await sendNextGenericPhase(ctx);
 			return;
 		}
 
@@ -1772,7 +1863,7 @@ Tag the note with relevant keywords for vector search.
 					`\n🔁 **${currentPhase.label} reported BLOCKED on the first attempt** — retrying once on the fallback model before halting. ${outcome.handoff || ""}`,
 					"warning",
 				);
-				sendNextGenericPhase(ctx);
+				await sendNextGenericPhase(ctx);
 				return;
 			}
 			ctx.ui.notify(
@@ -1869,9 +1960,12 @@ Tag the note with relevant keywords for vector search.
 			phaseQueue[0].instruction += `\n\n**Previous phase summary:**\n${nextBrief}`;
 		}
 
+		if (currentPhase) {
+			lastGenericPhase = { key: currentPhase.key, label: currentPhase.label, verdict: outcome.verdict };
+		}
 		completedPhases++;
 		phasePending = false;
-		sendNextGenericPhase(ctx);
+		await sendNextGenericPhase(ctx);
 	}
 
 	function startGenericOrchestration(
@@ -1886,6 +1980,8 @@ Tag the note with relevant keywords for vector search.
 		if (mode !== "fix") fixContext = null;
 		if (mode !== "debug") candidateContext = null;
 		runPhaseRecords = [];
+		lastGenericPhase = null;
+		genericFinalizing = false;
 		sandboxExecCount = 0;
 		sandboxExecMs = 0;
 		setOrchestrationActive(true);
@@ -1947,7 +2043,7 @@ Tag the note with relevant keywords for vector search.
 						skippedPhases++;
 						ctx.ui.notify(`\n⏰ **First phase timed out again** — skipping.`, "warning");
 					}
-					sendNextGenericPhase(ctx);
+					void sendNextGenericPhase(ctx);
 				}
 			}, firstBudget);
 			setTimeout(() => pi.sendUserMessage(first.instruction, { deliverAs: "followUp" }), 200);
@@ -1956,12 +2052,15 @@ Tag the note with relevant keywords for vector search.
 
 	// ─── System Prompt Injection — Agent personas ────────────────────
 
-	pi.on("before_agent_start", async (_event, _ctx) => {
+	pi.on("before_agent_start", async (event, _ctx) => {
 		if (!orchestrationActive || !activeAgentPrompt) {
 			return {};
 		}
-		// Replace system prompt with the active agent's prompt
-		return { systemPrompt: activeAgentPrompt };
+		// COMPOSE, never replace: the base prompt carries AGENTS.md/CLAUDE.md,
+		// the skills list, the active tools' guidelines (phase_result,
+		// sandbox_run...), cwd and date. Replacing it left phase agents blind to
+		// all of that. The persona goes last so its role instructions prevail.
+		return { systemPrompt: composePhaseSystemPrompt(event?.systemPrompt, activeAgentPrompt) };
 	});
 
 	// ─── Agent End Event — Phase Chaining ────────────────────────────
@@ -2276,7 +2375,7 @@ Tag the note with relevant keywords for vector search.
 			// single-agent EXPLORE below by simply not enriching the instruction.
 			if (wantFanout) {
 				try {
-					const available = ctx.modelRegistry?.getAvailable?.() || [];
+					const available: Model<Api>[] = ctx.modelRegistry?.getAvailable?.() || [];
 					const exploreModelId = resolveModelRef(available, firstPhase.model)?.id || firstPhase.model;
 					ctx.ui.notify(
 						`\n🔭 **Parallel exploration** (read-only, up to 2 concurrent) — building a fuller map before phase 1...`,
@@ -2434,12 +2533,12 @@ It runs REPRODUCE → LOCALIZE → FIX → VERIFY and only reports FIXED with a 
 			// Opt-in multi-candidate FIX: `--candidates N` (2..4). Diversity
 			// proposes (N model families patch independently), the oracle disposes
 			// (a real run arbitrates). Cost-disciplined: default stays 1.
-			const wantParallel = /(^|s)--parallel/.test(raw);
+			const wantParallel = /(^|\s)--parallel\b/.test(raw);
 			const candMatch = raw.match(/(^|\s)--candidates[= ](\d)\b/);
 			let candidates = candMatch ? Math.max(1, Math.min(4, Number(candMatch[2]))) : 1;
 			const cleaned = raw
 				.replace(/(^|\s)--candidates[= ]\d\b/g, " ")
-				.replace(/(^|s)--parallel/g, " ")
+				.replace(/(^|\s)--parallel\b/g, " ")
 				.trim();
 			const cwd = ctx.cwd || process.cwd();
 
@@ -2552,14 +2651,15 @@ With no runnable check at all, the result is honestly labelled UNVERIFIED.`,
 			// single shot deserves before the pipeline takes over.
 			const t = triage({ text: raw, hasFailingState: Boolean(state.failingTest || state.reproCommand) });
 			const shot = genericPhase("shot", "🎯 Phase 1 — SINGLE SHOT", "code", "code", singleShotInstruction(state));
-			shot.timeoutMs = shotBudgetMs(t.route);
+			// A real single shot legitimately runs 8–18 min (measured on the
+			// baselines); the flat 10 min phase cap was killing it mid-work. The
+			// tiered shotBudgetMs (6 to 12 min) used to be computed, announced, then
+			// overwritten by this value: announce the budget that actually applies.
+			shot.timeoutMs = FIX_SHOT_BUDGET_MS;
 			ctx.ui.notify(
-				`⏱️ Shot budget: ${Math.round(shotBudgetMs(t.route) / 60000)} min (triage: ${t.reason}).`,
+				`⏱️ Shot budget: ${Math.round(FIX_SHOT_BUDGET_MS / 60000)} min (triage: ${t.route}, ${t.reason}).`,
 				"info",
 			);
-			// A real single shot legitimately runs 8–18 min (measured on the
-			// baselines); the flat 10 min phase cap was killing it mid-work.
-			shot.timeoutMs = 25 * 60 * 1000;
 			startGenericOrchestration(
 				"fix",
 				[shot],
@@ -2711,7 +2811,8 @@ It reports SUCCESS only when a real run meets the acceptance criteria — otherw
 					return;
 				}
 				ctx.ui.notify(`🧪 \`${command}\` in ${sandbox.describe()}…`, "info");
-				const result = sandbox.exec(command);
+				// Async: a user-invoked run can last minutes; never freeze the TUI.
+				const result = await sandbox.execAsync(command);
 				const verdict = result.timedOut ? "TIMEOUT" : passed(result) ? "PASS" : "FAIL";
 				ctx.ui.notify(
 					`${passed(result) ? "✅" : "❌"} exit ${result.exitCode ?? "?"} ${verdict}\n\n\`\`\`\n${tail(result, 40) || "(no output)"}\n\`\`\``,

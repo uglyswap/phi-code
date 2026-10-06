@@ -19,6 +19,16 @@ export interface PhaseRecord {
 	durationMs?: number;
 }
 
+/**
+ * Whether a run outcome headline is a green finish. Negative markers win:
+ * "finished UNVERIFIED", "finished with FAIL", BLOCKED, aborted and cancelled
+ * runs all contain "finished"-like words but are NOT green.
+ */
+export function isGreenOutcome(outcome: string): boolean {
+	if (/UNVERIFIED|BLOCKED|aborted|cancel/i.test(outcome) || /\bFAIL\b/.test(outcome)) return false;
+	return /GREEN|FIXED|finished/i.test(outcome);
+}
+
 /** Aggregate .phi/runs.jsonl records into a readable markdown summary. */
 export function summarizeRuns(records: RunRecord[]): string {
 	if (records.length === 0) return "No runs recorded yet — run /fix, /debug or /build first.";
@@ -34,7 +44,7 @@ export function summarizeRuns(records: RunRecord[]): string {
 	out +=
 		"| mode | runs | green/finished | blocked | unverified | avg duration | avg sandbox execs |\n|---|---|---|---|---|---|---|\n";
 	for (const [mode, rs] of byMode) {
-		const green = rs.filter((r) => /GREEN|FIXED|finished/i.test(r.outcome)).length;
+		const green = rs.filter((r) => isGreenOutcome(r.outcome)).length;
 		const blocked = rs.filter((r) => /BLOCKED/i.test(r.outcome)).length;
 		const unv = rs.filter((r) => /UNVERIFIED/i.test(r.outcome)).length;
 		out += `| ${mode} | ${rs.length} | ${pct(green, rs.length)} | ${pct(blocked, rs.length)} | ${pct(unv, rs.length)} | ${Math.round(avg(rs.map((x) => x.durationMs)) / 1000)}s | ${avg(rs.map((x) => x.sandboxExecs))} |\n`;

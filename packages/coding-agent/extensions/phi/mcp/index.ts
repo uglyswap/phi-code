@@ -13,15 +13,15 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "phi-code";
+import { type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, getAgentDir } from "phi-code";
 // OAuth imports
 import { cancelCallback, ensureCallbackServer, stopCallbackServer, waitForCallback } from "./callback-server.ts";
-import { loadConfig } from "./config.ts";
+import { splitCommandLine } from "./command-line.ts";
+import { createEmptyConfig, loadConfig, validateServerConfig } from "./config.ts";
 import { McpError } from "./errors.ts";
 import { importExternalMcpConfigs } from "./import-configs.ts";
 import { McpOAuthProvider, setCallbackPort } from "./oauth-provider.ts";
@@ -64,6 +64,91 @@ function openBrowser(url: string): void {
 		.unref();
 }
 
+/** Global MCP config path (honors PHI_CODING_AGENT_DIR). */
+function globalConfigPath(): string {
+	return join(getAgentDir(), "mcp.json");
+}
+
+function errorMessage(err: unknown): string {
+	return err instanceof McpError ? err.userMessage : err instanceof Error ? err.message : String(err);
+}
+
+/** Ask for a stdio or remote server entry; undefined when the user cancels. */
+async function promptServerEntry(ctx: ExtensionCommandContext): Promise<Record<string, unknown> | undefined> {
+	const transport = await ctx.ui.select("Transport", ["stdio (local command)", "http (remote URL)"]);
+	if (!transport) return undefined;
+	if (transport.startsWith("stdio")) {
+		const command = await ctx.ui.input("Command", "npx -y @modelcontextprotocol/server-filesystem .");
+		if (!command) return undefined;
+		// Quote-aware split: `"C:\Program Files\x\server.exe" --root "my dir"` keeps its spaces.
+		const [cmd, ...rest] = splitCommandLine(command);
+		if (!cmd) throw new Error("Empty command");
+		return { command: cmd, args: rest, lifecycle: "lazy" };
+	}
+	const url = await ctx.ui.input("Server URL", "https://example.com/mcp");
+	if (!url) return undefined;
+	// Without an explicit transport the schema defaults to stdio and rejects the entry.
+	return { transport: "streamable-http", url: url.trim(), lifecycle: "lazy" };
+}
+
+/** Read the global mcp.json for editing; throws instead of silently starting from scratch. */
+function readGlobalConfigForEdit(
+	configPath: string,
+): Record<string, unknown> & { mcpServers: Record<string, unknown> } {
+	if (!existsSync(configPath)) return { mcpServers: {} };
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(readFileSync(configPath, "utf8"));
+	} catch (err) {
+		throw new Error(
+			`${configPath} is not valid JSON (${err instanceof Error ? err.message : String(err)}): fix it first`,
+		);
+	}
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		throw new Error(`${configPath} must contain a JSON object`);
+	}
+	const config = parsed as Record<string, unknown>;
+	const servers = config.mcpServers;
+	const mcpServers =
+		typeof servers === "object" && servers !== null && !Array.isArray(servers)
+			? (servers as Record<string, unknown>)
+			: {};
+	return { ...config, mcpServers };
+}
+
+/** /mcp add: interactive wizard writing a lazy server to the global config. */
+async function runAddWizard(nameArg: string, ctx: ExtensionCommandContext): Promise<void> {
+	const configPath = globalConfigPath();
+	if (!ctx.hasUI) {
+		ctx.ui.notify(`pi-mcp: /mcp add requires interactive UI. Edit ${configPath} directly.`, "error");
+		return;
+	}
+	const name = nameArg || (await ctx.ui.input("Server name", "my-server"));
+	if (!name) return;
+	const entry = await promptServerEntry(ctx);
+	if (!entry) return;
+	const validation = validateServerConfig(entry);
+	if (!validation.ok) {
+		ctx.ui.notify(`pi-mcp: Invalid server entry: ${validation.issues.join("; ")}`, "error");
+		return;
+	}
+	const config = readGlobalConfigForEdit(configPath);
+	if (Object.hasOwn(config.mcpServers, name)) {
+		ctx.ui.notify(`pi-mcp: "${name}" already exists in ${configPath}`, "error");
+		return;
+	}
+	config.mcpServers[name] = entry;
+	mkdirSync(dirname(configPath), { recursive: true });
+	// env/headers may hold secrets: owner-only file (chmod covers pre-existing files; no-op on Windows).
+	writeFileSync(configPath, JSON.stringify(config, null, 2), { encoding: "utf8", mode: 0o600 });
+	try {
+		chmodSync(configPath, 0o600);
+	} catch (err) {
+		console.error(`[pi-mcp] Could not restrict permissions of ${configPath}: ${(err as Error).message}`);
+	}
+	ctx.ui.notify(`pi-mcp: Added "${name}" to ${configPath}. /reload to connect.`, "info");
+}
+
 export default async function (pi: ExtensionAPI): Promise<void> {
 	// ── 1. Load and validate config ──────────────────────────────────────────
 	// cwd is available on the ExtensionContext passed to event handlers.
@@ -71,14 +156,17 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	// For the initial load we use process.cwd() as a bootstrap path to detect
 	// whether any config exists at all.
 	let config: Awaited<ReturnType<typeof loadConfig>>;
+	/** Last config error, shown by /mcp. The commands stay registered so the user can see and fix it. */
+	let configError: string | undefined;
 	try {
 		// Global config only: project trust is unknown until session_start.
 		config = await loadConfig(process.cwd(), { includeProject: false });
 	} catch (err) {
 		// Can't notify yet (no ctx), so log to stderr. The session_start handler
 		// will re-try with the real cwd and surface errors properly.
-		console.error(`[pi-mcp] Config error: ${err instanceof McpError ? err.message : String(err)}`);
-		return;
+		configError = err instanceof McpError ? err.message : String(err);
+		console.error(`[pi-mcp] Config error: ${configError}`);
+		config = createEmptyConfig();
 	}
 
 	// Even with zero configured servers we proceed so the bundled `/mcp` command
@@ -86,11 +174,11 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	// mcp.json. Servers are still only connected when one is actually configured.
 
 	// ── 2. Initialize bridge components ──────────────────────────────────────
-	// Auth callbacks — opens browser and notifies user when OAuth is needed
+	// Automatic connections never open a browser (no callback server listens for
+	// them): the server is marked "auth required" and the user runs /mcp:auth.
 	const authCallbacks: TransportAuthCallbacks = {
-		onAuthRequired: (serverName: string, authorizationUrl: URL): void => {
-			console.error(`[pi-mcp] OAuth required for "${serverName}". Opening browser for authorization...`);
-			openBrowser(authorizationUrl.toString());
+		onAuthRequired: (serverName: string): void => {
+			console.error(`[pi-mcp] OAuth required for "${serverName}". Run /mcp:auth ${serverName} to authorize.`);
 		},
 	};
 
@@ -102,16 +190,25 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		await bridge.refreshTools(serverName, client);
 	});
 
+	/**
+	 * Bumped on every session start/shutdown: background connections started for an
+	 * older session must not notify through its (now stale) ctx.
+	 */
+	let sessionGeneration = 0;
+
 	// ── 3. Session lifecycle ──────────────────────────────────────────────────
 	pi.on("session_start", async (_event, ctx: ExtensionContext) => {
+		const generation = ++sessionGeneration;
 		// Reload config with the real session cwd (project config may differ)
 		let sessionConfig = config;
 		try {
 			// <cwd>/.phi/mcp.json spawns local commands: read it only for trusted projects.
 			sessionConfig = await loadConfig(ctx.cwd, { includeProject: ctx.isProjectTrusted() });
+			configError = undefined;
 		} catch (err) {
 			const msg = err instanceof McpError ? err.userMessage : String(err);
-			ctx.ui.notify(`pi-mcp: Config error — ${msg}`, "error");
+			configError = msg;
+			ctx.ui.notify(`pi-mcp: Config error: ${msg}\nRun /mcp for details.`, "error");
 			return;
 		}
 
@@ -130,20 +227,29 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 
 		const eagerServers = Object.entries(sessionConfig.mcpServers).filter(([, cfg]) => cfg.lifecycle === "eager");
 
-		// Start all eager servers concurrently
-		await Promise.allSettled(
+		// Connect eager servers in the background: retries can take ~50 s per server
+		// and must not block session startup. Failures are reported when they settle.
+		const notify = (message: string): void => {
+			if (generation !== sessionGeneration) return;
+			try {
+				ctx.ui.notify(message, "error");
+			} catch (err) {
+				console.error(`[pi-mcp] ${message} (${err instanceof Error ? err.message : String(err)})`);
+			}
+		};
+		void Promise.allSettled(
 			eagerServers.map(async ([name]) => {
 				try {
 					await manager.startServer(name, ctx.cwd);
 				} catch (err) {
-					const msg = err instanceof McpError ? err.userMessage : String(err);
-					ctx.ui.notify(`pi-mcp: Failed to start ${name} — ${msg}`, "error");
+					notify(`pi-mcp: Failed to start ${name}: ${errorMessage(err)}`);
 				}
 			}),
 		);
 	});
 
 	pi.on("session_shutdown", async (_event, _ctx: ExtensionContext) => {
+		sessionGeneration++;
 		// Stop the callback server
 		await stopCallbackServer().catch(() => {});
 
@@ -161,36 +267,16 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 			const serverName = args.trim();
 			if (serverName === "add" || serverName.startsWith("add ")) {
 				// Interactive wizard: /mcp add (omp-style mcp-add-wizard)
-				if (!ctx.hasUI) {
-					ctx.ui.notify("pi-mcp: /mcp add requires interactive UI. Edit ~/.phi/agent/mcp.json directly.", "error");
-					return;
+				try {
+					await runAddWizard(serverName.slice(4).trim(), ctx);
+				} catch (err) {
+					ctx.ui.notify(`pi-mcp: /mcp add failed: ${errorMessage(err)}`, "error");
 				}
-				const name = serverName.slice(4).trim() || (await ctx.ui.input("Server name", "my-server"));
-				if (!name) return;
-				const transport = await ctx.ui.select("Transport", ["stdio (local command)", "http (remote URL)"]);
-				if (!transport) return;
-				let entry: Record<string, unknown>;
-				if (transport.startsWith("stdio")) {
-					const command = await ctx.ui.input("Command", "npx -y @modelcontextprotocol/server-filesystem .");
-					if (!command) return;
-					const [cmd, ...rest] = command.split(/\s+/);
-					entry = { command: cmd, args: rest, lifecycle: "lazy" };
-				} else {
-					const url = await ctx.ui.input("Server URL", "https://example.com/mcp");
-					if (!url) return;
-					entry = { url, lifecycle: "lazy" };
-				}
-				const configPath = join(homedir(), ".phi", "agent", "mcp.json");
-				const config = existsSync(configPath) ? JSON.parse(readFileSync(configPath, "utf8")) : { mcpServers: {} };
-				config.mcpServers = config.mcpServers ?? {};
-				if (config.mcpServers[name]) {
-					ctx.ui.notify(`pi-mcp: "${name}" already exists in ${configPath}`, "error");
-					return;
-				}
-				config.mcpServers[name] = entry;
-				mkdirSync(dirname(configPath), { recursive: true });
-				writeFileSync(configPath, JSON.stringify(config, null, 2));
-				ctx.ui.notify(`pi-mcp: Added "${name}" to ${configPath}. /reload to connect.`, "info");
+				return;
+			}
+			if (configError && !serverName) {
+				// The config could not be loaded: no server was started. Say why.
+				ctx.ui.notify(`pi-mcp: MCP config error, no server started:\n${configError}`, "error");
 				return;
 			}
 			if (serverName) {
@@ -216,7 +302,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 			} else if (manager.getAllServers().length === 0) {
 				// No servers configured yet: guide the user instead of showing nothing.
 				ctx.ui.notify(
-					'No MCP servers configured. Create ~/.phi/agent/mcp.json (global) or .phi/mcp.json (project) with an "mcpServers" block, e.g.:\n' +
+					`No MCP servers configured. Create ${globalConfigPath()} (global) or .phi/mcp.json (project) with an "mcpServers" block, e.g.:\n` +
 						'{ "mcpServers": { "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "."], "lifecycle": "eager" } } }',
 					"info",
 				);
@@ -229,15 +315,18 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 
 	// ── 4b. /mcp:import — import server configs from other agent tools ─────
 	pi.registerCommand("mcp:import", {
-		description: "Import MCP servers from Claude/Codex/Gemini/Cursor/VS Code configs into ~/.phi/agent/mcp.json",
+		description: "Import MCP servers from Claude/Codex/Gemini/Cursor/VS Code configs into the global phi mcp.json",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			const result = importExternalMcpConfigs(ctx.cwd);
 			const lines = [
 				result.imported.length ? `Imported: ${result.imported.join(", ")}` : "Nothing new to import.",
 				result.skipped.length ? `Skipped (already configured): ${result.skipped.join(", ")}` : null,
+				result.errors.length ? `Not imported:\n  ${result.errors.join("\n  ")}` : null,
+				result.warnings.length ? `Warnings:\n  ${result.warnings.join("\n  ")}` : null,
 				result.imported.length ? "Restart or /reload to start the new servers." : null,
 			].filter(Boolean);
-			ctx.ui.notify(lines.join("\n"), result.imported.length ? "info" : "warning");
+			const level = result.imported.length && !result.errors.length ? "info" : "warning";
+			ctx.ui.notify(lines.join("\n"), level);
 		},
 	});
 
@@ -330,9 +419,19 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 				ctx.ui.notify(`pi-mcp: No server named "${serverName}"`, "error");
 				return;
 			}
+			const before = manager.getServer(serverName)?.state;
+			if (before === "ready" || before === "starting") {
+				ctx.ui.notify(`pi-mcp: ${serverName} is already ${before === "ready" ? "running" : "starting"}`, "info");
+				return;
+			}
 			try {
+				ctx.ui.notify(`pi-mcp: Starting ${serverName}...`, "info");
+				// startServer throws when every attempt failed or OAuth is required;
+				// it returns without a ready server only when stopped meanwhile.
 				await manager.startServer(serverName, ctx.cwd);
-				ctx.ui.notify(`pi-mcp: Started ${serverName}`, "info");
+				const state = manager.getServer(serverName)?.state;
+				if (state === "ready") ctx.ui.notify(`pi-mcp: Started ${serverName}`, "info");
+				else ctx.ui.notify(`pi-mcp: ${serverName} was stopped before it finished connecting`, "warning");
 			} catch (err) {
 				const msg = err instanceof McpError ? err.userMessage : String(err);
 				ctx.ui.notify(`pi-mcp: Failed to start ${serverName} — ${msg}`, "error");

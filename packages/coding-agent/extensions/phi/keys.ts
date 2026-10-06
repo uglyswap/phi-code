@@ -20,7 +20,7 @@
  * with chmod 0600 on Unix. The user is warned in /setup and on `set`.
  */
 
-import { ApiKeyStore, type ExtensionAPI, getApiKeyStore, getConfigWatcher } from "phi-code";
+import { ApiKeyStore, type ExtensionAPI, type ExtensionContext, getApiKeyStore, getConfigWatcher } from "phi-code";
 import { pingAlibaba } from "./providers/alibaba.ts";
 import { pingOpenCodeGo } from "./providers/opencode-go.ts";
 import { bootstrapProviderConfig, isBootstrappableProvider } from "./providers/provider-bootstrap.ts";
@@ -187,7 +187,22 @@ export default function keysExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	// The watcher is a process-wide singleton and session_start fires again on
+	// /new, /resume and /fork: listeners are registered ONCE (re-registering
+	// stacked duplicate reloads/notifications per session switch) and talk to
+	// the CURRENT session's UI, never a ctx captured by an earlier session.
+	let currentCtx: ExtensionContext | undefined;
+	let watcherListeners: Array<[string, (data: unknown) => void]> | undefined;
+	const notify = (message: string, type: "info" | "warning") => {
+		try {
+			currentCtx?.ui.notify(message, type);
+		} catch {
+			/* UI gone (session shutting down): nothing to show */
+		}
+	};
+
 	pi.on("session_start", async (_event, ctx) => {
+		currentCtx = ctx;
 		try {
 			store.load();
 		} catch {
@@ -195,22 +210,36 @@ export default function keysExtension(pi: ExtensionAPI) {
 		}
 
 		watcher.start();
-		watcher.on("models_json_changed", () => {
-			try {
-				store.reloadFromDisk();
-				ctx.ui.notify("Detected change in `models.json`. Keys reloaded.", "info");
-			} catch (err) {
-				ctx.ui.notify(`Failed to reload models.json: ${err}`, "warning");
-			}
-		});
-		watcher.on("routing_json_changed", () => {
-			ctx.ui.notify("Detected change in `routing.json`. Smart-router will reload on next input.", "info");
-			pi.events.emit("routing_json_changed", { source: "watcher" });
-		});
-		watcher.on("watcher_error", (data: unknown) => {
-			const d = data as { path: string; error: unknown };
-			ctx.ui.notify(`Config watcher error on ${d.path}: ${d.error}`, "warning");
-		});
+		if (!watcherListeners) {
+			watcherListeners = [
+				[
+					"models_json_changed",
+					() => {
+						try {
+							store.reloadFromDisk();
+							notify("Detected change in `models.json`. Keys reloaded.", "info");
+						} catch (err) {
+							notify(`Failed to reload models.json: ${err}`, "warning");
+						}
+					},
+				],
+				[
+					"routing_json_changed",
+					() => {
+						notify("Detected change in `routing.json`. Smart-router will reload on next input.", "info");
+						pi.events.emit("routing_json_changed", { source: "watcher" });
+					},
+				],
+				[
+					"watcher_error",
+					(data: unknown) => {
+						const d = data as { path: string; error: unknown };
+						notify(`Config watcher error on ${d.path}: ${d.error}`, "warning");
+					},
+				],
+			];
+			for (const [event, listener] of watcherListeners) watcher.on(event, listener);
+		}
 
 		const providers = store.listProviders();
 		if (providers.length > 0) {
@@ -220,5 +249,13 @@ export default function keysExtension(pi: ExtensionAPI) {
 				"info",
 			);
 		}
+	});
+
+	pi.on("session_shutdown", async () => {
+		// Release the singleton watcher's listeners so a reloaded extension
+		// instance does not stack a second set on top of these.
+		for (const [event, listener] of watcherListeners ?? []) watcher.off(event, listener);
+		watcherListeners = undefined;
+		currentCtx = undefined;
 	});
 }

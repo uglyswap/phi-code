@@ -5,14 +5,16 @@
  * Deliberately thin: the SDK handles protocol state, transport, and process lifecycle.
  * This module handles:
  *   - 3-state lifecycle per server (stopped / starting / ready)
- *   - Retry with a fixed delay schedule
+ *   - Retry with a fixed delay schedule (cancellable by stop/shutdown)
  *   - roots/list capability for the MCP handshake
  *   - notifications/tools/list_changed → tool refresh callback
  *   - Stderr capture (circular buffer)
  *   - PID tracking for safety-net SIGKILL on shutdown failure
  */
 
-import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { type OAuthClientProvider, UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -23,6 +25,7 @@ import {
 	LoggingMessageNotificationSchema,
 	ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { getAgentDir } from "phi-code";
 import type { McpConfig, ServerConfig, Settings } from "./config.ts";
 import { McpError } from "./errors.ts";
 import { getAuthStatus, McpOAuthProvider, resetAuth } from "./oauth-provider.ts";
@@ -51,36 +54,48 @@ export interface ManagedServer {
 	healthCheckTimer: ReturnType<typeof setInterval> | null;
 	/** Pending retry timeout — cleared on shutdown to prevent ghost reconnects. */
 	retryTimer: ReturnType<typeof setTimeout> | null;
+	/** Wakes up a pending retry wait as cancelled (set while waiting). */
+	cancelRetry: (() => void) | null;
+	/**
+	 * Bumped by every stop/shutdown. A connect/retry chain captures it when it
+	 * starts and gives up as soon as it changes, so a stopped server never
+	 * reconnects on its own.
+	 */
+	generation: number;
 }
+
+/**
+ * Result of a connect chain (first attempt + retries).
+ * "auth-required": the server needs OAuth; never retried, user must run /mcp:auth.
+ * "cancelled": stopped/shut down while connecting or waiting for a retry.
+ */
+export type ConnectOutcome = "ready" | "failed" | "auth-required" | "cancelled";
 
 /** Called after tool list is refreshed for a server (e.g. on list_changed notification). */
 export type ToolRefreshCallback = (serverName: string, client: Client) => Promise<void>;
 
 export interface TransportAuthCallbacks {
-	/** Called when OAuth authorization is required (browser redirect needed). */
-	onAuthRequired: (serverName: string, authorizationUrl: URL) => void | Promise<void>;
+	/**
+	 * Called when an automatic connection finds that OAuth authorization is required.
+	 * Notification only: automatic connections never open a browser (no callback
+	 * server listens for them); the user authorizes with /mcp:auth <name>.
+	 */
+	onAuthRequired: (serverName: string) => void;
 }
 
 // ─── Transport Factory ────────────────────────────────────────────────────────
 
-function createTransport(
-	serverName: string,
-	config: ServerConfig,
-	onStderr: (line: string) => void,
-	authCallbacks?: TransportAuthCallbacks,
-): Transport {
+function createTransport(serverName: string, config: ServerConfig, onStderr: (line: string) => void): Transport {
 	// Build requestInit for static headers (API keys, etc.)
 	const requestInit: RequestInit | undefined = config.headers ? { headers: config.headers } : undefined;
 
 	// Build OAuth authProvider if auth config is present
 	let authProvider: OAuthClientProvider | undefined;
 	if (config.auth && config.transport !== "stdio") {
-		authProvider = new McpOAuthProvider(
-			serverName,
-			config.url,
-			config.auth,
-			authCallbacks ? (url: URL) => authCallbacks.onAuthRequired(serverName, url) : undefined,
-		);
+		// Stored tokens are used and refreshed silently. If the SDK needs a new
+		// authorization, the redirect is ignored here: the transport then fails with
+		// UnauthorizedError and the server is marked "auth required" (see _attempt).
+		authProvider = new McpOAuthProvider(serverName, config.url, config.auth, () => {});
 	}
 
 	switch (config.transport) {
@@ -142,6 +157,8 @@ export class ServerManager {
 				stderrLog: [],
 				healthCheckTimer: null,
 				retryTimer: null,
+				cancelRetry: null,
+				generation: 0,
 			});
 		}
 	}
@@ -166,7 +183,7 @@ export class ServerManager {
 	/** Status summary for /mcp command. */
 	getStatusSummary(): string {
 		const all = this.getAllServers();
-		if (all.length === 0) return "pi-mcp: No servers configured (create ~/.pi/agent/mcp.json)";
+		if (all.length === 0) return `pi-mcp: No servers configured (create ${join(getAgentDir(), "mcp.json")})`;
 		const lines = all.map((s) => {
 			const icon = s.state === "ready" ? "✓" : s.state === "starting" ? "⟳" : "✗";
 			const err = s.lastError ? ` — ${s.lastError.message}` : "";
@@ -207,8 +224,10 @@ export class ServerManager {
 	// ─── Lifecycle ──────────────────────────────────────────────────────────────
 
 	/**
-	 * Start a server and connect to it.
+	 * Start a server and connect to it (retrying per settings.maxRetries).
 	 * cwd is passed to roots/list — the workspace root exposed to the MCP server.
+	 * Resolves once the server is ready, or when it was stopped meanwhile.
+	 * Throws an McpError when every attempt failed or OAuth authorization is required.
 	 */
 	async startServer(name: string, cwd: string): Promise<void> {
 		const server = this.servers.get(name);
@@ -218,12 +237,25 @@ export class ServerManager {
 		if (server.state !== "stopped") return; // Already starting or ready
 		// Reset retry count on explicit start — allows /mcp:start after exhaustion
 		server.retryCount = 0;
-		await this._connect(server, cwd);
+		const outcome = await this._connect(server, cwd);
+		if (outcome === "auth-required") {
+			throw new McpError(
+				`OAuth authorization required. Run /mcp:auth ${name} to sign in.`,
+				name,
+				"auth",
+				server.lastError,
+			);
+		}
+		if (outcome === "failed") {
+			const reason = server.lastError?.message ?? "unknown error";
+			throw new McpError(`Could not connect: ${reason}`, name, "connection", server.lastError);
+		}
 	}
 
 	async stopServer(name: string): Promise<void> {
 		const server = this.servers.get(name);
-		if (!server || server.state === "stopped") return;
+		if (!server) return;
+		// Not gated on state: a server waiting for a retry must be cancelled too.
 		await this._shutdown(server);
 	}
 
@@ -252,20 +284,32 @@ export class ServerManager {
 				stderrLog: [],
 				healthCheckTimer: null,
 				retryTimer: null,
+				cancelRetry: null,
+				generation: 0,
 			});
 		}
 	}
 
 	// ─── Internal ───────────────────────────────────────────────────────────────
 
-	private async _connect(server: ManagedServer, cwd: string): Promise<void> {
+	/** Connect, retrying failed attempts until ready, retries are exhausted, auth is needed, or cancelled. */
+	private async _connect(server: ManagedServer, cwd: string): Promise<ConnectOutcome> {
+		const generation = server.generation;
 		server.state = "starting";
 		server.lastError = null;
-		// Note: retryCount is NOT reset here — it's only reset after successful connect.
-		// This ensures the retry limit is respected across reconnection attempts.
-		// It IS reset when startServer() is called explicitly (e.g. /mcp:start)
-		// via the caller having already set retryCount = 0 before calling _connect.
+		// Note: retryCount is NOT reset here: it's only reset after successful connect
+		// or by startServer() (explicit start, e.g. /mcp:start).
+		for (;;) {
+			const outcome = await this._attempt(server, cwd, generation);
+			if (outcome !== "failed") return outcome;
+			if (!(await this._waitForRetry(server, generation))) {
+				return server.generation === generation ? "failed" : "cancelled";
+			}
+		}
+	}
 
+	/** One connection attempt. On failure the state stays "starting" for the caller to retry. */
+	private async _attempt(server: ManagedServer, cwd: string, generation: number): Promise<ConnectOutcome> {
 		const appendStderr = (line: string): void => {
 			server.stderrLog.push(line);
 			if (server.stderrLog.length > STDERR_BUFFER_SIZE) {
@@ -273,15 +317,76 @@ export class ServerManager {
 			}
 		};
 
-		let transport: Transport;
-		try {
-			transport = createTransport(server.name, server.config, appendStderr, this.authCallbacks);
-		} catch (err) {
-			server.state = "stopped";
-			server.lastError = err instanceof Error ? err : new Error(String(err));
-			throw new McpError(`Failed to create transport: ${server.lastError.message}`, server.name, "connection", err);
+		// OAuth server without stored tokens: connecting can only end in an authorization
+		// redirect that nothing listens for. Ask the user to run /mcp:auth instead.
+		if (server.config.auth && server.config.transport !== "stdio") {
+			const status = await getAuthStatus(server.name, server.config.url);
+			if (server.generation !== generation) return "cancelled";
+			if (!status?.hasTokens) return this._markAuthRequired(server);
 		}
 
+		let transport: Transport;
+		try {
+			transport = createTransport(server.name, server.config, appendStderr);
+		} catch (err) {
+			server.lastError = new Error(
+				`Failed to create transport: ${err instanceof Error ? err.message : String(err)}`,
+			);
+			return "failed";
+		}
+
+		const client = this._createClient(server, cwd, appendStderr);
+
+		try {
+			await client.connect(transport);
+		} catch (err) {
+			// Clean up the transport we created (client.close() also closes transport)
+			await client.close().catch(() => {});
+			if (server.generation !== generation) return "cancelled";
+			if (err instanceof UnauthorizedError) return this._markAuthRequired(server);
+			server.lastError = err instanceof Error ? err : new Error(String(err));
+			return "failed";
+		}
+
+		// Guard against shutdown being called while we were connecting.
+		// _shutdown bumps the generation but can't close the local client variable.
+		if (server.generation !== generation || server.state !== "starting") {
+			await client.close().catch(() => {});
+			return "cancelled";
+		}
+
+		// Extract PID from stdio transport for safety-net cleanup
+		if (server.config.transport === "stdio") {
+			// StdioClientTransport exposes the underlying process
+			server.childPid = (transport as unknown as { process?: { pid?: number } }).process?.pid ?? null;
+		}
+
+		server.client = client;
+		server.state = "ready";
+		server.retryCount = 0;
+		server.lastError = null;
+
+		this._startHealthCheck(server, client, cwd);
+
+		// Trigger initial tool registration
+		if (this.onToolRefresh) {
+			try {
+				await this.onToolRefresh(server.name, client);
+			} catch (err) {
+				console.error(`[pi-mcp] Initial tool registration failed for ${server.name}:`, err);
+			}
+		}
+		return "ready";
+	}
+
+	private _markAuthRequired(server: ManagedServer): ConnectOutcome {
+		server.state = "stopped";
+		server.lastError = new Error(`OAuth authorization required. Run /mcp:auth ${server.name}`);
+		this.authCallbacks?.onAuthRequired(server.name);
+		return "auth-required";
+	}
+
+	private _createClient(server: ManagedServer, cwd: string, appendStderr: (line: string) => void): Client {
 		const client = new Client(
 			{ name: "pi-mcp", version: "1.0.0" },
 			{
@@ -293,12 +398,10 @@ export class ServerManager {
 			},
 		);
 
-		// Handle roots/list requests from the server
+		// Handle roots/list requests from the server. pathToFileURL gives a valid
+		// file URI on every platform (file:///C:/... on Windows, percent-encoded).
 		client.setRequestHandler(ListRootsRequestSchema, async () => ({
-			// file:// URI for the workspace root. On Windows this produces
-			// file://C:\... which is technically non-standard but functional
-			// for the common case (MCP servers use roots as hints, not strict paths).
-			roots: [{ uri: `file://${cwd}`, name: "workspace" }],
+			roots: [{ uri: pathToFileURL(cwd).href, name: "workspace" }],
 		}));
 
 		// tools/list_changed: re-discover tools and update Pi registrations
@@ -319,97 +422,73 @@ export class ServerManager {
 			console.error(`[pi-mcp:${server.name}] [${level}] ${logger}: ${msg}`);
 			appendStderr(`[${level}] ${logger}: ${msg}`);
 		});
-
-		try {
-			await client.connect(transport);
-		} catch (err) {
-			server.state = "stopped";
-			server.lastError = err instanceof Error ? err : new Error(String(err));
-			// Clean up the transport we created (client.close() also closes transport)
-			try {
-				await client.close();
-			} catch {
-				/* best effort */
-			}
-			// Attempt retry if under the limit
-			await this._scheduleRetry(server, cwd);
-			return;
-		}
-
-		// Guard against shutdown being called while we were connecting.
-		// _shutdown sets state to "stopped" but can't close the local client variable.
-		if (server.state !== "starting") {
-			try {
-				await client.close();
-			} catch {
-				/* best effort */
-			}
-			return;
-		}
-
-		// Extract PID from stdio transport for safety-net cleanup
-		if (server.config.transport === "stdio") {
-			// StdioClientTransport exposes the underlying process
-			server.childPid = (transport as any).process?.pid ?? null;
-		}
-
-		server.client = client;
-		server.state = "ready";
-		server.retryCount = 0;
-		server.lastError = null;
-
-		// Start opt-in health check
-		if (server.config.healthCheckIntervalMs) {
-			server.healthCheckTimer = setInterval(async () => {
-				try {
-					await client.ping();
-				} catch {
-					clearInterval(server.healthCheckTimer!);
-					server.healthCheckTimer = null;
-					console.error(`[pi-mcp] Health check failed for ${server.name}, reconnecting`);
-					server.state = "stopped";
-					await this._scheduleRetry(server, cwd);
-				}
-			}, server.config.healthCheckIntervalMs);
-		}
-
-		// Trigger initial tool registration
-		if (this.onToolRefresh) {
-			try {
-				await this.onToolRefresh(server.name, client);
-			} catch (err) {
-				console.error(`[pi-mcp] Initial tool registration failed for ${server.name}:`, err);
-			}
-		}
+		return client;
 	}
 
-	private async _scheduleRetry(server: ManagedServer, cwd: string): Promise<void> {
+	/** Opt-in health check: a failed ping drops the client and reconnects in the background. */
+	private _startHealthCheck(server: ManagedServer, client: Client, cwd: string): void {
+		if (!server.config.healthCheckIntervalMs) return;
+		server.healthCheckTimer = setInterval(async () => {
+			try {
+				await client.ping();
+			} catch {
+				if (server.healthCheckTimer) clearInterval(server.healthCheckTimer);
+				server.healthCheckTimer = null;
+				if (server.client !== client) return; // already stopped or replaced
+				console.error(`[pi-mcp] Health check failed for ${server.name}, reconnecting`);
+				server.client = null;
+				server.childPid = null;
+				server.state = "starting";
+				await client.close().catch(() => {});
+				const generation = server.generation;
+				if (await this._waitForRetry(server, generation)) {
+					void this._connect(server, cwd);
+				} else if (server.generation === generation) {
+					server.state = "stopped";
+				}
+			}
+		}, server.config.healthCheckIntervalMs);
+	}
+
+	/**
+	 * Wait before the next attempt. Returns false when retries are exhausted
+	 * (state becomes "stopped") or when the wait was cancelled by stop/shutdown.
+	 */
+	private async _waitForRetry(server: ManagedServer, generation: number): Promise<boolean> {
 		const maxRetries = this.settings.maxRetries;
 		if (server.retryCount >= maxRetries) {
+			server.state = "stopped";
 			console.error(
 				`[pi-mcp] Server "${server.name}" failed after ${maxRetries} retries: ${server.lastError?.message}`,
 			);
-			return;
+			return false;
 		}
 
 		const delayMs = RETRY_DELAYS_MS[Math.min(server.retryCount, RETRY_DELAYS_MS.length - 1)] ?? 30000;
 		server.retryCount++;
 		console.error(`[pi-mcp] Retrying "${server.name}" in ${delayMs}ms (attempt ${server.retryCount}/${maxRetries})`);
 
-		await new Promise<void>((resolve) => {
+		const completed = await new Promise<boolean>((resolve) => {
 			server.retryTimer = setTimeout(() => {
 				server.retryTimer = null;
-				resolve();
+				server.cancelRetry = null;
+				resolve(true);
 			}, delayMs);
+			server.cancelRetry = () => {
+				if (server.retryTimer) clearTimeout(server.retryTimer);
+				server.retryTimer = null;
+				server.cancelRetry = null;
+				resolve(false);
+			};
 		});
-		if (server.state !== "stopped") return; // May have been stopped externally
-		await this._connect(server, cwd);
+		return completed && server.generation === generation;
 	}
 
 	private async _shutdown(server: ManagedServer): Promise<void> {
-		if (server.state === "stopped") return;
-
-		// Cancel pending retry
+		// Invalidate any in-flight connect/retry chain, then wake a pending retry wait.
+		// Done before the state check: a server waiting for a retry has no client yet.
+		server.generation++;
+		server.cancelRetry?.();
 		if (server.retryTimer) {
 			clearTimeout(server.retryTimer);
 			server.retryTimer = null;
@@ -420,6 +499,8 @@ export class ServerManager {
 			clearInterval(server.healthCheckTimer);
 			server.healthCheckTimer = null;
 		}
+
+		if (server.state === "stopped" && !server.client) return;
 
 		server.state = "stopped";
 		server.lastError = null;

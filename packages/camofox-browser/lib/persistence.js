@@ -53,8 +53,13 @@ async function persistStorageState({ profileDir, userId, context, logger = conso
   const tmpMetaPath = `${metaPath}${suffix}`;
 
   try {
-    await fs.mkdir(userDir, { recursive: true });
+    // PHI-VENDOR: storage-state.json holds live session cookies in clear text.
+    // Keep the per-user directory private (0700, also tightened when it already
+    // exists) and the files owner-only (0600). No-op beyond read-only on Windows.
+    await fs.mkdir(userDir, { recursive: true, mode: 0o700 });
+    await fs.chmod(userDir, 0o700);
     await context.storageState({ path: tmpStoragePath });
+    await fs.chmod(tmpStoragePath, 0o600);
     await fs.rename(tmpStoragePath, storageStatePath);
     await fs.writeFile(
       tmpMetaPath,
@@ -66,7 +71,8 @@ async function persistStorageState({ profileDir, userId, context, logger = conso
         },
         null,
         2
-      )
+      ),
+      { mode: 0o600 }
     );
     await fs.rename(tmpMetaPath, metaPath);
     return { persisted: true, userDir, storageStatePath, metaPath };

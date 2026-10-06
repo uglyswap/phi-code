@@ -11,7 +11,8 @@
  * - memory_write: Write content to memory files
  * - memory_read: Read specific memory files or list available ones
  * - memory_status: Get status of all memory subsystems
- * - Auto-load AGENTS.md on session start
+ * - Report AGENTS.md files on session start (notification only; the core
+ *   context loader is what injects <cwd>/AGENTS.md into the system prompt)
  *
  * Usage:
  * 1. Ensure sigma-memory package is built: cd packages/sigma-memory && npm run build
@@ -366,6 +367,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: `Memory search failed: ${error}` }],
 					details: { error: String(error), found: false, query },
+					isError: true,
 				};
 			}
 		},
@@ -426,6 +428,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: `Failed to write to memory: ${error}` }],
 					details: { error: String(error) },
+					isError: true,
 				};
 			}
 		},
@@ -491,6 +494,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: `Failed to read memory: ${error}` }],
 					details: { error: String(error), action: "read", filename: file },
+					isError: true,
 				};
 			}
 		},
@@ -636,10 +640,14 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				relations?: Array<{ fromName?: string; toName?: string; relationType?: string }>;
 			};
 			try {
-				// sigma-memory 0.2.9 has no ontology.addBatch(), so compose the batch
-				// from addEntity/addRelation. Names are resolved against one index
-				// (built once, updated as entities are added) so a relation can
-				// reference an entity created earlier in the same batch.
+				// Deliberately NOT ontology.addBatch(): addBatch always creates new
+				// entities (duplicates on re-run) and throws on the first unresolved
+				// relation endpoint, whereas this tool reuses existing entities,
+				// skips duplicate relations and reports unresolved ones. Trade-off:
+				// the batch is written entry by entry (not one atomic append).
+				// Names are resolved against one index (built once, updated as
+				// entities are added) so a relation can reference an entity created
+				// earlier in the same batch.
 				const byName = new Map<string, string>();
 				for (const e of sigmaMemory.ontology.findEntity({})) byName.set(e.name.toLowerCase(), e.id);
 
@@ -853,6 +861,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: `Failed to get memory status: ${error}` }],
 					details: { error: String(error) },
+					isError: true,
 				};
 			}
 		},
@@ -919,26 +928,29 @@ violates project rules.
 	});
 
 	/**
-	 * Auto-load AGENTS.md on session start
+	 * Report AGENTS.md files on session start (nothing is loaded here)
 	 * Checks both project directory and ~/.phi/memory/
 	 */
 	pi.on("session_start", async (_event, ctx) => {
 		try {
+			// This handler only REPORTS the file: <cwd>/AGENTS.md is injected into
+			// the system prompt by the core context loader (unless context files are
+			// disabled); the two other locations are not injected by anyone, the
+			// model has to open them with the read tool.
 			const locations = [
-				join(process.cwd(), "AGENTS.md"),
-				join(process.cwd(), ".phi", "AGENTS.md"),
-				join(sigmaMemory.getConfig().memoryDir, "AGENTS.md"),
+				{ path: join(ctx.cwd, "AGENTS.md"), injectedByCore: true },
+				{ path: join(ctx.cwd, ".phi", "AGENTS.md"), injectedByCore: false },
+				{ path: join(sigmaMemory.getConfig().memoryDir, "AGENTS.md"), injectedByCore: false },
 			];
 
-			for (const agentsPath of locations) {
+			for (const { path: agentsPath, injectedByCore } of locations) {
 				try {
 					await access(agentsPath);
 					const content = readFileSync(agentsPath, "utf-8");
 					if (content.trim()) {
-						// Notify user that persistent instructions were loaded
 						const lineCount = content.split("\n").length;
-						ctx.ui.notify(`📝 Loaded AGENTS.md (${lineCount} lines) from ${agentsPath}`, "info");
-						// The content is available via memory_read tool — the model can access it
+						const note = injectedByCore ? "" : " (not loaded into the prompt automatically; use the read tool)";
+						ctx.ui.notify(`📝 Found AGENTS.md (${lineCount} lines) at ${agentsPath}${note}`, "info");
 						break;
 					}
 				} catch {

@@ -30,7 +30,10 @@ export interface LiveModel {
 	name?: string;
 	contextWindow?: number;
 	maxTokens?: number;
+	/** undefined = the provider did not say (toPersistedModel then defaults). */
 	reasoning?: boolean;
+	/** Input modalities when known; persisted as-is (defaults to text only). */
+	input?: ("text" | "image")[];
 }
 
 export type LiveModelSource = "live" | "cache" | "fallback" | "unsupported";
@@ -87,6 +90,8 @@ interface OpenAIModelsResponse {
 		max_tokens?: number;
 		top_provider?: { context_length?: number; max_completion_tokens?: number };
 		supported_parameters?: string[];
+		/** OpenRouter: architecture.input_modalities (e.g. ["text", "image"]). */
+		architecture?: { input_modalities?: string[] };
 	}>;
 }
 
@@ -97,13 +102,26 @@ function mapOpenAIModels(data: OpenAIModelsResponse): LiveModel[] {
 		.map((m) => {
 			const ctx = m.context_length ?? m.context_window ?? m.top_provider?.context_length;
 			const maxOut = m.max_tokens ?? m.top_provider?.max_completion_tokens;
-			const reasoning = (m.supported_parameters ?? []).includes("reasoning");
+			// Only conclude "no reasoning" when the endpoint lists its parameters
+			// (OpenRouter does; OpenAI's /v1/models does not). Unknown stays
+			// undefined so the caller's family inference / default applies,
+			// instead of every OpenAI model being persisted with reasoning:false.
+			const reasoning = Array.isArray(m.supported_parameters)
+				? m.supported_parameters.includes("reasoning")
+				: undefined;
+			const modalities = m.architecture?.input_modalities;
+			const input: LiveModel["input"] = Array.isArray(modalities)
+				? modalities.includes("image")
+					? ["text", "image"]
+					: ["text"]
+				: undefined;
 			return {
 				id: m.id,
 				name: m.name ?? m.id,
 				contextWindow: typeof ctx === "number" && ctx > 0 ? ctx : undefined,
 				maxTokens: typeof maxOut === "number" && maxOut > 0 ? maxOut : undefined,
 				reasoning,
+				input,
 			};
 		});
 }
@@ -122,6 +140,8 @@ function mapAnthropicModels(data: AnthropicModelsResponse): LiveModel[] {
 			id: m.id,
 			name: m.display_name ?? m.id,
 			reasoning: true,
+			// Every Claude model the /v1/models endpoint lists accepts images.
+			input: ["text", "image"],
 		}));
 }
 
@@ -148,7 +168,23 @@ function mapGoogleModels(data: GoogleModelsResponse): LiveModel[] {
 			contextWindow: m.inputTokenLimit,
 			maxTokens: m.outputTokenLimit,
 			reasoning: true,
+			// Gemini generateContent models are multimodal.
+			input: ["text", "image"],
 		}));
+}
+
+// ─── OpenAI capability inference ─────────────────────────────────────────────
+
+/**
+ * OpenAI's /v1/models reports neither reasoning nor vision. Infer them by
+ * family: o-series and GPT-5 reason; GPT-4o/4.1/4-turbo, GPT-5 and the full
+ * o1/o3/o4 models accept images (the "-mini" o1/o3 variants do not).
+ */
+export function withOpenAICapabilities(m: LiveModel): LiveModel {
+	const id = m.id.toLowerCase();
+	const reasoning = m.reasoning ?? /^(o\d|gpt-5)/.test(id);
+	const vision = /^(gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|o4)/.test(id) || /^o[13](?!-mini)(-|$)/.test(id);
+	return { ...m, reasoning, input: m.input ?? (vision ? ["text", "image"] : ["text"]) };
 }
 
 // ─── Static fallbacks ────────────────────────────────────────────────────────
@@ -234,7 +270,7 @@ function staticFallbackFor(providerId: string): LiveModel[] {
 				reasoning: m.reasoning,
 			}));
 		case "openai":
-			return STATIC_OPENAI;
+			return STATIC_OPENAI.map(withOpenAICapabilities);
 		case "anthropic":
 			return STATIC_ANTHROPIC;
 		case "google":
@@ -256,7 +292,7 @@ async function fetchOpenAI(apiKey: string, timeoutMs: number): Promise<LiveModel
 		{ Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
 		timeoutMs,
 	)) as OpenAIModelsResponse;
-	return mapOpenAIModels(raw);
+	return mapOpenAIModels(raw).map(withOpenAICapabilities);
 }
 
 async function fetchAnthropic(apiKey: string, timeoutMs: number): Promise<LiveModel[]> {
@@ -300,7 +336,8 @@ async function fetchGroq(apiKey: string, timeoutMs: number): Promise<LiveModel[]
 		{ Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
 		timeoutMs,
 	)) as OpenAIModelsResponse;
-	return mapOpenAIModels(raw);
+	// Groq lists no parameters: keep the previous "no reasoning" default.
+	return mapOpenAIModels(raw).map((m) => ({ ...m, reasoning: m.reasoning ?? false }));
 }
 
 async function fetchAlibaba(apiKey: string, timeoutMs: number): Promise<LiveModel[]> {
@@ -322,7 +359,7 @@ async function fetchAlibaba(apiKey: string, timeoutMs: number): Promise<LiveMode
 					maxTokens: m.maxTokens ?? spec.maxTokens,
 					reasoning: m.reasoning ?? spec.reasoning,
 				}
-			: m;
+			: { ...m, reasoning: m.reasoning ?? false };
 	});
 }
 
@@ -469,7 +506,7 @@ export interface PersistedModel {
 	id: string;
 	name: string;
 	reasoning: boolean;
-	input: readonly ["text"];
+	input: readonly ("text" | "image")[];
 	contextWindow: number;
 	maxTokens: number;
 }
@@ -479,7 +516,8 @@ export function toPersistedModel(m: LiveModel): PersistedModel {
 		id: m.id,
 		name: m.name ?? m.id,
 		reasoning: m.reasoning ?? true,
-		input: ["text"] as const,
+		// Keep known vision support (it used to be dropped to text-only).
+		input: m.input?.length ? [...m.input] : ["text"],
 		// Infer by model family when the provider API omits the window, instead of
 		// collapsing large-context models (Qwen/MiniMax/Gemini/...) to a flat 128k.
 		contextWindow: inferContextWindow(m.id, m.contextWindow),

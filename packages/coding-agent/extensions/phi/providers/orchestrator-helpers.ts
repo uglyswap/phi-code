@@ -102,3 +102,43 @@ export function isTransientError(messages: readonly unknown[]): boolean {
 	}
 	return false;
 }
+
+/** Minimal model shape needed to resolve a routing.json reference. */
+export interface ModelRefCandidate {
+	id: string;
+	provider: string;
+}
+
+/**
+ * Resolve a routing.json model reference to an available model.
+ * Accepts a provider-qualified "provider/id" reference (so the same model id
+ * offered by several providers can be disambiguated) and falls back to a bare
+ * "id" for legacy configs. Splits on the FIRST slash only, since some model
+ * ids themselves contain slashes (e.g. OpenRouter "anthropic/claude-...").
+ * Shared by the orchestrator and the smart router (routing.json is written
+ * with "provider/id" refs by /setup and /plan-models).
+ */
+export function resolveModelRef<T extends ModelRefCandidate>(available: readonly T[], ref: string): T | undefined {
+	if (!ref) return undefined;
+	const slash = ref.indexOf("/");
+	if (slash > 0) {
+		const provider = ref.slice(0, slash);
+		const id = ref.slice(slash + 1);
+		const qualified = available.find((m) => m.provider === provider && m.id === id);
+		if (qualified) return qualified;
+	}
+	return available.find((m) => m.id === ref);
+}
+
+/**
+ * System prompt for an orchestration phase: the session's assembled base
+ * prompt (project context files, skills, tool guidelines, cwd/date) followed
+ * by the phase agent's persona. before_agent_start's `systemPrompt` result
+ * REPLACES the prompt for the turn, so the persona must be composed with the
+ * base instead of returned alone.
+ */
+export function composePhaseSystemPrompt(basePrompt: string | undefined, persona: string): string {
+	const base = typeof basePrompt === "string" ? basePrompt.trimEnd() : "";
+	const section = `# Orchestration phase agent\n\nFor this phase you act as the agent below. Its instructions take precedence over the general guidance above when they conflict.\n\n${persona.trim()}`;
+	return base ? `${base}\n\n${section}` : section;
+}

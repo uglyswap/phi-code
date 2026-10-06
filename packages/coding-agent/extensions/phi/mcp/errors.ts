@@ -8,7 +8,8 @@ export type McpErrorCode =
 	| "config" // Configuration loading or validation failed
 	| "connection" // Transport/connection failed
 	| "protocol" // JSON-RPC protocol violation (server error response, timeout, etc.)
-	| "tool"; // Tool execution error (isError: true from server)
+	| "tool" // Tool execution error (isError: true from server)
+	| "auth"; // OAuth authorization required (run /mcp:auth)
 
 export class McpError extends Error {
 	public readonly server: string;

@@ -34,7 +34,7 @@ import {
 	pingAlibaba,
 	validateAlibabaApiKey,
 } from "./providers/alibaba.ts";
-import { getProviderCatalog, type ProviderCatalogEntry } from "./providers/catalog.ts";
+import { catalogEnvKey, getProviderCatalog, type ProviderCatalogEntry } from "./providers/catalog.ts";
 import { fetchLiveModels, pingProvider, toPersistedModel } from "./providers/live-models.ts";
 import {
 	buildOpenCodeGoAnthropicProviderConfig,
@@ -600,7 +600,7 @@ export async function runSetupWizard(ui: ExtensionUIContext): Promise<void> {
 					available.set(p.id, { source, modelCount });
 					continue;
 				}
-				if (!p.local && process.env[p.envVar]) {
+				if (!p.local && catalogEnvKey(p)) {
 					available.set(p.id, { source: "env", modelCount: p.staticModels.length });
 				}
 			}

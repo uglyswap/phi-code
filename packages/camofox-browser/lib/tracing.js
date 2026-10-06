@@ -13,7 +13,10 @@ export function userTracesDir(baseDir, userId) {
 
 export function ensureTracesDir(baseDir, userId) {
   const dir = userTracesDir(baseDir, userId);
-  fs.mkdirSync(dir, { recursive: true });
+  // PHI-VENDOR: traces embed page screenshots and DOM snapshots (possibly of
+  // logged-in pages): keep the per-user trace directory owner-only.
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(dir, 0o700);
   return dir;
 }
 

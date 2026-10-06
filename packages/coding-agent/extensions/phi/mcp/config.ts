@@ -125,6 +125,26 @@ export type ServerConfig = z.output<typeof ServerConfigSchema>;
 export type Settings = z.output<typeof SettingsSchema>;
 export type McpConfig = z.output<typeof McpConfigSchema>;
 
+/** A valid config with no servers and default settings. */
+export function createEmptyConfig(): McpConfig {
+	return McpConfigSchema.parse({});
+}
+
+/**
+ * Validate one server entry against the phi schema.
+ * Returns the parsed entry, or the list of issues when it is invalid.
+ */
+export function validateServerConfig(
+	raw: unknown,
+): { ok: true; config: ServerConfig } | { ok: false; issues: string[] } {
+	const result = ServerConfigSchema.safeParse(raw);
+	if (result.success) return { ok: true, config: result.data };
+	return {
+		ok: false,
+		issues: result.error.issues.map((i) => (i.path.length ? `${i.path.join(".")}: ${i.message}` : i.message)),
+	};
+}
+
 // ─── Loader ───────────────────────────────────────────────────────────────────
 
 async function readJsonFile(path: string): Promise<unknown | null> {

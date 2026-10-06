@@ -14,6 +14,7 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "phi-code";
 import type { RoutingConfig } from "sigma-agents";
 import { SmartRouter } from "sigma-agents";
+import { resolveModelRef } from "./providers/orchestrator-helpers.ts";
 
 // ─── Extension Config ────────────────────────────────────────────────────
 
@@ -80,13 +81,13 @@ export default function smartRouterExtension(pi: ExtensionAPI) {
 		const recommendation = router.getRecommendation(event.text);
 
 		if (recommendation.category !== "general") {
-			// Find the recommended model in the registry
+			// Find the recommended model in the registry. routing.json refs are
+			// "provider/id" (written by /setup and /plan-models): comparing them to
+			// a bare m.id never matched, so auto-switch could never fire.
 			const available = ctx.modelRegistry?.getAvailable?.() || [];
-			const targetModel = available.find((m: any) => m.id === recommendation.model);
+			const targetModel = resolveModelRef(available, recommendation.model);
 			const fallbackRoute = (router as any).config?.routes?.[recommendation.category];
-			const fallbackModel = fallbackRoute?.fallback
-				? available.find((m: any) => m.id === fallbackRoute.fallback)
-				: undefined;
+			const fallbackModel = fallbackRoute?.fallback ? resolveModelRef(available, fallbackRoute.fallback) : undefined;
 
 			const modelToUse = targetModel || fallbackModel;
 
@@ -97,14 +98,14 @@ export default function smartRouterExtension(pi: ExtensionAPI) {
 						"info",
 					);
 				}
-			} else if (modelToUse.id === ctx.model?.id) {
+			} else if (modelToUse.id === ctx.model?.id && modelToUse.provider === ctx.model?.provider) {
 				// Already on the recommended model — nothing to do.
 			} else if (extConfig.autoSwitch) {
 				// Legacy opt-in behavior: actually swap the chat model.
 				const switched = await pi.setModel(modelToUse);
 				if (switched && extConfig.notifyOnRecommendation) {
 					ctx.ui.notify(
-						`Auto-switched (${recommendation.category}) → \`${modelToUse.id}\`${modelToUse.id !== recommendation.model ? " (fallback)" : ""}`,
+						`Auto-switched (${recommendation.category}) → \`${modelToUse.id}\`${modelToUse !== targetModel ? " (fallback)" : ""}`,
 						"info",
 					);
 				}
@@ -218,15 +219,25 @@ export default function smartRouterExtension(pi: ExtensionAPI) {
 
 	// ─── Session Start ───────────────────────────────────────────────
 
+	// One listener at a time: session_start fires again on /new, /resume and
+	// /fork, and re-registering there stacked one more listener (one more
+	// reload) per session switch. Released on session_shutdown.
+	let unsubscribeRouting: (() => void) | undefined;
+
 	pi.on("session_start", async (_event, _ctx) => {
 		await loadConfig();
 		// Listen for routing.json file-watcher events (emitted by keys.ts extension).
 		// This implements Q9 strategy A: auto-reload SmartRouter when routing.json
 		// changes on disk, no /routing reload command needed.
-		pi.events.on("routing_json_changed", () => {
+		unsubscribeRouting ??= pi.events.on("routing_json_changed", () => {
 			loadConfig().catch(() => {
 				// If reload fails, keep the in-memory config rather than wiping it
 			});
 		});
+	});
+
+	pi.on("session_shutdown", async () => {
+		unsubscribeRouting?.();
+		unsubscribeRouting = undefined;
 	});
 }

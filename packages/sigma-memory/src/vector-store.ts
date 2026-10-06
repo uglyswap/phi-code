@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "fs";
 import { dirname } from "path";
-import initSqlJs, { type Database } from "sql.js";
+import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
+import { withFileLockSync } from "./file-lock.ts";
 import type { VectorSearchResult } from "./types.ts";
 
 /**
@@ -24,14 +25,28 @@ function vlog(message: string): void {
  *
  * Zero configuration — works out of the box on any platform.
  * No native compilation required.
+ *
+ * Persistence: the DB lives in memory (sql.js) and is written to disk as a
+ * whole image. Several phi processes may share the same vectors.db, so every
+ * write is a read-modify-write under an inter-process lock (same mechanism as
+ * the ontology graph): if another process changed the file since we last read
+ * it, the image is reloaded and our pending mutations are replayed on top of
+ * it before writing, so neither side's documents are lost. Writes can be
+ * grouped with batch() to export the image once instead of once per document.
  */
 export class VectorStore {
 	private db: Database | null = null;
+	private SQL: SqlJsStatic | null = null;
 	private pipeline: any = null;
 	private dbPath: string;
 	private initialized = false;
 	private initPromise: Promise<void> | null = null;
 	private modelPromise: Promise<void> | null = null;
+	/** mtime+size of vectors.db when we last read or wrote it; null when absent. */
+	private diskSignature: string | null = null;
+	/** Mutations applied in memory but not yet written to disk (replayed after a reload). */
+	private pending: Array<(db: Database) => void> = [];
+	private batchDepth = 0;
 
 	constructor(dbPath: string) {
 		this.dbPath = dbPath;
@@ -58,28 +73,20 @@ export class VectorStore {
 		}
 
 		// Initialize sql.js (loads WASM automatically)
-		const SQL = await initSqlJs();
+		this.SQL = await initSqlJs();
 
-		// Load existing DB or create a new one. If the on-disk image is
-		// corrupt (e.g. a previous crash left a truncated file), fall back to
-		// a fresh DB so the store self-heals rather than staying permanently
-		// dead behind a swallowed catch upstream.
-		if (existsSync(this.dbPath)) {
-			try {
-				const fileBuffer = readFileSync(this.dbPath);
-				this.db = new SQL.Database(fileBuffer);
-			} catch (error) {
-				vlog(
-					`[VectorStore] Failed to load existing DB at ${this.dbPath} (${error instanceof Error ? error.message : String(error)}); starting from a fresh database.`,
-				);
-				this.db = new SQL.Database();
-			}
-		} else {
-			this.db = new SQL.Database();
-		}
+		withFileLockSync(this.dbPath, () => {
+			const healthy = this.loadFromDisk();
+			// Write only when there is no usable image yet (first run, or a
+			// corrupt file replaced by a fresh DB). Re-writing an intact image
+			// on every start would race with other processes for nothing.
+			if (!healthy) this.persist();
+		});
+		this.initialized = true;
+	}
 
-		// Create schema
-		this.db.run(`
+	private static ensureSchema(db: Database): void {
+		db.run(`
       CREATE TABLE IF NOT EXISTS documents (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         file TEXT NOT NULL,
@@ -90,12 +97,102 @@ export class VectorStore {
         UNIQUE(file, chunk_index)
       )
     `);
-
 		// Index for fast file lookups
-		this.db.run("CREATE INDEX IF NOT EXISTS idx_documents_file ON documents(file)");
+		db.run("CREATE INDEX IF NOT EXISTS idx_documents_file ON documents(file)");
+	}
 
-		this.persist();
-		this.initialized = true;
+	/** Cheap change detector for the on-disk image (null when the file is absent). */
+	private readDiskSignature(): string | null {
+		try {
+			const stats = statSync(this.dbPath);
+			return `${stats.mtimeMs}:${stats.size}`;
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * (Re)load the in-memory DB from the on-disk image. Returns false when no
+	 * usable image exists (absent, or corrupt: e.g. a previous crash left a
+	 * truncated file); a fresh DB is used then, so the store self-heals rather
+	 * than staying permanently dead behind a swallowed catch upstream.
+	 */
+	private loadFromDisk(): boolean {
+		if (!this.SQL) throw new Error("VectorStore not initialized. Call init() first.");
+		const signature = this.readDiskSignature();
+		let db: Database;
+		let healthy = false;
+		if (signature !== null) {
+			try {
+				db = new this.SQL.Database(readFileSync(this.dbPath));
+				VectorStore.ensureSchema(db);
+				healthy = true;
+			} catch (error) {
+				vlog(
+					`[VectorStore] Failed to load existing DB at ${this.dbPath} (${error instanceof Error ? error.message : String(error)}); starting from a fresh database.`,
+				);
+				db = new this.SQL.Database();
+				VectorStore.ensureSchema(db);
+			}
+		} else {
+			db = new this.SQL.Database();
+			VectorStore.ensureSchema(db);
+		}
+		this.db?.close();
+		this.db = db;
+		this.diskSignature = signature;
+		return healthy;
+	}
+
+	/**
+	 * Pick up writes made by another process since we last read or wrote the
+	 * file. Only done when nothing is pending: pending mutations are replayed
+	 * on the fresh image by commit() instead.
+	 */
+	private refreshFromDisk(): void {
+		if (!this.db || this.pending.length > 0) return;
+		if (this.readDiskSignature() === this.diskSignature) return;
+		withFileLockSync(this.dbPath, () => {
+			this.loadFromDisk();
+		});
+	}
+
+	/** Apply a mutation now (in memory) and write it to disk unless a batch is open. */
+	private mutate(apply: (db: Database) => void): void {
+		if (!this.db) throw new Error("VectorStore not initialized. Call init() first.");
+		apply(this.db);
+		this.pending.push(apply);
+		if (this.batchDepth === 0) this.commit();
+	}
+
+	/**
+	 * Write pending mutations: under the file lock, reload the on-disk image if
+	 * another process changed it, replay our mutations on top, then write.
+	 */
+	private commit(): void {
+		if (!this.db || this.pending.length === 0) return;
+		withFileLockSync(this.dbPath, () => {
+			if (this.readDiskSignature() !== this.diskSignature) {
+				this.loadFromDisk();
+				for (const apply of this.pending) apply(this.db as Database);
+			}
+			this.persist();
+		});
+		this.pending = [];
+	}
+
+	/**
+	 * Group the writes made inside fn into a single disk write (one export of
+	 * the whole DB image instead of one per document). Nested calls are merged.
+	 */
+	async batch<T>(fn: () => Promise<T>): Promise<T> {
+		this.batchDepth++;
+		try {
+			return await fn();
+		} finally {
+			this.batchDepth--;
+			if (this.batchDepth === 0) this.commit();
+		}
 	}
 
 	/**
@@ -143,7 +240,7 @@ export class VectorStore {
 	}
 
 	/**
-	 * Persist the in-memory SQLite database to disk.
+	 * Persist the in-memory SQLite database to disk. Callers hold the file lock.
 	 */
 	private persist(): void {
 		if (!this.db) return;
@@ -159,6 +256,8 @@ export class VectorStore {
 		const tmpPath = `${this.dbPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 		writeFileSync(tmpPath, buffer);
 		renameSync(tmpPath, this.dbPath);
+		// Our own write must not look like an external change.
+		this.diskSignature = this.readDiskSignature();
 	}
 
 	/**
@@ -275,33 +374,59 @@ export class VectorStore {
 		return dotProduct / denominator;
 	}
 
+	/** Stored chunk texts for a file, in chunk order. */
+	private storedChunks(file: string): string[] {
+		if (!this.db) return [];
+		const stmt = this.db.prepare("SELECT content FROM documents WHERE file = ? ORDER BY chunk_index");
+		try {
+			stmt.bind([file]);
+			const contents: string[] = [];
+			while (stmt.step()) contents.push(String(stmt.get()[0]));
+			return contents;
+		} finally {
+			stmt.free();
+		}
+	}
+
 	/**
 	 * Add a document to the vector store.
 	 * Chunks the content, embeds each chunk, and stores in the DB.
-	 * Replaces any existing chunks for this file.
+	 * Replaces any existing chunks for this file. A document whose chunks are
+	 * already stored unchanged is skipped (no re-embedding, no disk write), so
+	 * re-indexing all notes at startup only embeds new or modified notes.
+	 * Resolves to true when the document was (re)indexed.
 	 */
-	async addDocument(file: string, content: string): Promise<void> {
+	async addDocument(file: string, content: string): Promise<boolean> {
 		if (!this.db) throw new Error("VectorStore not initialized. Call init() first.");
 
 		const chunks = this.chunkText(content);
-		if (chunks.length === 0) return;
+		if (chunks.length === 0) return false;
 
-		// Remove existing chunks for this file
-		this.db.run("DELETE FROM documents WHERE file = ?", [file]);
+		this.refreshFromDisk();
+		const stored = this.storedChunks(file);
+		if (stored.length === chunks.length && stored.every((text, i) => text === chunks[i])) return false;
 
-		// Embed and insert each chunk
-		for (let i = 0; i < chunks.length; i++) {
-			const embedding = await this.embed(chunks[i]);
-			const embeddingBlob = this.serializeEmbedding(embedding);
-			const now = new Date().toISOString();
-
-			this.db.run(
-				"INSERT INTO documents (file, chunk_index, content, embedding, updated_at) VALUES (?, ?, ?, ?, ?)",
-				[file, i, chunks[i], embeddingBlob as any, now],
-			);
+		// Embed outside the lock (slow), then apply the replace in one mutation.
+		const blobs: Uint8Array[] = [];
+		for (const chunk of chunks) {
+			blobs.push(this.serializeEmbedding(await this.embed(chunk)));
 		}
+		const now = new Date().toISOString();
 
-		this.persist();
+		this.mutate((db) => {
+			// Remove existing chunks for this file
+			db.run("DELETE FROM documents WHERE file = ?", [file]);
+			for (let i = 0; i < chunks.length; i++) {
+				db.run("INSERT INTO documents (file, chunk_index, content, embedding, updated_at) VALUES (?, ?, ?, ?, ?)", [
+					file,
+					i,
+					chunks[i],
+					blobs[i] as any,
+					now,
+				]);
+			}
+		});
+		return true;
 	}
 
 	/**
@@ -316,6 +441,7 @@ export class VectorStore {
 
 		// Embed the query
 		const queryEmbedding = await this.embed(query);
+		this.refreshFromDisk();
 
 		// Load all documents with embeddings
 		const results = this.db.exec("SELECT file, chunk_index, content, embedding FROM documents");
@@ -355,8 +481,9 @@ export class VectorStore {
 	async removeDocument(file: string): Promise<void> {
 		if (!this.db) throw new Error("VectorStore not initialized. Call init() first.");
 
-		this.db.run("DELETE FROM documents WHERE file = ?", [file]);
-		this.persist();
+		this.mutate((db) => {
+			db.run("DELETE FROM documents WHERE file = ?", [file]);
+		});
 	}
 
 	/**
@@ -366,15 +493,18 @@ export class VectorStore {
 	async reindex(files: Map<string, string>): Promise<void> {
 		if (!this.db) throw new Error("VectorStore not initialized. Call init() first.");
 
-		// Clear all existing documents
-		this.db.run("DELETE FROM documents");
+		// One disk write for the whole reindex.
+		await this.batch(async () => {
+			// Clear all existing documents
+			this.mutate((db) => {
+				db.run("DELETE FROM documents");
+			});
 
-		// Re-add all files
-		for (const [file, content] of files) {
-			await this.addDocument(file, content);
-		}
-
-		this.persist();
+			// Re-add all files
+			for (const [file, content] of files) {
+				await this.addDocument(file, content);
+			}
+		});
 	}
 
 	/**
@@ -384,6 +514,7 @@ export class VectorStore {
 		if (!this.db) {
 			return { documentCount: 0, chunkCount: 0, lastUpdate: "" };
 		}
+		this.refreshFromDisk();
 
 		const countResult = this.db.exec("SELECT COUNT(DISTINCT file) as docs, COUNT(*) as chunks FROM documents");
 		const updateResult = this.db.exec("SELECT MAX(updated_at) as last_update FROM documents");
@@ -403,14 +534,19 @@ export class VectorStore {
 	}
 
 	/**
-	 * Close the database connection and persist to disk.
+	 * Close the database connection, writing any pending (batched) changes.
+	 * Nothing is written when nothing changed: blindly re-exporting the image
+	 * would overwrite documents added meanwhile by another process.
 	 */
 	close(): void {
 		if (this.db) {
-			this.persist();
+			this.commit();
 			this.db.close();
 			this.db = null;
 		}
+		this.pending = [];
+		this.batchDepth = 0;
+		this.diskSignature = null;
 		// Release the embedding pipeline so the ONNX session/tensors can be
 		// freed. Keep close() synchronous: dispose best-effort, fire-and-forget.
 		const p = this.pipeline;

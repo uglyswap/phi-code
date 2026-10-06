@@ -15,6 +15,10 @@ interface ActiveGoal {
 	updatedAt: number;
 	iteration: number;
 	tokenBudget?: number;
+	/** Explicit cap on agent runs (`--max-iterations`); see resolveMaxIterations. */
+	maxIterations?: number;
+	/** Iteration count when the goal was last started or resumed; the cap counts from here. */
+	iterationBase?: number;
 	tokensUsed: number;
 	timeUsedSeconds: number;
 	baselineTokens: number;
@@ -46,6 +50,7 @@ interface CommandResult {
 	kind: "show" | "start" | "pause" | "resume" | "clear" | "edit";
 	objective?: string;
 	tokenBudget?: number;
+	maxIterations?: number;
 }
 
 interface StatusContext {
@@ -65,6 +70,13 @@ const GOAL_STATE_ENTRY_TYPE = "goal-state";
 const MAX_OBJECTIVE_LENGTH = 4_000;
 const MAX_CANCELLED_CONTINUATION_PROMPTS = 20;
 const CONTINUATION_MARKER_PREFIX = "pi-goal-continuation:";
+/**
+ * Default cap on agent runs for a goal WITHOUT a token budget, so a goal that
+ * never calls goal_complete cannot loop forever. Override per goal with
+ * `--max-iterations N`, or globally with PHI_GOAL_MAX_ITERATIONS (0 = no cap).
+ */
+export const DEFAULT_MAX_ITERATIONS = 50;
+const MAX_ITERATIONS_ENV = "PHI_GOAL_MAX_ITERATIONS";
 const STATE_FILE = join(getAgentDir(), "pi-goal-state.json");
 
 let activeGoal: ActiveGoal | undefined;
@@ -118,7 +130,7 @@ export default function goal(pi: ExtensionAPI) {
 	pi.registerTool(goalCompleteTool);
 
 	pi.registerCommand("goal", {
-		description: "Run a goal to completion: /goal [--tokens 100k] <goal_to_complete>",
+		description: "Run a goal to completion: /goal [--tokens 100k] [--max-iterations 50] <goal_to_complete>",
 		handler: async (args, ctx) => {
 			const result = parseCommand(args);
 			if (typeof result === "string") {
@@ -140,10 +152,10 @@ export default function goal(pi: ExtensionAPI) {
 					clearGoal(ctx);
 					return;
 				case "edit":
-					await editGoal(result.objective ?? "", result.tokenBudget, pi, ctx);
+					await editGoal(result.objective ?? "", result.tokenBudget, result.maxIterations, pi, ctx);
 					return;
 				case "start":
-					await startGoal(result.objective ?? "", result.tokenBudget, pi, ctx);
+					await startGoal(result.objective ?? "", result.tokenBudget, result.maxIterations, pi, ctx);
 					return;
 			}
 		},
@@ -202,6 +214,18 @@ export default function goal(pi: ExtensionAPI) {
 			return;
 		}
 
+		if (iterationLimitReached(activeGoal)) {
+			cancelContinuationPending();
+			activeGoal = transitionGoal(activeGoal, "paused");
+			persistGoal(activeGoal);
+			updateStatus(ctx, activeGoal);
+			ctx.ui.notify(
+				`Goal paused after ${activeGoal.iteration - (activeGoal.iterationBase ?? 0)} runs (iteration limit ${resolveMaxIterations(activeGoal)}). Run /goal resume to continue.`,
+				"warning",
+			);
+			return;
+		}
+
 		persistGoal(activeGoal);
 		updateStatus(ctx, activeGoal);
 
@@ -217,7 +241,13 @@ export default function goal(pi: ExtensionAPI) {
 	});
 }
 
-async function startGoal(objective: string, tokenBudget: number | undefined, pi: ExtensionAPI, ctx: StatusContext) {
+async function startGoal(
+	objective: string,
+	tokenBudget: number | undefined,
+	maxIterations: number | undefined,
+	pi: ExtensionAPI,
+	ctx: StatusContext,
+) {
 	const validationError = validateObjective(objective);
 	if (validationError) {
 		ctx.ui.notify(validationError, "warning");
@@ -237,7 +267,7 @@ async function startGoal(objective: string, tokenBudget: number | undefined, pi:
 	}
 
 	cancelContinuationPending();
-	activeGoal = createGoal(objective, tokenBudget, currentTokenTotal(ctx));
+	activeGoal = createGoal(objective, tokenBudget, currentTokenTotal(ctx), maxIterations);
 	persistGoal(activeGoal);
 	updateStatus(ctx, activeGoal);
 	ctx.ui.notify(existingGoal ? `Goal replaced: ${objective}` : `Goal started: ${objective}`, "info");
@@ -269,7 +299,8 @@ async function resumeGoal(pi: ExtensionAPI, ctx: StatusContext) {
 		ctx.ui.notify(`Goal is ${activeGoal.status}; only paused or budget-limited goals can be resumed.`, "warning");
 		return;
 	}
-	activeGoal = transitionGoal(activeGoal, "active");
+	// A resume grants a fresh iteration allowance (the cap counts from here).
+	activeGoal = transitionGoal({ ...activeGoal, iterationBase: activeGoal.iteration }, "active");
 	persistGoal(activeGoal);
 	updateStatus(ctx, activeGoal);
 	if (activeGoal.status !== "active") {
@@ -294,7 +325,13 @@ function clearGoal(ctx: StatusContext) {
 	ctx.ui.notify(`Goal cleared: ${stoppedGoal}`, "warning");
 }
 
-async function editGoal(objective: string, tokenBudget: number | undefined, pi: ExtensionAPI, ctx: StatusContext) {
+async function editGoal(
+	objective: string,
+	tokenBudget: number | undefined,
+	maxIterations: number | undefined,
+	pi: ExtensionAPI,
+	ctx: StatusContext,
+) {
 	const validationError = validateObjective(objective);
 	if (validationError) {
 		ctx.ui.notify(validationError, "warning");
@@ -312,6 +349,7 @@ async function editGoal(objective: string, tokenBudget: number | undefined, pi: 
 		text: objective,
 		status: editedGoalStatus(activeGoal.status),
 		tokenBudget: tokenBudget ?? activeGoal.tokenBudget,
+		maxIterations: maxIterations ?? activeGoal.maxIterations,
 		updatedAt: Date.now(),
 	});
 	persistGoal(activeGoal);
@@ -332,7 +370,12 @@ function showGoal(ctx: StatusContext) {
 	ctx.ui.notify(goalSummary(activeGoal), "info");
 }
 
-function createGoal(text: string, tokenBudget: number | undefined, baselineTokens: number): ActiveGoal {
+function createGoal(
+	text: string,
+	tokenBudget: number | undefined,
+	baselineTokens: number,
+	maxIterations?: number,
+): ActiveGoal {
 	const now = Date.now();
 	return {
 		id: randomUUID(),
@@ -342,6 +385,8 @@ function createGoal(text: string, tokenBudget: number | undefined, baselineToken
 		updatedAt: now,
 		iteration: 0,
 		tokenBudget,
+		maxIterations,
+		iterationBase: 0,
 		tokensUsed: 0,
 		timeUsedSeconds: 0,
 		baselineTokens,
@@ -361,6 +406,33 @@ function normalizeGoalForBudget(goal: ActiveGoal): ActiveGoal {
 		return { ...goal, status: "budget_limited" };
 	}
 	return goal;
+}
+
+/**
+ * Effective iteration cap: the explicit per-goal value, else no cap when a token
+ * budget already bounds the goal, else PHI_GOAL_MAX_ITERATIONS or
+ * DEFAULT_MAX_ITERATIONS. 0 means unlimited.
+ */
+export function resolveMaxIterations(
+	goal: Pick<ActiveGoal, "maxIterations" | "tokenBudget">,
+	env: NodeJS.ProcessEnv = process.env,
+): number | undefined {
+	const cap = goal.maxIterations ?? (goal.tokenBudget !== undefined ? undefined : defaultMaxIterations(env));
+	return cap === undefined || cap <= 0 ? undefined : cap;
+}
+
+function defaultMaxIterations(env: NodeJS.ProcessEnv): number {
+	const raw = env[MAX_ITERATIONS_ENV]?.trim();
+	if (raw && /^\d+$/.test(raw)) return Number(raw);
+	return DEFAULT_MAX_ITERATIONS;
+}
+
+export function iterationLimitReached(
+	goal: Pick<ActiveGoal, "maxIterations" | "tokenBudget" | "iteration" | "iterationBase">,
+	env: NodeJS.ProcessEnv = process.env,
+): boolean {
+	const cap = resolveMaxIterations(goal, env);
+	return cap !== undefined && goal.iteration - (goal.iterationBase ?? 0) >= cap;
 }
 
 function incrementGoal(goal: ActiveGoal): ActiveGoal {
@@ -399,22 +471,36 @@ export function parseCommand(args: string): CommandResult | string {
 
 function parseObjective(kind: "start" | "edit", tokens: string[]): CommandResult | string {
 	let tokenBudget: number | undefined;
+	let maxIterations: number | undefined;
 	const objectiveTokens = [...tokens];
 
-	if (objectiveTokens[0] === "--tokens") {
-		const rawBudget = objectiveTokens[1];
-		if (!rawBudget) return "Usage: /goal --tokens 100k <goal_to_complete>";
-		const parsedBudget = parseTokenBudget(rawBudget);
-		if (parsedBudget === undefined) return `Invalid token budget: ${rawBudget}`;
-		tokenBudget = parsedBudget;
-		objectiveTokens.splice(0, 2);
+	// Leading options, in any order.
+	for (;;) {
+		if (objectiveTokens[0] === "--tokens") {
+			const rawBudget = objectiveTokens[1];
+			if (!rawBudget) return "Usage: /goal --tokens 100k <goal_to_complete>";
+			const parsedBudget = parseTokenBudget(rawBudget);
+			if (parsedBudget === undefined) return `Invalid token budget: ${rawBudget}`;
+			tokenBudget = parsedBudget;
+			objectiveTokens.splice(0, 2);
+			continue;
+		}
+		if (objectiveTokens[0] === "--max-iterations") {
+			const rawMax = objectiveTokens[1];
+			if (!rawMax) return "Usage: /goal --max-iterations 50 <goal_to_complete>";
+			if (!/^\d+$/.test(rawMax)) return `Invalid iteration limit: ${rawMax}`;
+			maxIterations = Number(rawMax);
+			objectiveTokens.splice(0, 2);
+			continue;
+		}
+		break;
 	}
 
 	if (objectiveTokens.length === 0) {
 		return kind === "edit" ? "Usage: /goal edit <goal_to_complete>" : "Usage: /goal <goal_to_complete>";
 	}
 
-	return { kind, objective: objectiveTokens.join(" "), tokenBudget };
+	return { kind, objective: objectiveTokens.join(" "), tokenBudget, maxIterations };
 }
 
 function tokenize(input: string): string[] {
@@ -563,13 +649,19 @@ function buildResumePrompt(goal: ActiveGoal) {
 }
 
 export function buildGoalSystemPrompt(goal: ActiveGoal) {
+	// Only static values here: the system prompt is the cached prompt prefix, so a
+	// per-iteration counter (tokens used) would invalidate the cache on every
+	// continuation. Live usage is reported in the continuation message instead.
 	const budgetLine =
-		goal.tokenBudget === undefined ? "" : `\n- Respect the goal token budget (${formatBudget(goal)} used).`;
+		goal.tokenBudget === undefined
+			? ""
+			: `\n- Respect the goal token budget (${formatTokenCount(goal.tokenBudget)} tokens in total; current usage is reported in each continuation message).`;
 	return `Active /goal:\n${goalObjectiveBlock(goal)}\n\nGoal-mode rules:\n- Keep going until the active goal is completely resolved end-to-end.\n- Treat the current worktree, command output, tests, and external state as authoritative.\n- Do not redefine the goal into a smaller task; audit every requirement before completion.\n- Do not stop at analysis, a plan, TODO list, partial fixes, or suggested next steps.\n- Autonomously perform implementation and verification with the available tools when they are needed to complete the goal.\n- Persevere through recoverable tool failures by trying reasonable alternatives instead of yielding early.\n- If the goal is not complete at the end of a turn, expect an automatic continuation and keep working from where you left off.\n- Only call the goal_complete tool after the goal is fully complete and verified.${budgetLine}`;
 }
 
 function buildContinuePrompt(goal: ActiveGoal, marker: string) {
-	return `Continue the active /goal until it is complete:\n\n${goalObjectiveBlock(goal)}\n\nThis is automatic continuation #${goal.iteration}. Current files, command output, tests, and external state are authoritative; re-check them as needed. ${goalPersistenceRules("this goal")}\n\n${continuationMarkerComment(marker)}`;
+	const budgetLine = goal.tokenBudget === undefined ? "" : `\nToken budget: ${formatBudget(goal)} used.`;
+	return `Continue the active /goal until it is complete:\n\n${goalObjectiveBlock(goal)}${budgetLine}\n\nThis is automatic continuation #${goal.iteration}. Current files, command output, tests, and external state are authoritative; re-check them as needed. ${goalPersistenceRules("this goal")}\n\n${continuationMarkerComment(marker)}`;
 }
 
 function goalObjectiveBlock(goal: ActiveGoal) {

@@ -19,7 +19,7 @@
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 
 export interface ExplorerSpec {
 	focus: string;
@@ -42,8 +42,42 @@ export interface FanoutOptions {
 	timeoutMs?: number;
 }
 
-/** Read-only tools handed to every sub-explorer. */
-export const READONLY_EXPLORER_TOOLS = ["read", "grep", "glob", "ls", "find", "memory_search", "memory_read"];
+/** Read-only tools handed to every sub-explorer. ("glob" is not a phi tool: find covers it.) */
+export const READONLY_EXPLORER_TOOLS = ["read", "grep", "ls", "find", "memory_search", "memory_read"];
+
+/**
+ * Tools that can modify files, run commands or persist state. A read-only
+ * sub-explorer must never receive them: they are stripped from its --tools
+ * allowlist AND passed as --exclude-tools, so the guarantee holds even if the
+ * allowlist semantics widen (e.g. an allowlist that keeps extension or MCP
+ * tools) or a caller hands in a broader list.
+ */
+export const WRITE_CAPABLE_TOOLS = [
+	"write",
+	"edit",
+	"bash",
+	"sandbox_run",
+	"memory_write",
+	"ontology_add",
+	"ontology_batch_add",
+	"learn",
+	"phase_result",
+	"orchestrate",
+	"goal_complete",
+];
+
+/** The --tools / --exclude-tools arguments for a read-only sub-explorer. */
+export function readOnlyToolArgs(requested?: string[]): string[] {
+	const blocked = new Set(WRITE_CAPABLE_TOOLS);
+	const base = requested && requested.length > 0 ? requested : READONLY_EXPLORER_TOOLS;
+	const allowed = base.filter((t) => !blocked.has(t));
+	return [
+		"--tools",
+		(allowed.length > 0 ? allowed : READONLY_EXPLORER_TOOLS).join(","),
+		"--exclude-tools",
+		WRITE_CAPABLE_TOOLS.join(","),
+	];
+}
 
 const HARD_CONCURRENCY_CAP = 2;
 const DEFAULT_TIMEOUT_MS = 4 * 60 * 1000;
@@ -58,7 +92,14 @@ export function getPiInvocation(args: string[]): { command: string; args: string
 	const execName = basename(process.execPath).toLowerCase();
 	const isGenericRuntime = /^(node|bun)(\.exe)?$/.test(execName);
 	if (!isGenericRuntime) return { command: process.execPath, args };
-	return { command: "pi", args };
+	// Last resort: the installed phi CLI (the package bin is "phi", not "pi").
+	// On Windows the npm shim is phi.cmd, which spawn() cannot run without a
+	// shell; run the global install's cli.js with the current runtime instead.
+	if (process.platform === "win32" && process.env.APPDATA) {
+		const cli = join(process.env.APPDATA, "npm", "node_modules", "@phi-code-admin", "phi-code", "dist", "cli.js");
+		if (existsSync(cli)) return { command: process.execPath, args: [cli, ...args] };
+	}
+	return { command: "phi", args };
 }
 
 export function isRateLimited(text: string): boolean {
@@ -79,8 +120,8 @@ export function runExplorer(spec: ExplorerSpec, opts: FanoutOptions): Promise<Ex
 	return new Promise((resolve) => {
 		const args = ["--mode", "json", "-p", "--no-session"];
 		if (opts.model) args.push("--model", opts.model);
-		const tools = opts.tools && opts.tools.length > 0 ? opts.tools : READONLY_EXPLORER_TOOLS;
-		args.push("--tools", tools.join(","));
+		// Read-only guarantee: write-capable tools are stripped AND excluded.
+		args.push(...readOnlyToolArgs(opts.tools));
 		args.push(`Task: ${spec.prompt}`);
 
 		let proc: ReturnType<typeof spawn>;

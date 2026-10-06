@@ -9,6 +9,7 @@
  */
 
 import { spawn, spawnSync } from "node:child_process";
+import { join } from "node:path";
 
 const DEFAULT_MAX_BUFFER = 32 * 1024 * 1024;
 
@@ -21,13 +22,41 @@ function killTree(pid: number | undefined): void {
 	if (!pid) return;
 	try {
 		if (process.platform === "win32") {
-			spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true });
+			// System32 taskkill.exe, not a PATH lookup (same hardening as the core's killProcessTree).
+			const taskkill = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
+			spawnSync(taskkill, ["/PID", String(pid), "/T", "/F"], { windowsHide: true });
 		} else {
-			process.kill(-pid, "SIGKILL");
+			// Negative pid = the whole process group. Only valid because POSIX
+			// children are spawned with detached:true (they lead their own group);
+			// fall back to the direct child if the group is already gone.
+			try {
+				process.kill(-pid, "SIGKILL");
+			} catch {
+				process.kill(pid, "SIGKILL");
+			}
 		}
 	} catch {
 		/* best effort */
 	}
+}
+
+/**
+ * Shell used to interpret a command string (same shape as phi's bash tool
+ * ShellConfig). When absent, the platform default shell is used (`shell:true`:
+ * /bin/sh on POSIX, cmd.exe on Windows).
+ */
+export interface CommandShell {
+	shell: string;
+	args: string[];
+	/** "stdin" feeds the command on stdin (legacy WSL bash); default "argv". */
+	commandTransport?: "argv" | "stdin";
+}
+
+/** argv + optional stdin payload for running `command` through `shell`. */
+function shellInvocation(shell: CommandShell, command: string): { file: string; args: string[]; input?: string } {
+	return shell.commandTransport === "stdin"
+		? { file: shell.shell, args: [...shell.args], input: command }
+		: { file: shell.shell, args: [...shell.args, command] };
 }
 
 /**
@@ -39,6 +68,10 @@ function killTree(pid: number | undefined): void {
  * runCommand: never throws, everything comes back as data.
  */
 export function runCommandAsync(command: string, options: RunOptions = {}): Promise<CommandResult> {
+	if (options.shell) {
+		const inv = shellInvocation(options.shell, command);
+		return spawnAsync(inv.file, inv.args, options, command, inv.input);
+	}
 	return spawnAsync(command, undefined, options, command);
 }
 
@@ -56,9 +89,15 @@ function spawnAsync(
 	args: string[] | undefined,
 	options: RunOptions,
 	label: string,
+	input?: string,
 ): Promise<CommandResult> {
 	const start = Date.now();
 	const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+	// POSIX: detached makes the child a process-group leader so killTree's
+	// process.kill(-pid) reaches the whole tree (without it the group kill
+	// fails with ESRCH and a timed-out workload keeps running). Not on Windows,
+	// where detached opens a new console and taskkill /T already walks the tree.
+	const detached = process.platform !== "win32";
 	return new Promise((resolve) => {
 		let stdout = "";
 		let stderr = "";
@@ -70,8 +109,16 @@ function spawnAsync(
 					env: options.env ?? process.env,
 					shell: false,
 					windowsHide: true,
+					detached,
 				})
-			: spawn(fileOrCommand, { cwd: options.cwd, env: options.env ?? process.env, shell: true, windowsHide: true });
+			: spawn(fileOrCommand, {
+					cwd: options.cwd,
+					env: options.env ?? process.env,
+					shell: true,
+					windowsHide: true,
+					detached,
+				});
+		if (input !== undefined) child.stdin?.end(input);
 		const timer = setTimeout(() => {
 			timedOut = true;
 			killTree(child.pid);
@@ -135,6 +182,8 @@ export interface RunOptions {
 	cwd?: string;
 	timeoutMs?: number;
 	env?: NodeJS.ProcessEnv;
+	/** Interpret the command with this shell instead of the platform default (runCommand/runCommandAsync only). */
+	shell?: CommandShell;
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
@@ -146,14 +195,18 @@ const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
  */
 export function runCommand(command: string, options: RunOptions = {}): CommandResult {
 	const start = Date.now();
-	const res = spawnSync(command, {
+	const common = {
 		cwd: options.cwd,
 		timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
 		env: options.env ?? process.env,
-		shell: true,
-		encoding: "utf-8",
+		encoding: "utf-8" as const,
 		maxBuffer: DEFAULT_MAX_BUFFER,
-	});
+		windowsHide: true,
+	};
+	const inv = options.shell ? shellInvocation(options.shell, command) : undefined;
+	const res = inv
+		? spawnSync(inv.file, inv.args, { ...common, shell: false, input: inv.input })
+		: spawnSync(command, { ...common, shell: true });
 	const durationMs = Date.now() - start;
 	// spawnSync sets error with code "ETIMEDOUT" on timeout, and signal SIGTERM.
 	const timedOut = res.error !== undefined && (res.error as NodeJS.ErrnoException).code === "ETIMEDOUT";

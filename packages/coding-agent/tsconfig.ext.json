@@ -53,6 +53,9 @@
 			"phi-code-telemetry": [
 				"../telemetry/src/index.ts"
 			],
+			"@phi-code-admin/browser": [
+				"../browser/src/index.ts"
+			],
 			"typebox": [
 				"../../node_modules/typebox"
 			]
@@ -68,9 +71,8 @@
 	"exclude": [
 		"node_modules",
 		"dist",
-		"extensions/phi/browser.ts",
 		"extensions/phi/web-search.ts",
 		"extensions/phi/memory.ts"
 	],
-	"_note": "Typecheck for phi extensions (NOT covered by tsconfig.build, loaded via jiti at runtime). browser/web-search/memory are excluded for pre-existing optional-dep / ontology type-debt; run check:ext before changing the orchestrator or adding commands."
+	"_note": "Typecheck for phi extensions (NOT covered by tsconfig.build, loaded via jiti at runtime). @phi-code-admin/browser maps to its sources so browser.ts typechecks without building packages/browser. web-search/memory are excluded for pre-existing optional-dep / ontology type-debt; run check:ext before changing the orchestrator or adding commands."
 }

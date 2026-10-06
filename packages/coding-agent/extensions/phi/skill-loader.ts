@@ -9,7 +9,8 @@
  * notification alone never reaches the model.
  *
  * Discovery locations (in priority order):
- * 1. .phi/skills/ (project-local, highest priority)
+ * 1. .phi/skills/ and .claude/.agents/.codex/.github skills (project-local,
+ *    highest priority; read ONLY when the project is trusted)
  * 2. ~/.phi/agent/skills/ (global user skills)
  * 3. Bundled skills shipped with the package (lowest priority)
  *
@@ -34,8 +35,9 @@ export default function skillLoaderExtension(pi: ExtensionAPI) {
 	// by skill name).
 	const bundledCandidates = [join(__dirname, "..", "..", "skills"), join(homedir(), ".phi", "agent", "skills")];
 	const cwd = process.cwd();
+	const globalDir = join(homedir(), ".phi", "agent", "skills");
 	const config: SkillsConfig = {
-		globalDir: join(homedir(), ".phi", "agent", "skills"),
+		globalDir,
 		projectDir: join(cwd, ".phi", "skills"),
 		bundledDir: bundledCandidates.find((dir) => existsSync(dir)) ?? bundledCandidates[0],
 		autoInject: true,
@@ -49,9 +51,17 @@ export default function skillLoaderExtension(pi: ExtensionAPI) {
 		],
 		managedDir: join(homedir(), ".phi", "agent", "managed-skills"),
 	};
+	// Project skill folders (.phi/.claude/.agents/.codex/.github under the
+	// project) are repository content: their descriptions end up in the user
+	// message, so they are only read for a TRUSTED project. The untrusted view
+	// keeps the user's own (global/bundled/managed) skills; projectDir is
+	// pointed at the global dir (required field, deduplicated by name).
+	const untrustedConfig: SkillsConfig = { ...config, projectDir: globalDir, extraDirs: [] };
 
-	const scanner = new SkillScanner(config);
-	const loader = new SkillLoader(scanner);
+	const trustedLoader = new SkillLoader(new SkillScanner(config));
+	const untrustedLoader = new SkillLoader(new SkillScanner(untrustedConfig));
+	const loaderFor = (ctx: { isProjectTrusted?: () => boolean }): SkillLoader =>
+		ctx.isProjectTrusted?.() === true ? trustedLoader : untrustedLoader;
 
 	// Skills already hinted this session — hint each skill once, not on every
 	// message of a long conversation about the same topic.
@@ -68,7 +78,7 @@ export default function skillLoaderExtension(pi: ExtensionAPI) {
 			return { action: "continue" };
 		}
 
-		const matches = loader.findRelevantSkills(event.text);
+		const matches = loaderFor(ctx).findRelevantSkills(event.text);
 		// findRelevantSkills scores any shared word; require a clear signal
 		// (name match or several keywords) before surfacing a skill.
 		const strong = matches.filter((m) => m.score >= 3 && !hintedSkills.has(m.skill.name)).slice(0, 2);
@@ -102,6 +112,7 @@ export default function skillLoaderExtension(pi: ExtensionAPI) {
 		description: "List available skills or show details for a specific skill",
 		handler: async (args, ctx) => {
 			const query = args.trim();
+			const loader = loaderFor(ctx);
 
 			if (!query) {
 				// List all skills

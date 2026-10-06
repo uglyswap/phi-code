@@ -13,8 +13,10 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { getShellConfig } from "phi-code";
 import {
 	type CommandResult,
+	type CommandShell,
 	passed,
 	type RunOptions,
 	runArgv as realRunArgv,
@@ -79,6 +81,27 @@ export interface SandboxDeps {
 	readConfig?: (cwd: string) => SandboxConfig | undefined;
 	/** Force docker availability in tests; otherwise probed via `docker version`. */
 	dockerAvailable?: boolean;
+	/** Shell for the local backend; defaults to phi's bash tool shell (see defaultLocalShell). */
+	resolveShell?: () => CommandShell | undefined;
+}
+
+let cachedLocalShell: { value: CommandShell | undefined } | undefined;
+
+/**
+ * The local backend runs commands with the SAME shell as phi's bash tool
+ * (Git Bash on Windows, bash on POSIX): the phase prompts announce bash, and
+ * `shell:true` would hand them to cmd.exe on Windows. Resolved once. If no bash
+ * can be found (the bash tool is unusable too), fall back to the platform shell.
+ */
+export function defaultLocalShell(): CommandShell | undefined {
+	if (!cachedLocalShell) {
+		try {
+			cachedLocalShell = { value: getShellConfig() };
+		} catch {
+			cachedLocalShell = { value: undefined };
+		}
+	}
+	return cachedLocalShell.value;
 }
 
 export interface ResolveOptions {
@@ -185,12 +208,13 @@ export function resolveSandbox(opts: ResolveOptions): Sandbox {
 	}
 
 	if (decision.backend === "local") {
+		const shell = () => (deps.resolveShell ?? defaultLocalShell)();
 		return {
 			...base,
 			describe: () => `local host (${opts.cwd})`,
 			available: () => true,
-			exec: (command, options) => rc(command, { cwd: opts.cwd, ...options }),
-			execAsync: (command, options) => rcAsync(command, { cwd: opts.cwd, ...options }),
+			exec: (command, options) => rc(command, { cwd: opts.cwd, shell: shell(), ...options }),
+			execAsync: (command, options) => rcAsync(command, { cwd: opts.cwd, shell: shell(), ...options }),
 			// Deliberately no host-side dependency install — running `npm install`
 			// etc. on the user's host is intrusive; local is best-effort as-is.
 			prepare: () => ({ ok: true, backend: "local", detail: "local host — no preparation performed" }),

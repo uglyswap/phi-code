@@ -37,7 +37,10 @@ export interface AgentDef {
  * Returns null when the file has no frontmatter block.
  */
 export function parseAgentMarkdown(content: string, filePath: string, source: AgentSource): AgentDef | null {
-	const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+	// Normalize CRLF/CR (Windows checkouts): with a trailing \r the field
+	// regex never matched, silently dropping tools/description.
+	const normalized = content.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+	const fmMatch = normalized.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
 	if (!fmMatch) return null;
 
 	const fields: Record<string, string> = {};

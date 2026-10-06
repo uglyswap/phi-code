@@ -13,7 +13,7 @@ export default function (pi: ExtensionAPI) {
 		description: "Select the UI theme (built-in pack, custom, or extension themes)",
 		handler: async (args, ctx) => {
 			if (!ctx.hasUI) {
-				ctx.ui.notify('Usage interactif uniquement. Sinon: définir "theme" dans settings.json.', "error");
+				ctx.ui.notify('/theme requires interactive mode. Otherwise set "theme" in settings.json.', "error");
 				return;
 			}
 			const themes = ctx.ui.getAllThemes();

@@ -133,19 +133,26 @@ export class SigmaMemory {
 
 	/**
 	 * Index all markdown notes into the vector store.
-	 * Reads every .md file from the notes directory and adds it.
+	 * Reads every .md file from the notes directory and adds it. Unchanged notes
+	 * are skipped by addDocument (only new or modified notes are embedded), and
+	 * all writes are grouped into a single disk write.
 	 */
 	async indexNotes(): Promise<void> {
 		const notesList = this.notes.list();
 
-		for (const note of notesList) {
-			try {
-				const content = this.notes.read(note.name);
-				await this.vectors.addDocument(note.name, content);
-			} catch {
-				// Skip files that can't be read
+		await this.vectors.batch(async () => {
+			for (const note of notesList) {
+				try {
+					const content = this.notes.read(note.name);
+					await this.vectors.addDocument(note.name, content);
+				} catch (error) {
+					// Skip files that can't be read or embedded; keep indexing the rest.
+					vlog(
+						`[SigmaMemory] indexing ${note.name} failed: ${error instanceof Error ? error.message : String(error)}`,
+					);
+				}
 			}
-		}
+		});
 	}
 
 	/**

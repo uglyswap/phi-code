@@ -21,7 +21,9 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, getApiKeyStore } from "phi-code";
-import { getProviderCatalog } from "./providers/catalog.ts";
+import type { Api, AssistantMessage, Model } from "phi-code-ai";
+import { completeSimple } from "phi-code-ai/compat";
+import { catalogEnvKey, getProviderCatalog } from "./providers/catalog.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -345,8 +347,32 @@ function extractCode(response: string): string {
 // same source /setup and /phi-init use. Cloud entries expose `benchModels`
 // (the subset /benchmark exercises); local servers are discovered separately.
 
-async function getAvailableModels(): Promise<Array<{ id: string; provider: string; baseUrl: string; apiKey: string }>> {
-	const models: Array<{ id: string; provider: string; baseUrl: string; apiKey: string }> = [];
+/** A benchmarkable model: where it lives and which wire API it speaks. */
+export interface BenchTarget {
+	id: string;
+	provider: string;
+	baseUrl: string;
+	apiKey: string;
+	/** Wire API (e.g. "openai-completions", "anthropic-messages"). */
+	api: string;
+}
+
+/** Minimal registry surface /benchmark needs (ExtensionContext.modelRegistry). */
+export type BenchRegistry = Pick<ExtensionContext["modelRegistry"], "find" | "getApiKeyAndHeaders">;
+
+const OPENAI_COMPLETIONS_API = "openai-completions";
+
+/**
+ * Whether /benchmark can actually call this target: through the model
+ * registry (any API: Anthropic, Google, OAuth, compat...) when the model is
+ * registered, otherwise only with the raw OpenAI chat/completions fallback.
+ */
+export function isBenchmarkable(target: BenchTarget, registry: BenchRegistry | undefined): boolean {
+	return Boolean(registry?.find(target.provider, target.id)) || target.api === OPENAI_COMPLETIONS_API;
+}
+
+async function getAvailableModels(registry?: BenchRegistry): Promise<BenchTarget[]> {
+	const models: BenchTarget[] = [];
 
 	// 1. Cloud providers via env vars, falling back to keys stored in
 	// models.json via /setup or /keys (the store resolves env-var names and
@@ -355,7 +381,7 @@ async function getAvailableModels(): Promise<Array<{ id: string; provider: strin
 	for (const provider of getProviderCatalog()) {
 		if (provider.local) continue;
 		const benchModels = provider.benchModels ?? [];
-		let apiKey = process.env[provider.envVar];
+		let apiKey = catalogEnvKey(provider)?.value;
 		if (!apiKey) {
 			try {
 				apiKey = store.getKey(provider.id);
@@ -371,6 +397,7 @@ async function getAvailableModels(): Promise<Array<{ id: string; provider: strin
 				provider: provider.id,
 				baseUrl: provider.baseUrl,
 				apiKey,
+				api: provider.api,
 			});
 		}
 	}
@@ -388,9 +415,14 @@ async function getAvailableModels(): Promise<Array<{ id: string; provider: strin
 			for (const m of providerConfig.models) {
 				const modelId = typeof m === "string" ? m : (m as { id?: string }).id;
 				if (!modelId) continue;
+				// Per-model api (e.g. OpenCode Go qwen/minimax) wins over the provider's.
+				const api =
+					(typeof m === "object" && m !== null ? (m as { api?: string }).api : undefined) ??
+					providerConfig.api ??
+					OPENAI_COMPLETIONS_API;
 				// Skip if already added from env vars
 				if (!models.some((existing) => existing.id === modelId && existing.baseUrl === baseUrl)) {
-					models.push({ id: modelId, provider: id, baseUrl, apiKey });
+					models.push({ id: modelId, provider: id, baseUrl, apiKey, api });
 				}
 			}
 		}
@@ -418,7 +450,13 @@ async function getAvailableModels(): Promise<Array<{ id: string; provider: strin
 				for (const m of modelList) {
 					const modelId = m.id || m.name;
 					if (modelId && !models.some((existing) => existing.id === modelId)) {
-						models.push({ id: modelId, provider: local.name, baseUrl: local.baseUrl, apiKey: "local" });
+						models.push({
+							id: modelId,
+							provider: local.name,
+							baseUrl: local.baseUrl,
+							apiKey: "local",
+							api: OPENAI_COMPLETIONS_API,
+						});
 					}
 				}
 			}
@@ -427,7 +465,69 @@ async function getAvailableModels(): Promise<Array<{ id: string; provider: strin
 		}
 	}
 
-	return models;
+	// Drop what cannot be called correctly (e.g. an Anthropic-API model that is
+	// not in the registry would only get a guaranteed-failing chat/completions).
+	return models.filter((m) => isBenchmarkable(m, registry));
+}
+
+/** Text of an assistant reply (text parts only; thinking is not graded). */
+function assistantText(message: AssistantMessage): string {
+	return message.content
+		.filter((part): part is Extract<AssistantMessage["content"][number], { type: "text" }> => part.type === "text")
+		.map((part) => part.text)
+		.join("");
+}
+
+/**
+ * Call a REGISTERED model through its own API (Anthropic, Google, OpenAI
+ * responses, OAuth providers, compat quirks...) via the registry's auth, the
+ * same path /btw uses.
+ */
+async function callRegisteredModel(
+	registry: BenchRegistry,
+	model: Model<Api>,
+	prompt: string,
+	timeoutMs: number,
+): Promise<{ response: string; timeMs: number }> {
+	const auth = await registry.getApiKeyAndHeaders(model);
+	if (!auth.ok) throw new Error(auth.error);
+	const startTime = Date.now();
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), timeoutMs);
+	try {
+		const reply = await completeSimple(
+			model,
+			{ messages: [{ role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() }] },
+			{ apiKey: auth.apiKey, headers: auth.headers, signal: controller.signal, maxTokens: 4096, temperature: 0.1 },
+		);
+		if (reply.stopReason === "error" || reply.stopReason === "aborted") {
+			throw new Error(reply.errorMessage || `request ${reply.stopReason}`);
+		}
+		return { response: assistantText(reply), timeMs: Date.now() - startTime };
+	} finally {
+		clearTimeout(timeout);
+	}
+}
+
+/**
+ * Route a benchmark prompt: through the model's own API when the registry
+ * knows it, else the raw OpenAI chat/completions call, which is only correct
+ * for "openai-completions" endpoints (getAvailableModels filters the rest).
+ */
+async function callBenchTarget(
+	target: BenchTarget,
+	prompt: string,
+	registry: BenchRegistry | undefined,
+	timeoutMs: number,
+): Promise<{ response: string; timeMs: number }> {
+	const registered = registry?.find(target.provider, target.id);
+	if (registry && registered) return callRegisteredModel(registry, registered, prompt, timeoutMs);
+	if (target.api !== OPENAI_COMPLETIONS_API) {
+		throw new Error(
+			`${target.provider}/${target.id} speaks ${target.api} and is not in the model registry: cannot benchmark it with a chat/completions call`,
+		);
+	}
+	return callModel(target.baseUrl, target.apiKey, target.id, prompt, timeoutMs);
 }
 
 async function callModel(
@@ -504,13 +604,8 @@ export default function benchmarkExtension(pi: ExtensionAPI) {
 	/**
 	 * Run full benchmark on a single model
 	 */
-	async function benchmarkModel(
-		modelId: string,
-		provider: string,
-		baseUrl: string,
-		apiKey: string,
-		ctx: ExtensionContext,
-	): Promise<ModelBenchmark> {
+	async function benchmarkModel(target: BenchTarget, ctx: ExtensionContext): Promise<ModelBenchmark> {
+		const { id: modelId, provider } = target;
 		const tests = createTestSuite();
 		const categories: ModelBenchmark["categories"] = {};
 		let totalTime = 0;
@@ -522,7 +617,7 @@ export default function benchmarkExtension(pi: ExtensionAPI) {
 			ctx.ui.notify(`  ⏳ ${test.category}: ${test.name}...`, "info");
 
 			try {
-				const { response, timeMs } = await callModel(baseUrl, apiKey, modelId, test.prompt, 90000);
+				const { response, timeMs } = await callBenchTarget(target, test.prompt, ctx.modelRegistry, 90000);
 				totalTime += timeMs;
 
 				const result = test.validate(response);
@@ -698,11 +793,11 @@ Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`,
 			}
 
 			// Get available models (validates API keys are non-empty and reasonable length)
-			const available = await getAvailableModels();
+			const available = await getAvailableModels(ctx.modelRegistry);
 			if (available.length === 0) {
 				const hint = getProviderCatalog()
 					.filter((p) => !p.local)
-					.map((p) => `  ${p.envVar}: ${process.env[p.envVar] ? "set but no models configured" : "not set"}`)
+					.map((p) => `  ${p.envVar}: ${catalogEnvKey(p) ? "set but no models configured" : "not set"}`)
 					.join("\n");
 				ctx.ui.notify(
 					`❌ No benchmarkable models found.\n\nProvider status (env):\n${hint}\n\nSet at least one API key with known models (env var, /setup or /keys).`,
@@ -719,7 +814,7 @@ Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`,
 
 				for (const model of available) {
 					ctx.ui.notify(`\n🧪 **${model.id}** (${model.provider})`, "info");
-					const result = await benchmarkModel(model.id, model.provider, model.baseUrl, model.apiKey, ctx);
+					const result = await benchmarkModel(model, ctx);
 
 					// Replace existing result for this model
 					store.results = store.results.filter((r) => r.modelId !== model.id);
@@ -754,7 +849,7 @@ Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`,
 				}
 
 				ctx.ui.notify(`🧪 Benchmarking **${model.id}** (6 categories)...\n`, "info");
-				const result = await benchmarkModel(model.id, model.provider, model.baseUrl, model.apiKey, ctx);
+				const result = await benchmarkModel(model, ctx);
 				store.results = store.results.filter((r) => r.modelId !== model.id);
 				store.results.push(result);
 				await saveStore(store);
@@ -767,16 +862,12 @@ Scoring: S (80+), A (65+), B (50+), C (35+), D (<35)`,
 			// Try to find current model in available list
 			const currentModel = ctx.model;
 			if (currentModel) {
-				const modelConfig = available.find((m) => m.id === currentModel.id);
+				const modelConfig =
+					available.find((m) => m.id === currentModel.id && m.provider === currentModel.provider) ??
+					available.find((m) => m.id === currentModel.id);
 				if (modelConfig) {
 					ctx.ui.notify(`🧪 Benchmarking current model **${currentModel.id}** (6 categories)...\n`, "info");
-					const result = await benchmarkModel(
-						modelConfig.id,
-						modelConfig.provider,
-						modelConfig.baseUrl,
-						modelConfig.apiKey,
-						ctx,
-					);
+					const result = await benchmarkModel(modelConfig, ctx);
 					store.results = store.results.filter((r) => r.modelId !== modelConfig.id);
 					store.results.push(result);
 					await saveStore(store);

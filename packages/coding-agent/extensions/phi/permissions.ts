@@ -22,7 +22,11 @@ const DECISIONS = ["allow", "deny", "prompt"] as const;
 
 /** Returns undefined when the file exists but cannot be parsed (never silently treat it as empty). */
 function loadUserConfig(): Record<string, unknown> | undefined {
-	const path = userConfigPath();
+	return loadConfigObject(userConfigPath());
+}
+
+/** {} when absent, undefined when present but not a JSON object. */
+function loadConfigObject(path: string): Record<string, unknown> | undefined {
 	if (!existsSync(path)) return {};
 	try {
 		const parsed = JSON.parse(readFileSync(path, "utf8").replace(/^\uFEFF/, "")) as unknown;
@@ -32,6 +36,21 @@ function loadUserConfig(): Record<string, unknown> | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+const STRICTNESS: Record<string, number> = { allow: 0, prompt: 1, deny: 2 };
+
+/**
+ * Effective tier decision, mirroring the core engine (src/core/permissions/
+ * policy.ts): a trusted project file can only TIGHTEN the user's decision, and
+ * an unset tier means "prompt".
+ */
+function effectiveTier(user: unknown, project: unknown): string {
+	const valid = (v: unknown): v is string => typeof v === "string" && v in STRICTNESS;
+	const u = valid(user) ? user : undefined;
+	const p = valid(project) ? project : undefined;
+	if (u && p) return STRICTNESS[u] >= STRICTNESS[p] ? u : p;
+	return u ?? p ?? "prompt";
 }
 
 export default function (pi: ExtensionAPI) {
@@ -69,14 +88,25 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify(`${userConfigPath()} is not valid JSON.`, "error");
 				return;
 			}
-			const projectFile = existsSync(join(ctx.cwd, ".phi", "permissions.json"));
+			const projectPath = join(ctx.cwd, ".phi", "permissions.json");
+			const projectFile = existsSync(projectPath);
+			const trusted = ctx.isProjectTrusted();
+			// The core engine merges a TRUSTED project file into the policy: show
+			// the merged (effective) tiers, not the user file alone. An unparsable
+			// project file is ignored by the engine, so it is ignored here too.
+			const projectParsed = projectFile && trusted ? loadConfigObject(projectPath) : undefined;
+			const project = projectParsed ?? {};
+			const projectRules = Array.isArray(project.rules)
+				? project.rules.filter((r) => (r as { decision?: unknown })?.decision !== "allow").length
+				: 0;
 			const summary = [
-				existsSync(userConfigPath()) || (projectFile && ctx.isProjectTrusted())
+				existsSync(userConfigPath()) || projectParsed !== undefined
 					? "Custom policy active"
 					: "Legacy allow-everything mode (no permissions.json found)",
-				`tiers: ${TIERS.map((t) => `${t}=${(user[t] as string) ?? "prompt"}`).join(" ")}`,
+				`tiers: ${TIERS.map((t) => `${t}=${effectiveTier(user[t], project[t])}`).join(" ")}`,
 				`user rules: ${Array.isArray(user.rules) ? user.rules.length : 0}`,
-				...(projectFile && !ctx.isProjectTrusted() ? ["project permissions.json ignored (untrusted project)"] : []),
+				...(projectFile && trusted ? [`project rules: ${projectRules}`] : []),
+				...(projectFile && !trusted ? ["project permissions.json ignored (untrusted project)"] : []),
 				"toggle: /permissions <read|write|exec> <allow|deny|prompt>",
 			].join(" | ");
 			ctx.ui.notify(summary, "info");

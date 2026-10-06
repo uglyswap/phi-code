@@ -149,6 +149,28 @@ async function saveState(serverName: string, serverUrl: string | undefined, stat
 	await chmod(path, 0o600).catch(() => {});
 }
 
+function isLoopbackHost(hostname: string): boolean {
+	return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1";
+}
+
+/**
+ * OpenID Connect `application_type` for the redirect URIs (MCP SEP-837, as in pi).
+ * Without it, OIDC servers assume "web", which rejects http loopback redirect URIs.
+ * Loopback hosts and custom schemes are native apps (RFC 8252).
+ */
+export function applicationType(redirectUris: readonly string[]): "native" | "web" {
+	const native = redirectUris.some((uri) => {
+		let url: URL;
+		try {
+			url = new URL(uri);
+		} catch {
+			return false;
+		}
+		return (url.protocol !== "http:" && url.protocol !== "https:") || isLoopbackHost(url.hostname);
+	});
+	return native ? "native" : "web";
+}
+
 // ─── OAuthClientProvider Implementation ────────────────────────────────────────
 
 export class McpOAuthProvider implements OAuthClientProvider {
@@ -184,13 +206,17 @@ export class McpOAuthProvider implements OAuthClientProvider {
 
 	get clientMetadata(): OAuthClientMetadata {
 		const redirectUrl = String(this.redirectUrl);
-		return {
+		// The SDK sends this object as-is to the registration endpoint (DCR), so the
+		// OpenID Connect field not declared in its type is passed through.
+		const metadata: OAuthClientMetadata & { application_type: "native" | "web" } = {
 			client_name: `phi-mcp/${this.serverName}`,
 			redirect_uris: [redirectUrl],
 			grant_types: ["authorization_code", "refresh_token"],
 			response_types: ["code"],
 			token_endpoint_auth_method: this.authConfig.clientSecret ? "client_secret_basic" : "none",
+			application_type: applicationType([redirectUrl]),
 		};
+		return metadata;
 	}
 
 	// --- clientInformation ---

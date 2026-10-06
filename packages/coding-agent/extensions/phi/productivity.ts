@@ -90,27 +90,42 @@ function firstUserMessageText(ctx: ExtensionCommandContext): string {
 /**
  * Tokenize free text into clean lowercase-able words.
  *
- * Strips markdown/code fences first, then keeps only [A-Za-z0-9] word cores so
- * untrusted user content cannot smuggle anything beyond plain words. Every
- * other byte (including control characters) acts as a separator.
+ * Strips markdown/code fences first, then keeps only Unicode letter/digit word
+ * cores (accents preserved: "préférences" stays one word) so untrusted user
+ * content cannot smuggle anything beyond plain words. Every other character
+ * (including control characters) acts as a separator.
  */
-function cleanWords(text: string): string[] {
+export function cleanWords(text: string): string[] {
 	const stripped = text
+		// NFC so a decomposed "e" + combining accent is matched as a single letter.
+		.normalize("NFC")
 		// Drop fenced code blocks and inline code so titles stay readable.
 		.replace(/```[\s\S]*?```/g, " ")
 		.replace(/`[^`]*`/g, " ");
-	// Only [A-Za-z0-9] word cores survive; every other byte (including control
-	// characters and escape sequences) acts as a separator, so untrusted user
-	// content cannot smuggle anything beyond plain words.
-	const matches = stripped.match(/[A-Za-z0-9]+/g);
+	// Only letter/digit word cores survive; every other character (including
+	// control characters and escape sequences) acts as a separator, so untrusted
+	// user content cannot smuggle anything beyond plain words.
+	const matches = stripped.match(/[\p{L}\p{N}]+/gu);
 	return matches ? matches : [];
+}
+
+/**
+ * ASCII form of a word for git branch names: accents are folded
+ * ("préférences" -> "preferences"); characters with no ASCII form are dropped.
+ */
+function asciiFold(word: string): string {
+	return word
+		.normalize("NFD")
+		.replace(/\p{M}+/gu, "")
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "");
 }
 
 /**
  * Build a human-readable title from the first words of the source text.
  * Capitalizes the first word; clamps to [TITLE_MIN_WORDS, TITLE_MAX_WORDS].
  */
-function deriveTitle(words: string[]): string {
+export function deriveTitle(words: string[]): string {
 	const chosen = words.slice(0, TITLE_MAX_WORDS);
 	if (chosen.length === 0) {
 		return "";
@@ -123,8 +138,8 @@ function deriveTitle(words: string[]): string {
  * Build a kebab-case branch slug (a-z0-9-, max BRANCH_SLUG_MAX chars).
  * Trailing partial words are dropped so the slug never ends on a hyphen.
  */
-function deriveBranchSlug(words: string[]): string {
-	const lower = words.map((w) => w.toLowerCase()).filter(Boolean);
+export function deriveBranchSlug(words: string[]): string {
+	const lower = words.map(asciiFold).filter(Boolean);
 	if (lower.length === 0) {
 		return "";
 	}

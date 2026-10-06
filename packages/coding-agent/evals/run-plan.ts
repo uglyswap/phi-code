@@ -63,14 +63,12 @@ function resolveSdkUrl(explicit?: string): string {
 
 async function runPlan(
 	sdk: any,
+	modelRuntime: unknown,
 	task: EvalTask,
 	model: any,
 	workDir: string,
 ): Promise<{ durationMs: number; error?: string }> {
-	const { createAgentSession, AuthStorage, ModelRegistry } = sdk;
-	const authStorage = AuthStorage.create();
-	const modelRegistry = ModelRegistry.create(authStorage);
-	await (modelRegistry.load?.() ?? Promise.resolve());
+	const { createAgentSession } = sdk;
 
 	const prevCwd = process.cwd();
 	process.chdir(workDir);
@@ -80,7 +78,9 @@ async function runPlan(
 	);
 	const start = Date.now();
 	try {
-		const { session } = await createAgentSession({ model, cwd: workDir, authStorage, modelRegistry });
+		// The SDK takes the canonical model/auth runtime (ModelRegistry.create and
+		// authStorage/modelRegistry options were removed with ModelRuntime).
+		const { session } = await createAgentSession({ model, cwd: workDir, modelRuntime });
 		await session.prompt(`/plan ${task.prompt}`);
 		const g = globalThis as unknown as { __phiOrchestrationActive?: boolean };
 		while (g.__phiOrchestrationActive === true && Date.now() - start < PLAN_TIMEOUT_MS) {
@@ -109,11 +109,15 @@ async function main() {
 	const tasksDir = resolve(args.tasks ?? join(HERE, "tasks"));
 	const outFile = resolve(args.out ?? join(HERE, "report-plan.md"));
 	const sdk = await import(resolveSdkUrl(args.sdk));
-	const { AuthStorage, ModelRegistry } = sdk;
-	const registry = ModelRegistry.create(AuthStorage.create());
-	await (registry.load?.() ?? Promise.resolve());
-	const available = await registry.getAvailable();
-	const [prov, id] = (args.model ?? "").split("/");
+	// One runtime (auth.json + models.json of the phi agent dir) shared by the
+	// model lookup and every session.
+	const modelRuntime = await sdk.ModelRuntime.create();
+	const available = await modelRuntime.getAvailable();
+	// Split on the FIRST slash only: model ids may contain slashes.
+	const ref = args.model ?? "";
+	const slash = ref.indexOf("/");
+	const prov = slash > 0 ? ref.slice(0, slash) : "";
+	const id = slash > 0 ? ref.slice(slash + 1) : ref;
 	const model = available.find((m: any) => m.provider === prov && m.id === id) ?? available[0];
 	if (!model) throw new Error("No available model (configure a provider first)");
 
@@ -125,7 +129,7 @@ async function main() {
 		const workDir = mkdtempSync(join(tmpdir(), `plan-${task.id}-`));
 		try {
 			process.stdout.write(`▶ ${task.id} (plan)... `);
-			const { durationMs, error } = await runPlan(sdk, task, model, workDir);
+			const { durationMs, error } = await runPlan(sdk, modelRuntime, task, model, workDir);
 			const passed = error ? false : verify(task, workDir);
 			results.push({ taskId: task.id, strategy: "plan", passed, durationMs, error });
 			console.log(error ? `error: ${error}` : passed ? `PASS (${(durationMs / 1000).toFixed(0)}s)` : "FAIL");
