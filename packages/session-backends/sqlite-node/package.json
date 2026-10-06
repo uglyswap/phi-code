@@ -1,6 +1,6 @@
 {
 	"name": "phi-code-session-backend-sqlite-node",
-	"version": "0.84.2",
+	"version": "0.84.3",
 	"description": "Node sqlite session backend for phi-code-agent sessions",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -34,8 +34,8 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"phi-code-ai": "^0.84.2",
-		"phi-code-agent": "^0.84.2"
+		"phi-code-ai": "^0.84.3",
+		"phi-code-agent": "^0.84.3"
 	},
 	"devDependencies": {
 		"@vitest/coverage-v8": "4.1.9",

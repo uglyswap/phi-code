@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.57.1] - 2026-10-06
+
 ### Changed
 
 - Renamed to `@phi-code-admin/pods`; the binary is `phi-pods` (it was `pi-pods`,

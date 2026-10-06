@@ -1,6 +1,6 @@
 {
 	"name": "@phi-code-admin/mom",
-	"version": "0.56.3",
+	"version": "0.57.0",
 	"description": "Slack bot that delegates messages to the phi coding agent",
 	"type": "module",
 	"bin": {
@@ -21,15 +21,15 @@
 	},
 	"dependencies": {
 		"@anthropic-ai/sandbox-runtime": "^0.0.16",
-		"@phi-code-admin/phi-code": "^0.99.1",
+		"@phi-code-admin/phi-code": "^0.99.2",
 		"@sinclair/typebox": "^0.34.0",
 		"@slack/socket-mode": "^2.0.0",
 		"@slack/web-api": "^7.0.0",
 		"chalk": "^5.6.2",
 		"croner": "^9.1.0",
 		"diff": "^8.0.2",
-		"phi-code-agent": "^0.84.2",
-		"phi-code-ai": "^0.84.2"
+		"phi-code-agent": "^0.84.3",
+		"phi-code-ai": "^0.84.3"
 	},
 	"devDependencies": {
 		"@types/diff": "^7.0.2",

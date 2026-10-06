@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.84.3] - 2026-10-06
+
+### Fixed
+
+- OAuth refreshes are no longer cancelled with the request that triggered them (the rotated refresh token was lost).
+- More transient errors are retried (capacity, high demand, 520, cancelled pending stream); an unreadable `Retry-After` uses exponential backoff; agent retry delays are capped (`maxAgentDelayMs`).
+- Event streams drain buffered events in linear time (#9055).
+- z.ai "Prompt too long" / "Prompt exceeds max length" are context overflows; body-less 400/413 only for Cerebras (#9805, #10208, #9482).
+- `NO_PROXY` handles subdomains, wildcards, IPv6 and ports (#8737).
+- OpenAI-compatible: empty text parts next to images dropped (#9797), unfinished Responses tool calls rejected (#9974), Kimi top-level `cached_tokens` counted as cache reads (#8075), opencode `qwen3.8-flash` replays empty signatures (#10047).
+- `OPENCODE_GO_API_KEY` is accepted as a fallback for the `opencode-go` provider.
+
 ## [0.84.2] - 2026-08-14
 
 ### Added

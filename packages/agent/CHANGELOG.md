@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.84.3] - 2026-10-06
+
+### Fixed
+
+- A proxy stream that closes without a final event now fails instead of ending as a successful `stop`.
+- `ctx.abort()` during the preflight of parallel tool calls no longer lets already prepared calls run (#8935).
+- The harness `edit` tool accepts a single edit object or a JSON string of one (#7835).
+
 ## [0.84.2] - 2026-08-14
 
 ### Fixed

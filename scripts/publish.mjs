@@ -12,9 +12,10 @@ import {
 	isEmptyDiff,
 	parsePackJson,
 } from "./publish-content.mjs";
-import { getPublicWorkspacePackages } from "./release-packages.mjs";
+import { getPublicWorkspacePackages, orderByInternalDependencies } from "./release-packages.mjs";
 
-const packages = getPublicWorkspacePackages();
+// Dependencies first: see orderByInternalDependencies.
+const packages = orderByInternalDependencies(getPublicWorkspacePackages());
 
 const dryRun = process.argv.includes("--dry-run");
 const unknownArgs = process.argv.slice(2).filter((arg) => arg !== "--dry-run");

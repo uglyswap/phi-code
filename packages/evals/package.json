@@ -9,8 +9,8 @@
 		"test": "vitest run --config vitest.test.config.ts"
 	},
 	"devDependencies": {
-		"phi-code-ai": "^0.84.2",
-		"@phi-code-admin/phi-code": "^0.98.0",
+		"phi-code-ai": "^0.84.3",
+		"@phi-code-admin/phi-code": "^0.99.2",
 		"@types/node": "24.12.4",
 		"shx": "0.4.0",
 		"typescript": "5.9.3",

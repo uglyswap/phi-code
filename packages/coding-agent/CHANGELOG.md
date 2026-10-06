@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.99.2] - 2026-10-06
+
+Large bug-fix release: the security fixes of the phi/pi comparison audit, about 120 functional bugs, and a verified fresh-install path (npm and standalone binary).
+
+### Security
+
+- Project `.phi/mcp.json` and `.phi/permissions.json` require a trusted project; project files can only tighten permissions.
+- MCP OAuth tokens are keyed by server name and URL and stored 0600 under the agent dir; `openBrowser` no longer goes through a shell; random OAuth `state`.
+- `user_bash` interception fails closed; the Chrome bridge `/command` endpoint requires a shared secret; `fetch_url` SSRF guard parses IPv6 (mapped, NAT64, ULA, link-local); the local Camofox API requires a per-process key.
+- Skill loader and `sandbox_run` `shellPath` respect project trust; the destructive-command gate also covers `sandbox_run`.
+
+### Fixed
+
+- Session and compaction: `/tree` during compaction, truncated or tool-calling summaries, cut-point fallback, compaction between tool results and the next request, Escape cancels retries/compaction/branch summaries, session file written at the first user message, JSONL repair, safe import, custom messages during tools, steer/followUp input handlers, compaction without provider usage, capped retry backoff (`retry.maxAgentDelayMs`), startup diagnostics visible in the TUI.
+- Tools and CLI: Windows `taskkill`, UTF-8 BOM in every config reader, extension factory rollback, signal-killed commands fail, safer hashline recovery, HTTP proxy tunnelling, package manager fixes, `--` terminator, clipboard (Unicode on Windows, async image reads), Windows keybindings, skills and extensions resolved inside the Bun binary.
+- Extensions: MCP import/retries/auth/tool names/health checks, browser screenshot as an image and parameters aligned with the server, LSP crash and Windows support, btw, goal, web-search size cap and current-model summaries, ast-grep, Chrome capture scope and auto-reload, orchestrator verdicts, prompts, sandbox shell, process-tree kills, smart-router, `PHI_CODING_AGENT_DIR` honoured everywhere.
+- Install: every runtime dependency of the bundled extensions (including `@phi-code-admin/browser`, `cross-spawn`, `ignore`) is linked by the postinstall; RPC mode no longer blocks on a fresh install; the first-run setup is offered after `npm i -g`; the embedding model cache lives under the agent dir.
+- Standalone binary: bundled extensions, agents and skills are synced on first start; extension dependencies ship pruned per platform (Windows archive about 77 MB); vector search works; the browser tools install their server on first use with the system Node.js (>= 22).
+
 ## [0.99.1] - 2026-10-05
 
 ### Fixed — the published package could not start: two extensions imported a path that only exists in the checkout

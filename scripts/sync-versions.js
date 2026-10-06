@@ -57,7 +57,14 @@ for (const pkg of workspacePackages) {
 			// Registry aliases such as `npm:phi-code-ai@0.1.2` are never workspace-linked,
 			// so lockstep bumping them would point at a version that is not published yet.
 			const version = versionMap.get(dependencyName);
-			const newSpecifier = version ? `^${version}` : null;
+			// Local links (file:, workspace:, link:) and aliases are left alone, and an
+			// exact pin stays exact: @phi-code-admin/browser requires the exact
+			// camofox-browser version it installs on demand.
+			if (typeof currentSpecifier !== "string" || /^(file|workspace|link|npm):/.test(currentSpecifier)) {
+				continue;
+			}
+			const isExactPin = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(currentSpecifier);
+			const newSpecifier = version ? (isExactPin ? version : `^${version}`) : null;
 			if (!newSpecifier || currentSpecifier === newSpecifier) {
 				continue;
 			}

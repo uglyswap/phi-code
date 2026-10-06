@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-10-06
+
 ### Breaking Changes
 
 - Mom now refuses to start unless `MOM_ALLOWED_USERS` is set: only the listed

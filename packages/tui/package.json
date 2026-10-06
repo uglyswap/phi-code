@@ -1,6 +1,6 @@
 {
 	"name": "phi-code-tui",
-	"version": "0.84.2",
+	"version": "0.84.3",
 	"description": "Terminal User Interface library with differential rendering for efficient text-based applications",
 	"type": "module",
 	"main": "dist/index.js",
@@ -13,15 +13,8 @@
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"files": [
-		"dist/**/*",
-		"native/win32/prebuilds/**/*.node",
-		"native/win32/src/**/*.c",
-		"native/win32/build.mjs",
-		"native/win32/README.md",
-		"native/darwin/prebuilds/**/*.node",
-		"native/darwin/src/**/*.c",
-		"native/darwin/build.sh",
-		"native/darwin/README.md",
+		"dist",
+		"native",
 		"README.md"
 	],
 	"keywords": [
