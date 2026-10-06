@@ -11,9 +11,13 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 export const WORKTREE_ROOT = join(".phi", "worktrees");
+/** Same root as git prints it (always forward slashes, also on Windows). */
+const WORKTREE_ROOT_GIT_PREFIX = ".phi/worktrees/";
+/** File in the worktree's private git dir recording the commit it was created from. */
+const BASE_MARKER = "phi-base-ref";
 
 export interface Worktree {
 	id: string;
@@ -54,13 +58,33 @@ export function worktreePath(repoRoot: string, id: string): string {
 	return join(repoRoot, WORKTREE_ROOT, sanitizeId(id));
 }
 
+function worktreeGitDir(path: string): string {
+	const gitDir = git(path, ["rev-parse", "--git-dir"]).trim();
+	return isAbsolute(gitDir) ? gitDir : join(path, gitDir);
+}
+
+/** Commit the worktree was created from (falls back to HEAD for worktrees made before the marker). */
+function worktreeBase(path: string): string {
+	try {
+		const recorded = readFileSync(join(worktreeGitDir(path), BASE_MARKER), "utf-8").trim();
+		if (recorded) return recorded;
+	} catch {
+		// No marker: worktree created by an older version.
+	}
+	return git(path, ["rev-parse", "HEAD"]).trim();
+}
+
 /** Create a detached worktree for `id` under .phi/worktrees/, based on baseRef. */
 export function createWorktree(repoRoot: string, id: string, baseRef = "HEAD"): Worktree {
 	const safeId = sanitizeId(id);
 	const path = join(repoRoot, WORKTREE_ROOT, safeId);
 	mkdirSync(dirname(path), { recursive: true });
-	git(repoRoot, ["worktree", "add", "--detach", path, baseRef]);
-	return { id: safeId, path, baseRef };
+	const baseCommit = git(repoRoot, ["rev-parse", "--verify", `${baseRef}^{commit}`]).trim();
+	git(repoRoot, ["worktree", "add", "--detach", path, baseCommit]);
+	// Remember the base: if the sub-agent commits inside its worktree, HEAD moves and
+	// diffing against HEAD would silently drop those commits from the merge.
+	writeFileSync(join(worktreeGitDir(path), BASE_MARKER), baseCommit);
+	return { id: safeId, path, baseRef: baseCommit };
 }
 
 function changedFiles(cwd: string, baseRef: string): string[] {
@@ -76,18 +100,19 @@ function untrackedFiles(cwd: string): string[] {
 /**
  * Merge a worktree's changes back onto the main working tree.
  *
- * Applies the worktree diff (tracked files) with `git apply`, then copies new
- * untracked files. If the apply fails because the main tree already has
- * conflicting changes on the same files, returns an explicit conflict report
- * with both diffs; nothing is overwritten silently. Never throws on conflict;
- * throws only on unexpected git failures.
+ * Checks the worktree diff (tracked files, including commits made inside the
+ * worktree) with `git apply --check` and every new untracked file BEFORE writing
+ * anything, then applies them. A conflict therefore never leaves the main tree
+ * half-merged: it returns an explicit report with both diffs. Never throws on
+ * conflict; throws only on unexpected git failures.
  */
 export function mergeWorktree(repoRoot: string, id: string): MergeResult {
 	const path = worktreePath(repoRoot, id);
 	if (!existsSync(path)) throw new Error(`worktree ${id} not found at ${path}`);
-	const baseRef = git(path, ["rev-parse", "HEAD"]).trim();
+	const baseRef = worktreeBase(path);
+	// base..working tree: commits made in the worktree plus uncommitted edits.
 	const incomingDiff = git(path, ["diff", baseRef]);
-	const incomingUntracked = untrackedFiles(path).filter((f) => !f.startsWith(`${WORKTREE_ROOT}/`));
+	const incomingUntracked = untrackedFiles(path).filter((f) => !f.startsWith(WORKTREE_ROOT_GIT_PREFIX));
 
 	if (!incomingDiff.trim() && incomingUntracked.length === 0) {
 		return { ok: true, applied: "" };
@@ -95,13 +120,15 @@ export function mergeWorktree(repoRoot: string, id: string): MergeResult {
 
 	if (incomingDiff.trim()) {
 		try {
-			git(repoRoot, ["apply", "--whitespace=nowarn"], incomingDiff);
+			git(repoRoot, ["apply", "--check", "--whitespace=nowarn"], incomingDiff);
 		} catch {
-			const overlap = changedFiles(path, baseRef).filter((f) => changedFiles(repoRoot, baseRef).includes(f));
+			const incomingFiles = changedFiles(path, baseRef);
+			const currentFiles = new Set(changedFiles(repoRoot, baseRef));
+			const overlap = incomingFiles.filter((f) => currentFiles.has(f));
 			return {
 				ok: false,
 				conflict: {
-					files: overlap.length > 0 ? overlap : changedFiles(path, baseRef),
+					files: overlap.length > 0 ? overlap : incomingFiles,
 					incomingDiff,
 					currentDiff: git(repoRoot, ["diff", baseRef]),
 				},
@@ -109,11 +136,11 @@ export function mergeWorktree(repoRoot: string, id: string): MergeResult {
 		}
 	}
 
-	// Copy new files; an existing file with different content is a conflict.
+	// An existing file with different content is a conflict.
+	const newFiles: Array<{ dest: string; content: Buffer }> = [];
 	for (const rel of incomingUntracked) {
-		const src = join(path, rel);
+		const content = readFileSync(join(path, rel));
 		const dest = join(repoRoot, rel);
-		const content = readFileSync(src);
 		if (existsSync(dest)) {
 			if (!readFileSync(dest).equals(content)) {
 				return {
@@ -127,6 +154,11 @@ export function mergeWorktree(repoRoot: string, id: string): MergeResult {
 			}
 			continue;
 		}
+		newFiles.push({ dest, content });
+	}
+
+	if (incomingDiff.trim()) git(repoRoot, ["apply", "--whitespace=nowarn"], incomingDiff);
+	for (const { dest, content } of newFiles) {
 		mkdirSync(dirname(dest), { recursive: true });
 		writeFileSync(dest, content);
 	}

@@ -17,6 +17,9 @@ describe("worktree", () => {
 		git(repo, ["init"]);
 		git(repo, ["config", "user.email", "test@example.com"]);
 		git(repo, ["config", "user.name", "Test"]);
+		// Byte-exact checkouts: a global core.autocrlf=true (Git for Windows default)
+		// would turn the LF fixtures into CRLF in worktrees.
+		git(repo, ["config", "core.autocrlf", "false"]);
 		writeFileSync(join(repo, "a.txt"), "alpha\n");
 		writeFileSync(join(repo, "b.txt"), "beta\n");
 		git(repo, ["add", "."]);
@@ -31,7 +34,29 @@ describe("worktree", () => {
 		const wt = createWorktree(repo, "agent-1");
 		expect(wt.path).toBe(worktreePath(repo, "agent-1"));
 		expect(readFileSync(join(wt.path, "a.txt"), "utf-8")).toBe("alpha\n");
-		expect(git(repo, ["worktree", "list"])).toContain(wt.path);
+		// git prints forward slashes on Windows.
+		expect(git(repo, ["worktree", "list"]).replace(/\\/g, "/")).toContain(wt.path.replace(/\\/g, "/"));
+	});
+
+	it("includes commits made inside the worktree in the merge", () => {
+		const wt = createWorktree(repo, "committer");
+		writeFileSync(join(wt.path, "a.txt"), "alpha committed\n");
+		git(wt.path, ["commit", "-am", "agent work"]);
+		const result = mergeWorktree(repo, "committer");
+		expect(result.ok).toBe(true);
+		expect(readFileSync(join(repo, "a.txt"), "utf-8")).toBe("alpha committed\n");
+	});
+
+	it("leaves the main tree untouched when a new file conflicts", () => {
+		const wt = createWorktree(repo, "partial");
+		writeFileSync(join(wt.path, "a.txt"), "alpha from agent\n");
+		writeFileSync(join(wt.path, "new.txt"), "agent version\n");
+		writeFileSync(join(repo, "new.txt"), "main version\n");
+		const result = mergeWorktree(repo, "partial");
+		expect(result.ok).toBe(false);
+		expect(result.conflict?.files).toEqual(["new.txt"]);
+		// The tracked change must not have been applied on its own.
+		expect(readFileSync(join(repo, "a.txt"), "utf-8")).toBe("alpha\n");
 	});
 
 	it("sanitizes unsafe ids", () => {

@@ -24,6 +24,9 @@ export default mergeConfig(
 		},
 		resolve: {
 			alias: [
+				// Bundled extensions import the CLI package by its runtime alias "phi-code"
+				// (provided by the extension loader); tests load them from source.
+				{ find: /^phi-code$/, replacement: fileURLToPath(new URL("./src/index.ts", import.meta.url)) },
 				{
 					find: /^phi-code-client$/,
 					replacement: fileURLToPath(new URL("../client/src/index.ts", import.meta.url)),

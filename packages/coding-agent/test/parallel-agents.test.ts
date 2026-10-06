@@ -25,6 +25,9 @@ describe("parallel-agents", () => {
 		git(repo, ["init"]);
 		git(repo, ["config", "user.email", "test@example.com"]);
 		git(repo, ["config", "user.name", "Test"]);
+		// Byte-exact checkouts: a global core.autocrlf=true (Git for Windows default)
+		// would turn the LF fixtures into CRLF in worktrees.
+		git(repo, ["config", "core.autocrlf", "false"]);
 		writeFileSync(join(repo, "shared.txt"), "base\n");
 		writeFileSync(join(repo, "one.txt"), "1\n");
 		writeFileSync(join(repo, "two.txt"), "2\n");

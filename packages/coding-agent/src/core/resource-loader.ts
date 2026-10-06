@@ -115,6 +115,11 @@ function findShadowedContextFile(cwd: string): string | undefined {
 	return worktreeContextFile ? join(mainRepoRoot, basename(worktreeContextFile.path)) : undefined;
 }
 
+/** A context file with no content (e.g. a stray empty AGENTS.md in the home directory). */
+function isBlankContext(file: { content: string }): boolean {
+	return file.content.trim().length === 0;
+}
+
 export function loadProjectContextFiles(options: {
 	cwd: string;
 	agentDir: string;
@@ -127,7 +132,7 @@ export function loadProjectContextFiles(options: {
 
 	const globalContext = loadContextFileFromDir(resolvedAgentDir);
 	if (globalContext) {
-		contextFiles.push(globalContext);
+		if (!isBlankContext(globalContext)) contextFiles.push(globalContext);
 		seenPaths.add(globalContext.path);
 	}
 
@@ -141,7 +146,9 @@ export function loadProjectContextFiles(options: {
 		const isShadowed =
 			shadowedContextFile !== undefined && canonicalizePath(contextFile?.path ?? "") === shadowedContextFile;
 		if (contextFile && !isShadowed && !seenPaths.has(contextFile.path)) {
-			ancestorContextFiles.unshift(contextFile);
+			// An empty file still wins over the lower-priority names in its directory
+			// (an empty AGENTS.override.md hides AGENTS.md) but adds nothing to the prompt.
+			if (!isBlankContext(contextFile)) ancestorContextFiles.unshift(contextFile);
 			seenPaths.add(contextFile.path);
 		}
 

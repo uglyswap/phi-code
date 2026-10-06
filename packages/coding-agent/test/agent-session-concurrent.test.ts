@@ -16,7 +16,7 @@ import {
 	type TextContent,
 } from "phi-code-ai/compat";
 import { Type } from "typebox";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentSession } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
@@ -134,7 +134,8 @@ describe("AgentSession concurrent prompt guard", () => {
 		const firstPrompt = session.prompt("First message");
 
 		// Wait a tick for isStreaming to be set
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		// Wait for the run to actually start streaming (a fixed delay is flaky under load).
+		await vi.waitFor(() => expect(session.isStreaming).toBe(true), { timeout: 5000, interval: 5 });
 
 		// Verify we're streaming
 		expect(session.isStreaming).toBe(true);
@@ -154,7 +155,8 @@ describe("AgentSession concurrent prompt guard", () => {
 
 		// Start first prompt
 		const firstPrompt = session.prompt("First message");
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		// Wait for the run to actually start streaming (a fixed delay is flaky under load).
+		await vi.waitFor(() => expect(session.isStreaming).toBe(true), { timeout: 5000, interval: 5 });
 
 		// steer should work while streaming
 		expect(() => session.steer("Steering message")).not.toThrow();
@@ -170,7 +172,8 @@ describe("AgentSession concurrent prompt guard", () => {
 
 		// Start first prompt
 		const firstPrompt = session.prompt("First message");
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		// Wait for the run to actually start streaming (a fixed delay is flaky under load).
+		await vi.waitFor(() => expect(session.isStreaming).toBe(true), { timeout: 5000, interval: 5 });
 
 		// followUp should work while streaming
 		expect(() => session.followUp("Follow-up message")).not.toThrow();
@@ -265,7 +268,8 @@ describe("AgentSession concurrent prompt guard", () => {
 		});
 
 		const firstPrompt = session.prompt("First message");
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		// Wait for the run to actually start streaming (a fixed delay is flaky under load).
+		await vi.waitFor(() => expect(session.isStreaming).toBe(true), { timeout: 5000, interval: 5 });
 		expect(session.isStreaming).toBe(true);
 
 		const pi = (

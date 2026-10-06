@@ -23,6 +23,9 @@ async function createRuntime(credentials: AuthStorage | ReadOnlyAuthStorage): Pr
 
 describe("auth check command", () => {
 	beforeEach(() => {
+		// Isolate from the developer's real environment: an exported OPENAI_API_KEY
+		// would make the "openai" provider look configured in every case below.
+		vi.stubEnv("OPENAI_API_KEY", undefined);
 		if (existsSync(tempDir)) rmSync(tempDir, { recursive: true });
 		mkdirSync(tempDir, { recursive: true });
 	});

@@ -475,10 +475,16 @@ function collectAncestorAgentsSkillDirs(startDir: string): string[] {
 	const skillDirs: string[] = [];
 	const resolvedStartDir = resolve(startDir);
 	const gitRepoRoot = findGitRepoRoot(resolvedStartDir);
+	// ~/.agents/skills is loaded as USER skills; climbing from a project inside the
+	// home directory (no git repo) must not load it a second time as project skills.
+	const userSkillDirs = new Set(
+		[process.env.HOME, homedir()].filter((d): d is string => !!d).map((d) => join(resolve(d), ".agents", "skills")),
+	);
 
 	let dir = resolvedStartDir;
 	while (true) {
-		skillDirs.push(join(dir, ".agents", "skills"));
+		const skillDir = join(dir, ".agents", "skills");
+		if (!userSkillDirs.has(skillDir)) skillDirs.push(skillDir);
 		if (gitRepoRoot && dir === gitRepoRoot) {
 			break;
 		}

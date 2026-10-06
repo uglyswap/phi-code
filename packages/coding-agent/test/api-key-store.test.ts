@@ -59,14 +59,18 @@ describe("ApiKeyStore", () => {
 		}
 	});
 
-	test("getKey ignores env-var-style placeholder ($VARNAME) in store", () => {
+	test("getKey falls back to the env var when a stored $VARNAME placeholder is unset", () => {
 		const store = new ApiKeyStore({ configPath });
 		store.setKey("openai", "$OPENAI_API_KEY");
+		// Isolate from the developer's real environment: $OPENAI_API_KEY must resolve to nothing here.
+		const previous = process.env.OPENAI_API_KEY;
+		delete process.env.OPENAI_API_KEY;
 		process.env.TEST_OPENAI_KEY = "real-key";
 		try {
 			expect(store.getKey("openai", "TEST_OPENAI_KEY")).toBe("real-key");
 		} finally {
 			delete process.env.TEST_OPENAI_KEY;
+			if (previous !== undefined) process.env.OPENAI_API_KEY = previous;
 		}
 	});
 
