@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.99.3] - 2026-10-06
+
+### Fixed
+
+- `ontology_query` `relations` and `path` accept an entity name (case-insensitive) as well as its ID. An unknown reference is now an explicit "Entity not found" error instead of "No relations found", which read as "this entity has no relations". Relations are listed with entity names next to their IDs.
+
 ## [0.99.2] - 2026-10-06
 
 Large bug-fix release: the security fixes of the phi/pi comparison audit, about 120 functional bugs, and a verified fresh-install path (npm and standalone binary).

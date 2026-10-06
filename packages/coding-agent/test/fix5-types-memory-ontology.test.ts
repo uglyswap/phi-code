@@ -180,4 +180,45 @@ describe("fix5-types: ontology tools handle absent values explicitly", () => {
 		expect(empty.isError).toBeUndefined();
 		expect(empty.details).toEqual({ action: "find" });
 	});
+
+	it("ontology_query relations/path accept an entity name and report unknown entities as errors", async () => {
+		const pong = await tool("ontology_add")(
+			"1",
+			{ type: "entity", entityType: "Project", name: "cyberpunk-pong" },
+			undefined,
+			undefined,
+			{},
+		);
+		expect(pong.isError).toBeUndefined();
+		await tool("ontology_add")(
+			"2",
+			{ type: "entity", entityType: "Project", name: "cyberpunk-pacman" },
+			undefined,
+			undefined,
+			{},
+		);
+		await tool("ontology_add")(
+			"3",
+			{ type: "relation", from: "cyberpunk-pong", to: "cyberpunk-pacman", relationType: "references" },
+			undefined,
+			undefined,
+			{},
+		);
+		const query = tool("ontology_query");
+		const byName = await query("4", { action: "relations", entityId: "Cyberpunk-Pong" }, undefined, undefined, {});
+		expect(byName.isError).toBeUndefined();
+		expect(byName.content[0]?.text).toContain("Found 1 relations");
+		expect(byName.content[0]?.text).toContain("**cyberpunk-pacman**");
+		const unknown = await query("5", { action: "relations", entityId: "no-such-entity" }, undefined, undefined, {});
+		expect(unknown.isError).toBe(true);
+		expect(unknown.content[0]?.text).toContain("Entity not found");
+		const badPath = await query(
+			"6",
+			{ action: "path", fromId: "cyberpunk-pong", toId: "nope" },
+			undefined,
+			undefined,
+			{},
+		);
+		expect(badPath.isError).toBe(true);
+	});
 });

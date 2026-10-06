@@ -219,6 +219,20 @@ function findEntityByIdOrName(sigmaMemory: SigmaMemory, ref: string): OntologyEn
 	return sigmaMemory.ontology.findEntity({}).find((e) => e.name.toLowerCase() === key);
 }
 
+/** Explicit error so a wrong reference is never mistaken for an entity without relations. */
+function entityNotFound(ref: string, details: { action: string }) {
+	return {
+		content: [
+			{
+				type: "text" as const,
+				text: `Entity not found: "${ref}" matches no entity ID or name. Use ontology_query action=find to look it up.`,
+			},
+		],
+		details,
+		isError: true,
+	};
+}
+
 export default function memoryExtension(pi: ExtensionAPI) {
 	// Initialize sigma-memory with embedded vector store
 	// Cache the embedding model under the agent dir (honors PHI_CODING_AGENT_DIR)
@@ -789,9 +803,11 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			),
 			entityType: Type.Optional(Type.String({ description: "Filter by entity type (for 'find' action)" })),
 			name: Type.Optional(Type.String({ description: "Filter by name (partial match, for 'find' action)" })),
-			entityId: Type.Optional(Type.String({ description: "Entity ID (for 'relations' action)" })),
-			fromId: Type.Optional(Type.String({ description: "Source entity ID (for 'path' action)" })),
-			toId: Type.Optional(Type.String({ description: "Target entity ID (for 'path' action)" })),
+			entityId: Type.Optional(
+				Type.String({ description: "Entity ID or exact name, case-insensitive (for 'relations' action)" }),
+			),
+			fromId: Type.Optional(Type.String({ description: "Source entity ID or exact name (for 'path' action)" })),
+			toId: Type.Optional(Type.String({ description: "Target entity ID or exact name (for 'path' action)" })),
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
@@ -810,9 +826,23 @@ export default function memoryExtension(pi: ExtensionAPI) {
 					case "relations": {
 						if (!p.entityId)
 							return { content: [{ type: "text", text: "'entityId' required" }], details, isError: true };
-						const rels = sigmaMemory.ontology.findRelations(p.entityId);
-						if (rels.length === 0) return { content: [{ type: "text", text: "No relations found." }], details };
-						const text = rels.map((r) => `- \`${r.from}\` → **${r.type}** → \`${r.to}\``).join("\n");
+						// Accept a name as well as an ID: with a name, findRelations() used to
+						// answer "No relations found", which reads as "this entity has none".
+						const entity = findEntityByIdOrName(sigmaMemory, p.entityId);
+						if (!entity) return entityNotFound(p.entityId, details);
+						const rels = sigmaMemory.ontology.findRelations(entity.id);
+						if (rels.length === 0)
+							return {
+								content: [
+									{ type: "text", text: `No relations found for **${entity.name}** (\`${entity.id}\`).` },
+								],
+								details,
+							};
+						const label = (id: string) => {
+							const name = sigmaMemory.ontology.findEntity({ id })[0]?.name;
+							return name ? `**${name}** (\`${id}\`)` : `\`${id}\``;
+						};
+						const text = rels.map((r) => `- ${label(r.from)} → **${r.type}** → ${label(r.to)}`).join("\n");
 						return { content: [{ type: "text", text: `Found ${rels.length} relations:\n${text}` }], details };
 					}
 					case "path": {
@@ -822,7 +852,11 @@ export default function memoryExtension(pi: ExtensionAPI) {
 								details,
 								isError: true,
 							};
-						const path = sigmaMemory.ontology.queryPath(p.fromId, p.toId);
+						const from = findEntityByIdOrName(sigmaMemory, p.fromId);
+						if (!from) return entityNotFound(p.fromId, details);
+						const to = findEntityByIdOrName(sigmaMemory, p.toId);
+						if (!to) return entityNotFound(p.toId, details);
+						const path = sigmaMemory.ontology.queryPath(from.id, to.id);
 						if (!path)
 							return { content: [{ type: "text", text: "No path found between these entities." }], details };
 						// each step carries the relation that *leads to* its entity, so the
