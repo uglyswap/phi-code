@@ -79,30 +79,37 @@ jobs:
           version=$(node -p "require('./packages/coding-agent/package.json').version")
           node scripts/install-smoke/smoke.mjs "$RUNNER_TEMP/phi-install-smoke/run" "$version"
 
-      # TEMPORARY diagnostic: process exit after an ONNX embedding (macOS abort).
+      # TEMPORARY diagnostic: process.exit() after an ONNX embedding aborts on macOS.
+      # Which onnxruntime-node / transformers versions are affected?
       - name: Diagnose exit after embedding (temporary)
-        if: always()
+        if: always() && runner.os == 'macOS'
         continue-on-error: true
         run: |
-          cat > "$RUNNER_TEMP/onnx-exit.mjs" <<'EOS'
-          import { realpathSync } from "node:fs";
+          set +e
+          D="$RUNNER_TEMP/onnx-diag"
+          mkdir -p "$D"
+          cat > "$D/probe.mjs" <<'EOS'
+          import { createRequire } from "node:module";
           import { join } from "node:path";
           import { pathToFileURL } from "node:url";
-          const [agentDir, variant] = process.argv.slice(2);
-          const dir = realpathSync(join(agentDir, "extensions", "node_modules", "sigma-memory"));
-          const { VectorStore } = await import(pathToFileURL(join(dir, "dist", "index.js")).href);
-          const vs = new VectorStore(join(agentDir, "diag", variant, "vectors.db"), { modelCacheDir: join(agentDir, "cache", "models") });
-          await vs.init();
-          await vs.addDocument("a.md", "hello world embedding");
-          console.log(`variant ${variant}: embedded`);
-          if (variant === "dispose") await vs.pipeline.dispose();
-          if (variant === "close") vs.close();
-          if (variant === "close-wait") { vs.close(); await new Promise((r) => setTimeout(r, 200)); }
-          if (variant !== "natural") process.exit(0);
+          const dir = process.argv[2];
+          const req = createRequire(join(dir, "x.cjs"));
+          const t = await import(pathToFileURL(req.resolve("@huggingface/transformers")).href);
+          const ort = req(join(dir, "node_modules", "onnxruntime-node", "package.json"));
+          const extractor = await t.pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", { dtype: "q8", cache_dir: join(dir, "models") });
+          const out = await extractor("hello world", { pooling: "mean", normalize: true });
+          console.log(`transformers ok, onnxruntime-node ${ort.version}, dims=${out.dims}`);
+          process.exit(0);
           EOS
-          set +e
-          for v in exit dispose close close-wait natural; do
-            node "$RUNNER_TEMP/onnx-exit.mjs" "$RUNNER_TEMP/phi-install-smoke/run/agent" $v; echo "variant $v -> exit $?"
+          for spec in "3.8.1|" "3.8.1|1.24.3" "3.8.1|1.30.0" "4.3.1|"; do
+            tv=${spec%%|*}; ov=${spec##*|}; P="$D/t$tv-o$ov"; mkdir -p "$P"
+            if [ -n "$ov" ]; then
+              printf '{"private":true,"dependencies":{"@huggingface/transformers":"%s"},"overrides":{"onnxruntime-node":"%s"}}' "$tv" "$ov" > "$P/package.json"
+            else
+              printf '{"private":true,"dependencies":{"@huggingface/transformers":"%s"}}' "$tv" > "$P/package.json"
+            fi
+            (cd "$P" && npm install --no-audit --no-fund --loglevel=error > install.log 2>&1) || { echo "install failed for $spec"; tail -5 "$P/install.log"; }
+            node "$D/probe.mjs" "$P"; echo "transformers $tv onnxruntime-node ${ov:-default} -> exit $?"
           done
 
       - name: Upload logs
