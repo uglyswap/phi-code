@@ -1,16 +1,11 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import ignore from "ignore";
 import { basename, dirname, join, relative, resolve, sep } from "path";
-import { fileURLToPath } from "url";
-import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
+import { CONFIG_DIR_NAME, getAgentDir, getPackageDir } from "../config.ts";
 import { parseFrontmatter } from "../utils/frontmatter.ts";
 import { canonicalizePath, resolvePath } from "../utils/paths.ts";
 import type { ResourceDiagnostic } from "./diagnostics.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
-
-// ESM has no __dirname: derive it from import.meta.url (same shim as src/config.ts).
-// Used to locate the skills/ directory shipped inside the package.
-const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 
 /** Max name length per spec */
 const MAX_NAME_LENGTH = 64;
@@ -336,8 +331,11 @@ function loadSkillFromFile(
  *
  * Skills with disableModelInvocation=true are excluded from the prompt
  * (they can only be invoked explicitly via /skill:name commands).
+ *
+ * `fileReadTool` names the tool that loads skill files: when only bash is active
+ * the hint must not tell the model to use a read tool it does not have (#8552).
  */
-export function formatSkillsForPrompt(skills: Skill[]): string {
+export function formatSkillsForPrompt(skills: Skill[], fileReadTool: "read" | "bash" = "read"): string {
 	const visibleSkills = skills.filter((s) => !s.disableModelInvocation);
 
 	if (visibleSkills.length === 0) {
@@ -346,7 +344,9 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
 
 	const lines = [
 		"\n\nThe following skills provide specialized instructions for specific tasks.",
-		"Use the read tool to load a skill's file when the task matches its description.",
+		fileReadTool === "read"
+			? "Use the read tool to load a skill's file when the task matches its description."
+			: "Use bash to load a skill's file when the task matches its description.",
 		"When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
 		"",
 		"<available_skills>",
@@ -436,8 +436,11 @@ export function loadSkills(options: LoadSkillsOptions): LoadSkillsResult {
 		addSkills(loadSkillsFromDirInternal(join(resolvedAgentDir, "skills"), "user", true));
 		addSkills(loadSkillsFromDirInternal(resolve(resolvedCwd, CONFIG_DIR_NAME, "skills"), "project", true));
 
-		// Bundled Phi Code skills (shipped with the package)
-		const bundledSkillsDir = resolve(join(MODULE_DIR, "..", "..", "skills"));
+		// Bundled Phi Code skills (shipped with the package). Resolved through
+		// getPackageDir() like every other shipped asset: in a Bun binary
+		// import.meta.url points into the embedded $bunfs filesystem, while the
+		// skills are staged next to the executable (scripts/build-binaries.sh).
+		const bundledSkillsDir = resolve(getPackageDir(), "skills");
 		if (existsSync(bundledSkillsDir)) {
 			addSkills(loadSkillsFromDirInternal(bundledSkillsDir, "user", true));
 		}

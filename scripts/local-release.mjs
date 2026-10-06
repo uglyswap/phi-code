@@ -14,6 +14,14 @@ const packages = [
 	{ directory: "packages/client", name: "phi-code-client" },
 	{ directory: "packages/session-backends/sqlite-node", name: "phi-code-session-backend-sqlite-node" },
 	{ directory: "packages/server", name: "phi-code-server" },
+	// Runtime dependencies of the CLI that live in this repo: without them the local
+	// install would silently use the versions published on npm instead of this tree.
+	{ directory: "packages/camoufox-js", name: "@phi-code-admin/camoufox-js" },
+	{ directory: "packages/camofox-browser", name: "@phi-code-admin/camofox-browser" },
+	{ directory: "packages/browser", name: "@phi-code-admin/browser" },
+	{ directory: "packages/sigma-memory", name: "sigma-memory" },
+	{ directory: "packages/sigma-agents", name: "sigma-agents" },
+	{ directory: "packages/sigma-skills", name: "sigma-skills" },
 	{ directory: "packages/coding-agent", name: "@phi-code-admin/phi-code" },
 ];
 
@@ -225,7 +233,7 @@ if (!options.skipCheck) {
 }
 
 for (const pkg of packages) {
-	run("npm", ["run", "clean"], { cwd: pkg.directory });
+	run("npm", ["run", "clean", "--if-present"], { cwd: pkg.directory });
 	run("npm", ["run", pkg.directory === "packages/ai" ? "build:offline" : "build"], { cwd: pkg.directory });
 }
 

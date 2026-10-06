@@ -115,18 +115,9 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ## Contribution Gate
 
-All issues and PRs from new contributors are auto-closed by default.
+Issues and PRs are reviewed by hand; nothing is auto-closed. (The automatic gate inherited from Pi is disabled in this fork: its contributor list belongs to the Pi project.)
 
-Issues submitted Friday through Sunday are not guaranteed to be reviewed. If something is urgent, ask on the Pi community Discord: https://discord.com/invite/3cU7Bz4UPx
-
-Maintainers review auto-closed issues daily and reopen worthwhile ones. Issues that do not meet the quality bar below will not be reopened or receive a reply.
-
-Approval happens through maintainer replies on issues:
-
-- `lgtmi`: your future issues will not be auto-closed
-- `lgtm`: your future issues and PRs will not be auto-closed
-
-The command must be at the start of the reply (optionally after one or more `@username` mentions) or at the end. `lgtmi` does not grant rights to submit PRs. Only `lgtm` grants rights to submit PRs.
+Issues that do not meet the quality bar below may be closed without a reply. For anything security related, do not open a public issue: follow [SECURITY.md](SECURITY.md).
 
 ## Quality Bar For Issues
 
@@ -140,7 +131,7 @@ If you open an issue, keep it short, concrete, and worth reading.
 - Explain why it matters.
 - If you want to implement the change yourself, say so.
 
-If the issue is real and written well, a maintainer may reopen it or reply with `lgtmi` or `lgtm` in the command position described above.
+If the issue is real and written well, a maintainer will follow up on it.
 
 ## Blocking
 
@@ -150,7 +141,7 @@ If you send a large volume of issues through automation, your GitHub account wil
 
 ## Before Submitting a PR
 
-Do not open a PR unless you have already been approved by a maintainer using `lgtm` in the command position described above.
+For anything beyond a small, obvious fix, open an issue first and wait for a maintainer to agree on the approach before opening a PR.
 
 Before submitting a PR:
 
@@ -191,17 +182,13 @@ Use [GitHub Issues](https://github.com/uglyswap/phi-code/issues) with:
 
 ## Questions?
 
-Open a [GitHub Discussion or Issue](https://github.com/uglyswap/phi-code/issues), or ask on the Pi community [Discord](https://discord.com/invite/3cU7Bz4UPx).
+Open a [GitHub Issue](https://github.com/uglyswap/phi-code/issues).
 
 ## FAQ
 
-### Why are new issues and PRs auto-closed?
-
-The project receives more issues than the maintainers can responsibly review in real time. Many reports do not meet the quality bar in this guide or do not follow CONTRIBUTING.md. Some are slung at the repository mindlessly via an agent instead of being reviewed and shaped by the person submitting them. Auto-closing creates a buffer so maintainers can review the tracker on their own schedule and reopen the issues that meet the quality bar.
-
 ### Why are weekend issues lower priority?
 
-We triage the tracker during working hours. That means more issues can accumulate over the weekend. Anything submitted Friday through Sunday may be missed or given lower priority in the Monday review queue. If a problem is urgent, ask on Discord and include the short version, a repro, and the relevant logs.
+We triage the tracker during working hours. That means more issues can accumulate over the weekend. Anything submitted Friday through Sunday may be missed or given lower priority in the Monday review queue. If a problem is urgent, say so in the issue title and include the short version, a repro, and the relevant logs.
 
 ### Why do some issues get no reply?
 

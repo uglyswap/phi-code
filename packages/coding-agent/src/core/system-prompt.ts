@@ -163,13 +163,9 @@ ${APP_NAME} documentation (read only when the user asks about ${APP_NAME} itself
 	return prompt;
 }
 
-const READ_TOOL_SKILL_HINT = "Use the read tool to load a skill's file when the task matches its description.";
-const BASH_SKILL_HINT = "Use bash to load a skill's file when the task matches its description.";
-
 /** Skills section, telling the model to load skill files with bash when the read tool is not active. */
 function formatSkillsSection(skills: Skill[], fileReadTool: "read" | "bash"): string {
-	const section = formatSkillsForPrompt(skills);
-	return fileReadTool === "read" ? section : section.replace(READ_TOOL_SKILL_HINT, BASH_SKILL_HINT);
+	return formatSkillsForPrompt(skills, fileReadTool);
 }
 
 /**

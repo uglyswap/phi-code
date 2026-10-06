@@ -570,7 +570,8 @@ export class SettingsSelectorComponent extends Container {
 			{
 				id: "install-telemetry",
 				label: "Install telemetry",
-				description: "Send an anonymous version/update ping after changelog-detected updates",
+				description:
+					"Send provider attribution headers (OpenRouter, Cloudflare, NVIDIA NIM). phi sends no install/update ping",
 				currentValue: config.enableInstallTelemetry ? "true" : "false",
 				values: ["true", "false"],
 			},

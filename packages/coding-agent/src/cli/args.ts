@@ -493,7 +493,7 @@ ${chalk.bold("Environment Variables:")}
   ${ENV_SESSION_DIR.padEnd(32)} - Session storage directory (overridden by --session-dir)
   PHI_PACKAGE_DIR                  - Override package directory (for Nix/Guix store paths)
   PHI_OFFLINE                      - Disable startup network operations when set to 1/true/yes
-  PHI_TELEMETRY                    - Override install telemetry when set to 1/true/yes or 0/false/no
+  PHI_TELEMETRY                    - 1/true/yes or 0/false/no: provider attribution headers (no install ping)
   PHI_SHARE_VIEWER_URL             - Base URL for /share command (default: https://pi.dev/session/)
   (the inherited PI_* names are still accepted)
 

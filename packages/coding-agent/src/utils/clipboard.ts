@@ -43,10 +43,25 @@ export async function readClipboardText(): Promise<string | null> {
 	}
 }
 
+/**
+ * Windows writer: `clip.exe` decodes stdin with the console code page, so UTF-8 accents
+ * arrive corrupted, and UTF-16LE input either keeps its BOM in the clipboard or is
+ * misdetected without one (CJK). PowerShell reads stdin as UTF-8 and calls Set-Clipboard;
+ * the text never touches the command line, so nothing is interpolated or escaped.
+ */
+export const WINDOWS_SET_CLIPBOARD_SCRIPT =
+	"$ErrorActionPreference = 'Stop'; [Console]::InputEncoding = New-Object System.Text.UTF8Encoding $false; Set-Clipboard -Value ([Console]::In.ReadToEnd())";
+
 /** Platform clipboard writers, in preference order. */
 function getClipboardWriteCommands(p: NodeJS.Platform, env: NodeJS.ProcessEnv): Array<[string, string[]]> {
 	if (p === "darwin") return [["pbcopy", []]];
-	if (p === "win32") return [["clip", []]];
+	if (p === "win32") {
+		// clip stays as the fallback: it handles ASCII and the empty string, which Set-Clipboard rejects.
+		return [
+			["powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_SET_CLIPBOARD_SCRIPT]],
+			["clip", []],
+		];
+	}
 
 	const commands: Array<[string, string[]]> = [];
 	if (env.TERMUX_VERSION) commands.push(["termux-clipboard-set", []]);
