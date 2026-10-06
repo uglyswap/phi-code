@@ -1,9 +1,9 @@
 <p align="center">
-  <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
+  <a href="https://github.com/uglyswap/phi-code"><img alt="GitHub" src="https://img.shields.io/badge/github-uglyswap%2Fphi--code-181717?style=flat-square&logo=github" /></a>
   <a href="https://www.npmjs.com/package/@phi-code-admin/phi-code"><img alt="npm" src="https://img.shields.io/npm/v/@phi-code-admin/phi-code?style=flat-square" /></a>
 </p>
 
-> New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](CONTRIBUTING.md).
+> Bug reports and pull requests are welcome on [GitHub](https://github.com/uglyswap/phi-code/issues). Report security issues privately, see [SECURITY.md](SECURITY.md).
 
 # φ Phi Code
 
@@ -60,7 +60,7 @@ Phi Code takes Pi's brilliant minimal architecture and adds what's missing for s
 | **Web search** | None | Brave API + DuckDuckGo fallback |
 | **Browser automation** | None | Bundled [Camoufox](https://github.com/daijro/camoufox) (anti-detect Firefox) — 10 tools, works on Cloudflare/SPA |
 
-Pi's core is untouched — only 2 lines modified out of 500+ files. Everything is additive: extensions, skills, and new packages. Upstream Pi updates merge in minutes.
+Most of phi lives in additive extensions, skills, and new packages, but phi also modifies upstream Pi's source (rebranding, renamed packages, Windows fixes, extension loading), so upstream updates are real merges with conflicts. See [docs/fork-policy.md](packages/coding-agent/docs/fork-policy.md).
 
 ---
 
@@ -75,9 +75,13 @@ npm install -g @phi-code-admin/phi-code
 # Or run directly without installing
 npx @phi-code-admin/phi-code
 
-# Or install the standalone binary (no Node.js required)
+# Or install the standalone binary (no Node.js required), macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/uglyswap/phi-code/main/scripts/install.sh | sh
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/uglyswap/phi-code/main/scripts/install.ps1 | iex
 ```
+
+The installers verify the download against the release `SHA256SUMS` and install the whole release directory (the executable needs the `package.json`, themes and assets next to it). The standalone binary does not load the bundled phi extensions yet (`/plan`, MCP, memory, sub-agents, browser...): use the npm install for the full feature set.
 
 ### First Run
 
@@ -95,7 +99,7 @@ The setup wizard lets you:
 
 ### Requirements
 
-- **Node.js** 18+ (tested on 22.x)
+- **Node.js** 22.19+ (`engines` in `package.json`; not needed for the standalone binary)
 - **Operating systems**: Linux, macOS, Windows (via Git Bash, WSL, or native)
 - **API key**: Any supported provider key (Alibaba, OpenAI, Anthropic, Google, OpenRouter, Groq, or local models)
 
@@ -893,8 +897,8 @@ The `apiKey` field accepts either a literal key or an environment variable name 
 | `GOOGLE_API_KEY` | Google/Gemini models |
 | `OPENROUTER_API_KEY` | OpenRouter (300+ models) |
 | `GROQ_API_KEY` | Groq (fast inference) |
-| `PHI_DISABLE_PROJECT_EXTENSIONS` | Set to `1` to skip auto-loading project-local extensions (`cwd/.phi/extensions`), e.g. when opening an untrusted repo (global and bundled extensions still load) |
-| `PHI_DISABLE_BUNDLED_EXTENSIONS` | Set to `1` to skip auto-loading the bundled phi extensions shipped with the package (mirrors `PHI_DISABLE_PROJECT_EXTENSIONS`); useful for a bare agent or for test isolation |
+| `PHI_DISABLE_PROJECT_EXTENSIONS` | Set to `1` to skip every project-scoped extension (`cwd/.phi/extensions` and project packages), e.g. when opening an untrusted repo; global and bundled extensions still load. `PI_DISABLE_PROJECT_EXTENSIONS` is accepted too |
+| `PHI_DISABLE_BUNDLED_EXTENSIONS` | Set to `1` to skip the bundled phi extensions (the ones the package copies into `~/.phi/agent/extensions`); other extensions you installed there still load. Useful for a bare agent or for test isolation. `PI_DISABLE_BUNDLED_EXTENSIONS` is accepted too |
 
 ---
 
@@ -1032,8 +1036,8 @@ git clone https://github.com/uglyswap/phi-code.git
 cd phi-code
 
 npm install --ignore-scripts  # Install all dependencies without running lifecycle scripts
-npm run build                 # Refresh model data, then build all packages
-npm run build:offline         # Rebuild using existing model data without network access
+npm run build                 # Regenerate the model catalog live (network, --strict), then build all packages
+npm run build:offline         # Build with the committed model catalog, no network (what CI and releases use)
 npm run check                 # Lint, format, and type check
 npm test                      # Run tests (skips LLM-dependent tests without API keys)
 
@@ -1046,7 +1050,7 @@ npx tsx packages/coding-agent/src/cli.ts
 
 `npm run build` builds the core packages in dependency order (`tui` → `telemetry` → `ai` →
 `agent` → `session-backends/sqlite-node` → `protocol` → `client` → `server` → `coding-agent`)
-and then the phi packages (`sigma-memory`, `sigma-agents`, `sigma-skills`, `mom`, `pods`).
+and then the phi packages (`sigma-memory`, `sigma-agents`, `sigma-skills`, `mom`, `pods`, `camoufox-js`, `camofox-browser`, `browser`, `web-ui`).
 
 ### Monorepo Structure
 
@@ -1091,15 +1095,16 @@ The source archive includes the generated provider model data used for the relea
 
 We treat npm dependency changes as reviewed code changes.
 
-- Direct external dependencies are pinned to exact versions. Internal workspace packages remain version-ranged.
+- Exact pins are the goal for direct external dependencies (internal workspace packages remain version-ranged), but they are **not enforced yet**: `npm run check:pinned-deps` currently reports unpinned ranges and is not part of `npm run check` or CI.
 - `.npmrc` sets `save-exact=true` and `min-release-age=2` to avoid same-day dependency releases during npm resolution.
 - `package-lock.json` is the dependency ground truth. Pre-commit blocks accidental lockfile commits unless `PI_ALLOW_LOCKFILE_CHANGE=1` is set.
-- `npm run check` verifies pinned direct deps, native TypeScript import compatibility, and the generated coding-agent shrinkwrap.
-- The published CLI package includes `packages/coding-agent/npm-shrinkwrap.json`, generated from the root lockfile, to pin transitive deps for npm users.
+- `npm run check` verifies formatting/lint, native TypeScript import compatibility, that `packages/coding-agent/install-lock` is up to date, types, the browser bundle and web-ui.
+- The published CLI package does **not** include an `npm-shrinkwrap.json`: npm users get the ranges declared in `package.json`. `packages/coding-agent/npm-shrinkwrap.json` is still generated (`npm run check:shrinkwrap`) but not shipped.
 - Release smoke tests use `npm run release:local` to build, pack, and create isolated npm and Bun installs outside the repo before tagging a release.
 - Local release installs, documented npm installs, and `phi update --self` use `--ignore-scripts` where supported.
 - CI installs with `npm ci --ignore-scripts`, and a scheduled GitHub workflow runs `npm audit --omit=dev` plus `npm audit signatures --omit=dev`.
-- Shrinkwrap generation has an explicit allowlist for dependency lifecycle scripts; new lifecycle-script deps fail checks until reviewed.
+- The install-lock generator (`scripts/generate-coding-agent-install-lock.mjs`) has an explicit allowlist for dependency lifecycle scripts; new lifecycle-script deps fail the check until reviewed.
+- `scripts/publish.mjs` refuses to skip a version that is already on npm when its content differs from the local package: changed packages must be version-bumped.
 
 ---
 
@@ -1189,14 +1194,14 @@ Pi is exceptional. Its minimalist philosophy — a 200-token system prompt, 4 ba
 - Web search integration
 - Bundled Camoufox browser engine (10 browser_* tools, anti-detect Firefox)
 
-**What we didn't touch:**
+**What we kept from Pi:**
 - Pi's core agent loop
 - Pi's tool system (read, write, edit, bash)
 - Pi's provider architecture (20+ providers)
 - Pi's TUI and rendering
 - Pi's extension API
 
-Only 2 lines modified in Pi's source — the config directory name (`.pi` → `.phi`) and the CLI binary name. Everything else is extensions and new packages.
+These are kept, not untouched: phi carries changes in Pi's source (rebranding to `phi` / `~/.phi`, renamed packages, Windows fixes, extension loading, bug fixes). See [docs/fork-policy.md](packages/coding-agent/docs/fork-policy.md) for what is rebranded and how upstream is merged.
 
 ### Thank You
 

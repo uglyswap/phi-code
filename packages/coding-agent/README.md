@@ -4,7 +4,7 @@
   <a href="https://github.com/uglyswap/phi-code"><img alt="GitHub" src="https://img.shields.io/badge/github-uglyswap%2Fphi--code-181717?style=flat-square&logo=github" /></a>
 </p>
 
-> New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](../../CONTRIBUTING.md).
+> Bug reports and pull requests are welcome on [GitHub](https://github.com/uglyswap/phi-code/issues). Report security issues privately, see [SECURITY.md](../../SECURITY.md).
 
 ---
 
@@ -337,9 +337,9 @@ Use `/trust` in interactive mode to save a project trust decision for future ses
 phi has two separate startup features:
 
 - **Update check:** fetches `https://registry.npmjs.org/@phi-code-admin/phi-code/latest` to check whether a newer phi-code version exists. Disable it with `PI_SKIP_VERSION_CHECK=1`. Disabling update checks only turns off this check.
-- **Install/update telemetry:** no version ping. phi-code sends no telemetry pings (the inherited upstream ping to `pi.dev/api/report-install` was removed). The `enableInstallTelemetry` setting is still honored: it controls the optional provider attribution headers sent to OpenRouter, Cloudflare, and direct NVIDIA NIM requests. Opt out by setting `enableInstallTelemetry` to `false` in `settings.json`, or by setting `PI_TELEMETRY=0`. This does not disable update checks.
+- **Install/update telemetry:** no version ping. phi-code sends no telemetry pings (the inherited upstream ping to `pi.dev/api/report-install` was removed). The `enableInstallTelemetry` setting is still honored: it controls the optional provider attribution headers sent to OpenRouter, Cloudflare, and direct NVIDIA NIM requests. Opt out by setting `enableInstallTelemetry` to `false` in `settings.json`, or by setting `PHI_TELEMETRY=0` (`PI_TELEMETRY` is accepted too). This does not disable update checks.
 
-Use `--offline` or `PI_OFFLINE=1` to disable all startup network operations described here, including update checks, package update checks, and install/update telemetry.
+Use `--offline` or `PHI_OFFLINE=1` (`PI_OFFLINE` is accepted too) to disable all startup network operations described here, including update checks and package update checks.
 
 ---
 
@@ -519,21 +519,19 @@ See [docs/rpc.md](docs/rpc.md) for the protocol.
 
 ## Philosophy
 
-phi is aggressively extensible so it doesn't have to dictate your workflow. Features that other tools bake in can be built with [extensions](#extensions), [skills](#skills), or installed from third-party [phi packages](#phi-packages). This keeps the core minimal while letting you shape phi to fit how you work.
+phi keeps upstream Pi's small, aggressively extensible core: features that other tools bake in are built with [extensions](#extensions), [skills](#skills), or installed from third-party [phi packages](#phi-packages).
 
-**No MCP.** Build CLI tools with READMEs (see [Skills](#skills)), or build an extension that adds MCP support. [Why?](https://mariozechner.at/posts/2025-11-02-what-if-you-dont-need-mcp/)
+Where upstream Pi deliberately leaves them out, phi ships the following features as **bundled extensions** (`extensions/phi`), on by default:
 
-**No sub-agents.** There's many ways to do this. Spawn phi instances via tmux, or build your own with [extensions](#extensions), or install a package that does it your way.
+- **MCP client**: `/mcp`, `/mcp:import` (Claude Code, Codex, Gemini, Cursor, VS Code configs), `/mcp:prompt`.
+- **Sub-agents**: `/agents`, and a parallel read-only exploration with `/plan --fanout`.
+- **Plan mode and orchestration**: `/plan`, `/debug`, `/build` (see [Execution-Grounded Modes](#execution-grounded-modes)).
+- **Permission rules**: `/permissions`, `~/.phi/agent/permissions.json` and `.phi/permissions.json`. They are a convenience guard, not a sandbox: run phi in a container or VM for isolation.
+- **To-dos**: a todo tool.
 
-**No permission popups.** Run in a container, or build your own confirmation flow with [extensions](#extensions) inline with your environment and security requirements.
+Set `PHI_DISABLE_BUNDLED_EXTENSIONS=1` for a bare agent closer to upstream Pi. There is still **no background bash**: use tmux for full observability and direct interaction.
 
-**No plan mode.** Write plans to files, or build it with [extensions](#extensions), or install a package.
-
-**No built-in to-dos.** They confuse models. Use a TODO.md file, or build your own with [extensions](#extensions).
-
-**No background bash.** Use tmux. Full observability, direct interaction.
-
-Read the [blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/) for the full rationale.
+Read upstream's [blog post](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/) for the rationale of the minimal core.
 
 ---
 
@@ -634,7 +632,7 @@ Combine `--no-*` with explicit flags to load exactly what you need, ignoring set
 |--------|-------------|
 | `--system-prompt <text>` | Replace default prompt (context files and skills still appended) |
 | `--append-system-prompt <text>` | Append to system prompt |
-| `--tui-mode <mode>` | TUI mode: `regular` (default) or experimental `fullscreen` |
+| `--tui-mode <mode>` | TUI mode: `regular` (default) or `fullscreen` |
 | `--use-theme <name[/name]>` | Set the initial interactive theme for this run without changing settings |
 | `--verbose` | Force verbose startup |
 | `-a`, `--approve` | Trust project-local files for this run |
@@ -697,12 +695,12 @@ phi --thinking high "Solve this complex problem"
 | `PI_CODING_AGENT` | Set to `true` by the CLI and RPC entry points so child processes can detect that they run inside phi |
 | `PHI_CODING_AGENT_DIR` | Override config directory (default: `~/.phi/agent`) |
 | `PHI_CODING_AGENT_SESSION_DIR` | Override session storage directory (overridden by `--session-dir`) |
-| `PHI_DISABLE_BUNDLED_EXTENSIONS` | Skip loading the bundled phi extensions |
-| `PHI_DISABLE_PROJECT_EXTENSIONS` | Skip loading project-local extensions |
+| `PHI_DISABLE_BUNDLED_EXTENSIONS` | Set to `1` to skip the bundled phi extensions (the ones the package copies into `~/.phi/agent/extensions`); other extensions you installed there still load. `PI_DISABLE_BUNDLED_EXTENSIONS` is accepted too |
+| `PHI_DISABLE_PROJECT_EXTENSIONS` | Set to `1` to skip every project-scoped extension (`.phi/extensions` and project packages), e.g. when opening an untrusted repo; global and bundled extensions still load. `PI_DISABLE_PROJECT_EXTENSIONS` is accepted too |
 | `PI_PACKAGE_DIR` | Override package directory (useful for Nix/Guix where store paths tokenize poorly) |
 | `PI_OFFLINE` | Disable startup network operations, including update checks and package update checks |
 | `PI_SKIP_VERSION_CHECK` | Skip the phi-code version update check at startup. This prevents the npm registry latest-version request |
-| `PI_TELEMETRY` | Override provider attribution headers (phi-code sends no install/update ping). Use `1`/`true`/`yes` to enable or `0`/`false`/`no` to disable. This does not disable update checks |
+| `PHI_TELEMETRY` (or `PI_TELEMETRY`) | `1`/`true`/`yes` or `0`/`false`/`no`: overrides `enableInstallTelemetry`, which only controls the provider attribution headers (OpenRouter, Cloudflare, NVIDIA NIM). phi-code sends no install/update ping. Does not disable update checks |
 | `PI_CACHE_RETENTION` | Set to `long` for extended prompt cache (Anthropic: 1h, OpenAI: 24h) |
 | `VISUAL`, `EDITOR` | Fallback external editor for Ctrl+G when `externalEditor` is unset; defaults to Notepad on Windows and `nano` elsewhere |
 

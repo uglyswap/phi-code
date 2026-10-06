@@ -174,7 +174,7 @@ function createPhiShim(installDirectory) {
 	const binDirectory = join(installDirectory, "node_modules", ".bin");
 	if (process.platform === "win32") {
 		if (existsSync(join(binDirectory, "phi.cmd"))) {
-			writeFileSync(join(installDirectory, "phi.cmd"), '@ECHO off\r\n"%~dp0node_modules\\.bin\\pi.cmd" %*\r\n');
+			writeFileSync(join(installDirectory, "phi.cmd"), '@ECHO off\r\n"%~dp0node_modules\\.bin\\phi.cmd" %*\r\n');
 			writeFileSync(join(installDirectory, "phi.ps1"), '& "$PSScriptRoot/node_modules/.bin/phi.ps1" @args\n');
 			return;
 		}

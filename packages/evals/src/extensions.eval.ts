@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { CONFIG_DIR_NAME } from "@phi-code-admin/phi-code";
 import { describe, expect } from "vitest";
 import { createJudge, describeEval } from "vitest-evals";
 import { createPiCodingAgentHarness, type PiCodingAgentInput } from "./pi-harness.ts";
@@ -21,12 +22,14 @@ function createExtensionAuthoringHarness(name: string, transformSystemPrompt?: (
 		...(transformSystemPrompt ? { transformSystemPrompt } : {}),
 		output: ({ response, session }) => {
 			const extensions = session.resourceLoader.getExtensions();
-			const extensionPath = join(session.sessionManager.getCwd(), ".pi", "extensions", "hello.ts");
+			// Project-local extensions live in the branded config dir (".phi"), not ".pi".
+			const extensionPath = join(session.sessionManager.getCwd(), CONFIG_DIR_NAME, "extensions", "hello.ts");
 			const extensionSource = existsSync(extensionPath) ? readFileSync(extensionPath, "utf8") : null;
 			return {
 				response,
 				systemPromptHasGuidelines: session.systemPrompt.includes("\nGuidelines:\n"),
-				systemPromptHasPiDocs: session.systemPrompt.includes("\nPi documentation (read only"),
+				// The header is "${APP_NAME} documentation (read only ...", i.e. "phi", not "Pi".
+				systemPromptHasPiDocs: session.systemPrompt.includes(" documentation (read only when the user asks about "),
 				extensionErrors: extensions.errors,
 				loadedExtensions: extensions.extensions.map(({ path, tools }) => ({
 					path,

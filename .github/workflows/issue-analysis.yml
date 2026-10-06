@@ -45,6 +45,10 @@
 # /ir extension command (.pi/extensions/import-repro.ts):
 #   pi "/ir <gist-id | gist-url | pi.dev/session URL>"
 
+# DISABLED for phi-code (inherited from upstream pi). Authorization requires an
+# active member of the earendil-works/staff team (EARENDIL_ORG_READ_TOKEN) and
+# the pi-analyze environment secrets, none of which exist for this repository.
+# Kept (not deleted) pending a maintainer decision.
 name: Issue Analysis
 
 on:
@@ -63,6 +67,7 @@ concurrency:
 
 jobs:
   authorize:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.verify.outputs.should_run }}

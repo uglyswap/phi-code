@@ -4,12 +4,15 @@
 # Mirrors .github/workflows/build-binaries.yml
 #
 # Usage:
-#   ./scripts/build-binaries.sh [--skip-install] [--skip-deps] [--skip-build] [--offline-model-data] [--platform <platform>] [--out <dir>]
+#   ./scripts/build-binaries.sh [--skip-install] [--skip-deps] [--skip-build] [--skip-extension-deps] [--offline-model-data] [--platform <platform>] [--out <dir>]
 #
 # Options:
 #   --skip-install       Skip npm ci
 #   --skip-deps          Skip installing cross-platform dependencies
 #   --skip-build         Skip the package build
+#   --skip-extension-deps Do not ship the bundled extensions' npm dependencies
+#                        (sigma-*, MCP SDK, zod, ...): smaller archives, but the
+#                        memory/agents/skills/mcp/ast-grep/lsp extensions fail to load
 #   --offline-model-data Build with bundled model data instead of refreshing it
 #   --platform <name>    Build only for specified platform (darwin-arm64, darwin-x64, linux-x64, linux-arm64, windows-x64, windows-arm64)
 #   --out <dir>          Output directory (default: packages/coding-agent/binaries)
@@ -30,6 +33,7 @@ cd "$(dirname "$0")/.."
 SKIP_INSTALL=false
 SKIP_DEPS=false
 SKIP_BUILD=false
+SKIP_EXTENSION_DEPS=false
 OFFLINE_MODEL_DATA=false
 PLATFORM=""
 OUTPUT_DIR=""
@@ -46,6 +50,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-build)
             SKIP_BUILD=true
+            shift
+            ;;
+        --skip-extension-deps)
+            SKIP_EXTENSION_DEPS=true
             shift
             ;;
         --offline-model-data)
@@ -179,6 +187,61 @@ for platform in "${PLATFORMS[@]}"; do
     fi
 done
 
+# Bundled phi extensions import npm packages that are not embedded in the
+# executable (only typebox and phi-code* are, via the loader's virtual modules).
+# Keep this list in sync with BUNDLED_EXTENSION_DEPS in src/core/bundled-assets.ts
+# and extensionDeps in scripts/postinstall.cjs.
+EXTENSION_DEPS=(sigma-memory sigma-agents sigma-skills zod @modelcontextprotocol/sdk @ast-grep/napi cross-spawn ignore)
+# Workspace packages are packed from the local build so the archive ships the
+# exact code this release was built from (build:phi has built their dist/).
+EXTENSION_WORKSPACE_DEPS=(sigma-memory sigma-agents sigma-skills)
+EXTENSION_TARBALLS_DIR=""
+if [[ "$SKIP_EXTENSION_DEPS" == "false" ]]; then
+    echo "==> Packing workspace extension dependencies..."
+    EXTENSION_TARBALLS_DIR=$(mktemp -d)
+    for package in "${EXTENSION_WORKSPACE_DEPS[@]}"; do
+        (cd "../$package" && npm pack --ignore-scripts --pack-destination "$EXTENSION_TARBALLS_DIR" >/dev/null)
+    done
+fi
+
+# Install the extension dependencies for one target platform into a staging
+# prefix. --os/--cpu make npm pick the target's native optional packages
+# (@ast-grep/napi-*, sharp's @img/*) instead of the build host's. Install
+# scripts are skipped: onnxruntime-node already ships its CPU binaries for every
+# platform in its tarball.
+stage_extension_deps() {
+    local platform="$1"
+    local staging="$2"
+    local npm_os=""
+    local npm_cpu="${platform##*-}"
+    case "$platform" in
+        darwin-*) npm_os="darwin" ;;
+        linux-*) npm_os="linux" ;;
+        windows-*) npm_os="win32" ;;
+    esac
+    # Versions come from packages/coding-agent/package.json; workspace packages
+    # point at the tarballs packed above.
+    PHI_EXT_TARBALLS_DIR="$EXTENSION_TARBALLS_DIR" PHI_EXT_STAGING="$staging" node -e '
+        const fs = require("fs");
+        const path = require("path");
+        const pkg = require("./package.json");
+        const deps = { ...pkg.optionalDependencies, ...pkg.dependencies };
+        const tarballDir = process.env.PHI_EXT_TARBALLS_DIR;
+        const tarballs = fs.readdirSync(tarballDir);
+        const out = {};
+        for (const name of process.argv.slice(1)) {
+            const prefix = name.replace(/^@/, "").replace(/\//g, "-") + "-";
+            const tarball = tarballs.find((f) => f.startsWith(prefix) && /^\d/.test(f.slice(prefix.length)) && f.endsWith(".tgz"));
+            if (tarball) out[name] = "file:" + path.join(tarballDir, tarball);
+            else if (deps[name]) out[name] = deps[name];
+            else throw new Error("No version for bundled extension dependency " + name + " in packages/coding-agent/package.json");
+        }
+        fs.writeFileSync(path.join(process.env.PHI_EXT_STAGING, "package.json"), JSON.stringify({ private: true, dependencies: out }, null, 2));
+    ' "${EXTENSION_DEPS[@]}"
+    npm install --prefix "$staging" --omit=dev --ignore-scripts --no-audit --no-fund --package-lock=false \
+        --os="$npm_os" --cpu="$npm_cpu"
+}
+
 echo "==> Creating release archives..."
 
 # Copy shared files to each platform directory
@@ -189,6 +252,17 @@ for platform in "${PLATFORMS[@]}"; do
     cp ../../node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm "$OUTPUT_DIR/$platform/"
     mkdir -p "$OUTPUT_DIR/$platform/theme"
     cp dist/modes/interactive/theme/*.json "$OUTPUT_DIR/$platform/theme/"
+    # Extended built-in theme pack: theme.ts reads <themes dir>/defaults/*.json.
+    mkdir -p "$OUTPUT_DIR/$platform/theme/defaults"
+    cp dist/modes/interactive/theme/defaults/*.json "$OUTPUT_DIR/$platform/theme/defaults/"
+    # Bundled phi extensions ship as TypeScript sources loaded at runtime; stage
+    # them next to the executable, where getPackageDir() points in a Bun binary.
+    mkdir -p "$OUTPUT_DIR/$platform/extensions"
+    cp -r extensions/phi "$OUTPUT_DIR/$platform/extensions/"
+    # Bundled agents and skills: copied into the agent dir on first start, like
+    # postinstall.cjs does for npm installs (src/core/bundled-assets.ts).
+    cp -r agents "$OUTPUT_DIR/$platform/"
+    cp -r skills "$OUTPUT_DIR/$platform/"
     mkdir -p "$OUTPUT_DIR/$platform/assets"
     cp dist/modes/interactive/assets/* "$OUTPUT_DIR/$platform/assets/"
     cp -r dist/core/export-html "$OUTPUT_DIR/$platform/"
@@ -227,6 +301,18 @@ for platform in "${PLATFORMS[@]}"; do
     cp "../../node_modules/@mariozechner/$clipboard_native_package/$clipboard_native_file" \
         "$OUTPUT_DIR/$platform/node_modules/@mariozechner/clipboard/"
 
+    # Extension dependencies next to the executable: extensions loaded from
+    # extensions/phi resolve them by walking up to this node_modules, and the
+    # copies made in the agent dir link to it (src/core/bundled-assets.ts).
+    if [[ "$SKIP_EXTENSION_DEPS" == "false" ]]; then
+        echo "Staging extension dependencies for $platform..."
+        ext_staging=$(mktemp -d)
+        stage_extension_deps "$platform" "$ext_staging"
+        rm -rf "$ext_staging/node_modules/.bin"
+        cp -R "$ext_staging/node_modules/." "$OUTPUT_DIR/$platform/node_modules/"
+        rm -rf "$ext_staging"
+    fi
+
     # Copy terminal input native helpers next to compiled binaries.
     if [[ "$platform" == darwin-* ]]; then
         mkdir -p "$OUTPUT_DIR/$platform/native/darwin/prebuilds/$platform"
@@ -242,6 +328,10 @@ for platform in "${PLATFORMS[@]}"; do
         cp ../tui/native/win32/prebuilds/$win32_arch_dir/win32-console-mode.node "$OUTPUT_DIR/$platform/native/win32/prebuilds/$win32_arch_dir/"
     fi
 done
+
+if [[ -n "$EXTENSION_TARBALLS_DIR" ]]; then
+    rm -rf "$EXTENSION_TARBALLS_DIR"
+fi
 
 # Create archives
 cd "$OUTPUT_DIR"

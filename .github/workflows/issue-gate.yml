@@ -1,3 +1,7 @@
+# DISABLED for phi-code (inherited from upstream pi). It auto-closes every issue
+# whose author is not listed in .github/APPROVED_CONTRIBUTORS, and that list is
+# pi's contributor list, so it closed phi users' issues. Kept (not deleted)
+# pending a maintainer decision: delete it, or re-enable it with a phi-owned list.
 name: Issue Gate
 
 on:
@@ -6,6 +10,7 @@ on:
 
 jobs:
   check-contributor:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

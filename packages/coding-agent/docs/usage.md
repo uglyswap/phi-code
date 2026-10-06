@@ -241,7 +241,7 @@ phi --no-extensions -e ./my-extension.ts
 |--------|-------------|
 | `--system-prompt <text>` | Replace default prompt; context files and skills are still appended |
 | `--append-system-prompt <text>` | Append to system prompt |
-| `--tui-mode <mode>` | TUI mode: `regular` (default) or experimental `fullscreen` |
+| `--tui-mode <mode>` | TUI mode: `regular` (default) or `fullscreen` |
 | `--use-theme <name[/name]>` | Set the initial interactive theme for this run without changing settings |
 | `--verbose` | Force verbose startup |
 | `-a`, `--approve` | Trust project-local files for this run |
@@ -305,12 +305,12 @@ phi --exclude-tools ask_question
 | `PI_CODING_AGENT` | Set to `true` by the CLI and RPC entry points so child processes can detect that they run inside phi |
 | `PHI_CODING_AGENT_DIR` | Override config directory; default is `~/.phi/agent` |
 | `PHI_CODING_AGENT_SESSION_DIR` | Override session storage directory; overridden by `--session-dir` |
-| `PHI_DISABLE_BUNDLED_EXTENSIONS` | Skip loading the bundled phi extensions |
-| `PHI_DISABLE_PROJECT_EXTENSIONS` | Skip loading project-local extensions |
+| `PHI_DISABLE_BUNDLED_EXTENSIONS` | Set to `1` to skip the bundled phi extensions (the ones the package copies into `~/.phi/agent/extensions`); other extensions you installed there still load. `PI_DISABLE_BUNDLED_EXTENSIONS` is accepted too |
+| `PHI_DISABLE_PROJECT_EXTENSIONS` | Set to `1` to skip every project-scoped extension (`.phi/extensions` and project packages), e.g. when opening an untrusted repo; global and bundled extensions still load. `PI_DISABLE_PROJECT_EXTENSIONS` is accepted too |
 | `PI_PACKAGE_DIR` | Override package directory, useful for Nix/Guix store paths |
 | `PI_OFFLINE` | Disable startup network operations, including update checks and package update checks |
 | `PI_SKIP_VERSION_CHECK` | Skip the phi-code version update check at startup. This prevents the npm registry latest-version request |
-| `PI_TELEMETRY` | Override provider attribution headers (phi-code sends no install/update ping): `1`/`true`/`yes` or `0`/`false`/`no`. This does not disable update checks |
+| `PHI_TELEMETRY` (or `PI_TELEMETRY`) | `1`/`true`/`yes` or `0`/`false`/`no`: overrides `enableInstallTelemetry`, which only controls the provider attribution headers (OpenRouter, Cloudflare, NVIDIA NIM). phi-code sends no install/update ping. Does not disable update checks |
 | `PI_CACHE_RETENTION` | Set to `long` for extended prompt cache where supported |
 | `VISUAL`, `EDITOR` | Fallback external editor for Ctrl+G when `externalEditor` is unset; defaults to Notepad on Windows and `nano` elsewhere |
 

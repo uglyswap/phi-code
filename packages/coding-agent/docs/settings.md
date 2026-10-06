@@ -56,7 +56,7 @@ Use `/trust` in interactive mode to save a project trust decision for future ses
 | `quietStartup` | boolean | `false` | Hide startup header |
 | `defaultProjectTrust` | string | `"ask"` | Fallback project trust behavior: `"ask"`, `"always"`, or `"never"`. Global setting only |
 | `collapseChangelog` | boolean | `false` | Show condensed changelog after updates |
-| `enableInstallTelemetry` | boolean | `true` | Send an anonymous install/update version ping after first install or changelog-detected updates. This does not control update checks |
+| `enableInstallTelemetry` | boolean | `true` | Send the provider attribution headers (OpenRouter, Cloudflare, NVIDIA NIM). phi-code sends no install/update ping; the name is inherited from upstream. `PHI_TELEMETRY` (or `PI_TELEMETRY`) overrides it. This does not control update checks |
 | `enableAnalytics` | boolean | `false` | Opt-in analytics data sharing. Currently only asked for during the experimental first-time setup (`PI_EXPERIMENTAL=1`) |
 | `trackingId` | string | - | Analytics tracking identifier, generated when `enableAnalytics` is turned on |
 | `doubleEscapeAction` | string | `"tree"` | Action for double-escape: `"tree"`, `"fork"`, or `"none"` |
@@ -65,7 +65,7 @@ Use `/trust` in interactive mode to save a project trust decision for future ses
 | `outputPad` | number | `1` | Horizontal padding for user messages, assistant messages, and thinking (0 or 1) |
 | `autocompleteMaxVisible` | number | `5` | Max visible items in autocomplete dropdown (3-20) |
 | `showHardwareCursor` | boolean | `false` | Show the terminal cursor while TUI positions it for IME support |
-| `tuiMode` | string | `"regular"` | Interactive TUI mode: `"regular"` or experimental `"fullscreen"`. Changes from `/settings` apply immediately; `--tui-mode` overrides this setting at startup |
+| `tuiMode` | string | `"regular"` | Interactive TUI mode: `"regular"` or `"fullscreen"`. Changes from `/settings` apply immediately; `--tui-mode` overrides this setting at startup |
 | `fullscreenExitOutput` | string | `"transcript"` | Fullscreen exit output: `"transcript"` prints the final transcript and resume hint, while `"resume-hint"` restores the previous screen and prints only the resume hint. Has no effect in regular TUI mode |
 | `fullscreenScrollbar` | string | `"auto"` | Fullscreen transcript scrollbar: `"auto"` shows it temporarily while scrolling, `"always"` reserves the rightmost column and keeps it visible, and `"hidden"` hides it. Has no effect in regular TUI mode |
 
@@ -79,7 +79,7 @@ For VS Code, include `--wait` so pi resumes after the editor exits:
 
 ### Telemetry and update checks
 
-phi-code sends no install/update telemetry (the inherited upstream ping to `pi.dev` was removed; `enableInstallTelemetry` is kept for settings compatibility but has no effect). The update check fetches `https://registry.npmjs.org/@phi-code-admin/phi-code/latest` to look for a newer phi-code release.
+phi-code sends no install/update telemetry (the inherited upstream ping to `pi.dev` was removed). `enableInstallTelemetry` (overridden by `PHI_TELEMETRY`/`PI_TELEMETRY`) only controls the optional provider attribution headers sent to OpenRouter, Cloudflare and direct NVIDIA NIM requests. The update check fetches `https://registry.npmjs.org/@phi-code-admin/phi-code/latest` to look for a newer phi-code release.
 
 Set `PI_SKIP_VERSION_CHECK=1` to disable the phi-code version update check. Use `--offline` or `PI_OFFLINE=1` to disable all startup network operations described here, including update checks and package update checks.
 
@@ -141,6 +141,7 @@ Set `PI_SKIP_VERSION_CHECK=1` to disable the phi-code version update check. Use 
 | `retry.enabled` | boolean | `true` | Enable automatic agent-level retry on transient errors |
 | `retry.maxRetries` | number | `3` | Maximum agent-level retry attempts |
 | `retry.baseDelayMs` | number | `2000` | Base delay for agent-level exponential backoff (2s, 4s, 8s) |
+| `retry.maxAgentDelayMs` | number | `60000` | Cap for one agent-level retry delay |
 | `retry.provider.timeoutMs` | number | SDK default | Provider/SDK request timeout in milliseconds |
 | `retry.provider.maxRetries` | number | `0` | Provider/SDK retry attempts |
 | `retry.provider.maxRetryDelayMs` | number | `60000` | Max server-requested delay before failing (60s) |

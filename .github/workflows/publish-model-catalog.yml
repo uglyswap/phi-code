@@ -1,23 +1,29 @@
+# DISABLED for phi-code (inherited from upstream pi). It uploads the model
+# catalog to pi's R2 bucket (environment pi-model-upload, PI_ARTIFACTS_R2_*
+# secrets) on an hourly schedule and after every CI run; phi has no such bucket
+# and ships its catalog in git (see refresh-models.yml). The automatic triggers
+# are commented out and the jobs never run. Kept (not deleted) pending a
+# maintainer decision.
 name: Publish Model Catalog
 
 on:
-  workflow_run:
-    workflows:
-      - CI
-    types:
-      - completed
-  pull_request:
-    paths:
-      - '.github/workflows/publish-model-catalog.yml'
-      - '.gitignore'
-      - 'package.json'
-      - 'packages/ai/**'
-      - 'scripts/publish-model-catalog.mjs'
+  # workflow_run:
+  #   workflows:
+  #     - CI
+  #   types:
+  #     - completed
+  # pull_request:
+  #   paths:
+  #     - '.github/workflows/publish-model-catalog.yml'
+  #     - '.gitignore'
+  #     - 'package.json'
+  #     - 'packages/ai/**'
+  #     - 'scripts/publish-model-catalog.mjs'
   # GitHub schedules use UTC. Run hourly candidates across the CET/CEST
   # boundaries; the publish job only uploads at 10:17, 12:17, and 14:17
   # Europe/Vienna time.
-  schedule:
-    - cron: '17 8-13 * * 1-5'
+  # schedule:
+  #   - cron: '17 8-13 * * 1-5'
   workflow_dispatch:
     inputs:
       source_ref:
@@ -36,7 +42,8 @@ permissions:
 
 jobs:
   generate:
-    if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
+    # Upstream condition: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    if: ${{ false }}
     runs-on: ubuntu-latest
     env:
       SOURCE_REF: ${{ github.event.workflow_run.head_sha || inputs.source_ref || github.sha }}
@@ -71,7 +78,8 @@ jobs:
           retention-days: 14
 
   publish:
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+    # Upstream condition: github.event_name == 'schedule' || github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    if: ${{ false }}
     needs: generate
     runs-on: ubuntu-latest
     environment: pi-model-upload

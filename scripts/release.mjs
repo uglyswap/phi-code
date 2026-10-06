@@ -11,19 +11,23 @@
  * 2. Verify every public workspace package is registered on npm
  * 3. Bump version via npm run version:xxx or set an explicit version
  * 4. Update CHANGELOG.md files: [Unreleased] -> [version] - date
- * 5. Regenerate release artifacts (model data)
+ * 5. Regenerate release artifacts (model data, coding-agent install lock)
  * 6. Run checks, build and tests
  * 7. Preflight publish (dry-run) before any irreversible git state
- * 8. Commit and tag the release
- * 9. Publish to npm, rolling back the local commit + tag on failure
- * 10. Add new [Unreleased] section to changelogs
- * 11. Commit next-cycle changelog updates
- * 12. Push main and the tag
+ * 8. Commit and tag the release (tag = coding-agent version)
+ * 9. Add new [Unreleased] section to changelogs
+ * 10. Commit next-cycle changelog updates
+ * 11. Push main and the tag
+ *
+ * Nothing is published from this machine: pushing the tag starts
+ * .github/workflows/build-binaries.yml, whose publish-npm job publishes with npm
+ * trusted publishing (OIDC + provenance, which only works inside GitHub Actions).
  */
 
 import { execSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { spawnNpmSync } from "./npm-command.mjs";
 import { findPackageDirectories } from "./package-workspaces.mjs";
 import { getPublicWorkspacePackages } from "./release-packages.mjs";
 
@@ -49,14 +53,19 @@ function run(cmd, options = {}) {
 	}
 }
 
-// NOTE: packages are versioned independently (see scripts/sync-versions.js).
-// This derives the single git-tag / changelog version from packages/ai, which
-// may differ from a given package's published version (e.g. coding-agent). The
-// tag is a repo-level marker, not a per-package version. Adjust the source here
-// if the team adopts a different headline-version policy.
+// Packages are versioned independently (see scripts/sync-versions.js). The git
+// tag follows the CLI (packages/coding-agent): build-binaries.yml passes the tag
+// to scripts/create-source-archive.sh, which refuses any version other than the
+// coding-agent one, and the internal packages' 0.84.x line collides with the
+// upstream pi tags.
+const HEADLINE_PACKAGE_DIR = "packages/coding-agent";
+
+function readPackageVersion(directory) {
+	return JSON.parse(readFileSync(join(directory, "package.json"), "utf-8")).version;
+}
+
 function getVersion() {
-	const pkg = JSON.parse(readFileSync("packages/ai/package.json", "utf-8"));
-	return pkg.version;
+	return readPackageVersion(HEADLINE_PACKAGE_DIR);
 }
 
 function assertPackagesAreRegisteredWithNpm() {
@@ -65,7 +74,7 @@ function assertPackagesAreRegisteredWithNpm() {
 
 	console.log("Checking npm package registration...");
 	for (const packageName of packageNames) {
-		const result = spawnSync(process.platform === "win32" ? "npm.cmd" : "npm", ["view", packageName, "version", "--json"], {
+		const result = spawnNpmSync(["view", packageName, "version", "--json"], {
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "pipe"],
 		});
@@ -91,6 +100,23 @@ function assertPackagesAreRegisteredWithNpm() {
 	console.log("  All public workspace packages are registered on npm\n");
 }
 
+// The repository carries upstream pi's tags too: refuse before committing rather
+// than failing on `git tag` after the release commit exists.
+function assertTagIsFree(tag) {
+	const local = spawnSync("git", ["rev-parse", "--quiet", "--verify", `refs/tags/${tag}`], { stdio: "ignore" });
+	const remote = spawnSync("git", ["ls-remote", "--tags", "origin", `refs/tags/${tag}`], { encoding: "utf8" });
+	if (remote.status !== 0) {
+		console.error(`Error: could not query origin for tag ${tag}.\n${remote.stderr ?? ""}`);
+		process.exit(1);
+	}
+	if (local.status === 0 || remote.stdout.trim()) {
+		console.error(
+			`Error: tag ${tag} already exists (${local.status === 0 ? "locally" : "on origin"}). Choose an explicit version that does not collide: node scripts/release.mjs <x.y.z>`,
+		);
+		process.exit(1);
+	}
+}
+
 function compareVersions(a, b) {
 	const aParts = a.split(".").map(Number);
 	const bParts = b.split(".").map(Number);
@@ -103,10 +129,6 @@ function compareVersions(a, b) {
 	}
 
 	return 0;
-}
-
-function shellQuote(value) {
-	return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function removeStaleWorkspaceLockEntries() {
@@ -143,7 +165,14 @@ function stageChangedFiles() {
 		return;
 	}
 
-	run(`git add -- ${paths.map(shellQuote).join(" ")}`);
+	// Pass the paths as argv (no shell): the previous POSIX single-quoting was
+	// handed to cmd.exe on Windows, which keeps the quotes and made git fail.
+	console.log(`$ git add -- ${paths.join(" ")}`);
+	const result = spawnSync("git", ["add", "--", ...paths], { stdio: "inherit" });
+	if (result.status !== 0) {
+		console.error("Command failed: git add");
+		process.exit(1);
+	}
 }
 
 function bumpOrSetVersion(target) {
@@ -158,8 +187,11 @@ function bumpOrSetVersion(target) {
 			process.exit(1);
 		}
 
-		console.log(`Setting explicit version (${target})...`);
-		run(`npm version ${target} --workspaces --no-git-tag-version --no-workspaces-update && node scripts/sync-versions.js && npm install --package-lock-only --ignore-scripts`);
+		// The explicit version is the CLI's (it is compared with, and tagged as, the
+		// coding-agent version). Applying it to every workspace would put all the
+		// independently versioned packages back on a single lockstep line.
+		console.log(`Setting explicit ${HEADLINE_PACKAGE_DIR} version (${target})...`);
+		run(`npm version ${target} --workspace=${HEADLINE_PACKAGE_DIR} --no-git-tag-version --no-workspaces-update && node scripts/sync-versions.js && npm install --package-lock-only --ignore-scripts`);
 	}
 
 	// npm version can temporarily install the previous workspace versions before
@@ -177,7 +209,7 @@ function getChangelogs() {
 		.filter((path) => existsSync(path));
 }
 
-function updateChangelogsForRelease(version) {
+function updateChangelogsForRelease() {
 	const date = new Date().toISOString().split("T")[0];
 	const changelogs = getChangelogs();
 
@@ -189,9 +221,11 @@ function updateChangelogsForRelease(version) {
 			continue;
 		}
 
+		// Each package's changelog gets that package's own (independent) version.
+		const packageVersion = readPackageVersion(dirname(changelog));
 		const updated = content.replace(
 			"## [Unreleased]",
-			`## [${version}] - ${date}`
+			`## [${packageVersion}] - ${date}`
 		);
 		writeFileSync(changelog, updated);
 		console.log(`  Updated ${changelog}`);
@@ -234,16 +268,20 @@ assertPackagesAreRegisteredWithNpm();
 // 3. Bump or set version
 const version = bumpOrSetVersion(RELEASE_TARGET);
 console.log(`  New version: ${version}\n`);
+assertTagIsFree(`v${version}`);
 
 // 4. Update changelogs
 console.log("Updating CHANGELOG.md files...");
-updateChangelogsForRelease(version);
+updateChangelogsForRelease();
 console.log();
 
 // 5. Regenerate release artifacts
 console.log("Regenerating release artifacts...");
 run("npm run generate:models");
 run("npm run check:model-data");
+// The version bump changes the internal versions recorded in the coding-agent
+// install lock; build-binaries.yml rejects the tag if it is stale (--check).
+run("npm run install-lock:coding-agent");
 console.log();
 
 // 6. Run checks and tests
@@ -273,31 +311,18 @@ run(`git commit -m "Release v${version}"`);
 run(`git tag v${version}`);
 console.log();
 
-// 9. Publish (with rollback of the local commit + tag on failure)
-console.log("Publishing to npm...");
-try {
-	execSync("npm run publish", { encoding: "utf-8", stdio: "inherit" });
-} catch {
-	console.error("\nPublish failed. Rolling back local tag and release commit...");
-	run(`git tag -d v${version}`, { ignoreError: true });
-	run("git reset --hard HEAD~1", { ignoreError: true });
-	console.error("Rolled back. Re-run the release after resolving the publish error.");
-	process.exit(1);
-}
-console.log();
-
-// 10. Add new [Unreleased] sections
+// 9. Add new [Unreleased] sections
 console.log("Adding [Unreleased] sections for next cycle...");
 addUnreleasedSection();
 console.log();
 
-// 11. Commit
+// 10. Commit
 console.log("Committing changelog updates...");
 stageChangedFiles();
 run(`git commit -m "Add [Unreleased] section for next cycle"`);
 console.log();
 
-// 12. Push
+// 11. Push (the tag push starts the CI publication)
 console.log("Pushing to remote...");
 run("git push origin main");
 run(`git push origin v${version}`);

@@ -1,3 +1,9 @@
+# DISABLED for phi-code (inherited from upstream pi's moderation). It labels
+# "possibly-openclaw-clanker" every issue or pull request whose author is not in
+# .github/APPROVED_CONTRIBUTORS (pi's contributor list) and has activity on
+# openclaw/openclaw: a policy of the pi project, not of phi. It also uses an
+# unpinned actions/github-script@v7. Kept (not deleted) pending a maintainer
+# decision.
 name: OpenClaw Gate
 
 on:
@@ -8,6 +14,7 @@ on:
 
 jobs:
   check-contributor:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -6,7 +6,7 @@
 
 Phi Code (Φ Code) is an open-source coding agent forked from [Pi](https://github.com/badlogic/pi-mono). It enhances Pi with:
 
-- **Persistent Memory** — QMD vector search + Ontology graph + Markdown notes
+- **Persistent Memory**: embedded vector search + Ontology graph + Markdown notes (`sigma-memory`)
 - **Typed Sub-Agents** — explore, plan, code, test, review — each routed to the optimal model
 - **Intelligent Routing** — Automatically selects the best model for each task
 - **Orchestrator** — Converts high-level descriptions into specs → todo → parallel execution
@@ -15,8 +15,9 @@ Phi Code (Φ Code) is an open-source coding agent forked from [Pi](https://githu
 
 ## Architecture
 
-Phi Code is designed as a set of **extensions** and **new packages** on top of Pi's core.
-Only 2 lines of Pi's original code are modified — everything else is additive.
+Phi Code is mostly a set of **extensions** and **new packages** on top of Pi's core, but it
+also modifies upstream source files (rebranding, renamed packages, Windows fixes, extension
+loading). See `packages/coding-agent/docs/fork-policy.md` before touching upstream code.
 
 ## Key Directories
 
@@ -25,7 +26,7 @@ Only 2 lines of Pi's original code are modified — everything else is additive.
 - `packages/coding-agent/config/` — Routing schema + example (defaults live in `SmartRouter.defaultConfig()`)
 - `packages/coding-agent/extensions/phi/` — Core Phi Code extensions
 
-## Models (Alibaba Coding Plan — Free)
+## Models (Alibaba Coding Plan, requires an Alibaba Coding Plan API key)
 
 | Model | Best For | Agent Role |
 |---|---|---|
@@ -89,7 +90,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 - When updating `undici`, you MUST read its changelog/release notes for the target version and evaluate whether any changes may affect functionality before applying the update.
 - Hydrate/update locally with `npm install --ignore-scripts`; clean/CI-style with `npm ci --ignore-scripts`. Don't run lifecycle scripts unless the user asks.
 - If dep metadata changes, refresh `package-lock.json` with `npm install --package-lock-only --ignore-scripts`.
-- If `packages/coding-agent/npm-shrinkwrap.json` needs regen, run `node scripts/generate-coding-agent-shrinkwrap.mjs` (verify with `--check` or `npm run check`). New deps with lifecycle scripts require review and an explicit allowlist entry in that script; never add one silently.
+- If dependencies change, regenerate the coding-agent install lock with `npm run install-lock:coding-agent` (`npm run check` and the release workflow verify it with `--check`). New deps with lifecycle scripts require review and an explicit allowlist entry in `scripts/generate-coding-agent-install-lock.mjs`; never add one silently.
+- `packages/coding-agent/npm-shrinkwrap.json` is not published (not in the package `files`); if you keep it in sync, use `npm run shrinkwrap:coding-agent` and `npm run check:shrinkwrap` (not part of `npm run check`).
 - Pre-commit blocks lockfile commits unless `PI_ALLOW_LOCKFILE_CHANGE=1` (the env var name kept by `scripts/check-lockfile-commit.mjs`). Don't bypass unless the user wants the lockfile change committed.
 
 ## Git
@@ -116,7 +118,7 @@ If rebase conflicts occur:
 
 ## Issues and PRs
 
-See `CONTRIBUTING.md` for the contributor gate (auto-close workflows, `lgtm`/`lgtmi`, quality bar).
+The inherited contributor gate workflows (`issue-gate.yml`, `pr-gate.yml`, `openclaw-gate.yml`) are disabled in this repository: issues and PRs are not auto-closed. See `CONTRIBUTING.md` for the quality bar.
 
 When reviewing PRs:
 
@@ -151,9 +153,9 @@ tmux send-keys -t phi-test Escape               # special keys (also C-o for ctr
 tmux kill-session -t phi-test
 ```
 
-On Windows, `pi-test.bat` is meant to wrap the same entry point, but it delegates to a
-`pi-test.ps1` that is not present in the repo; use `npx tsx packages/coding-agent/src/cli.ts`
-directly until that script is restored.
+On Windows, run the same entry point directly: `npx tsx packages/coding-agent/src/cli.ts`.
+`pi-test.bat` / `pi-test.ps1` do not start the TUI: they run the repository test suite
+(`npm run test`, all workspaces), which the rules above say not to run unless asked.
 
 ## Changelog
 
@@ -174,13 +176,11 @@ Attribution:
 
 ## Releasing
 
-**Lockstep versioning**: all packages share one version; every release updates all together. `patch` = fixes + additions, `minor` = breaking changes. No major releases.
+**Independent versioning**: each package has its own version line (internal packages 0.84.x, the CLI `@phi-code-admin/phi-code` 0.99.x, `sigma-*`, browser packages...). Do not move them back to a single lockstep version. The git tag `vX.Y.Z` is the CLI (`packages/coding-agent`) version. Any package whose content changed since its last publication needs its own version bump: `scripts/publish.mjs` fails when a version already on npm has different content.
 
 1. **Update CHANGELOGs**: ask the user whether they ran the `/cl` prompt on the latest commit on `main`. If not, they must run `/cl` first to audit and update each package's `[Unreleased]` section before releasing.
 
 2. **Local smoke test**: build an unpublished release and smoke test from outside the repo (so it can't resolve workspace files).
-
-   Blocker to fix first: `scripts/local-release.mjs` is still upstream-named. It aborts on `rootPackageJson.name !== "pi-monorepo"` (the root package is `phi-code-monorepo`), and it stages `pi`/`pi.cmd`/`pi.ps1` launchers pointing at `node_modules/.bin/pi` while the published bin is `phi`. Until that script is renamed, the commands below cannot run as written.
 
    ```bash
    npm run release:local -- --out /tmp/phi-local-release --force
@@ -200,20 +200,20 @@ Attribution:
    /tmp/phi-local-release/bun/phi -p "Say exactly: ok"
    /tmp/phi-local-release/bun/phi
    ```
-   Verify both Node and Bun startup, model/account listing, interactive startup, and at least one real prompt with the intended default provider. The bare commands `/tmp/phi-local-release/node/phi` and `/tmp/phi-local-release/bun/phi` start interactive mode; run each in tmux, submit a prompt, and wait for the model reply before considering the interactive smoke test passed. Failures are release blockers unless the user explicitly accepts the risk.
+   On Windows the launchers are `phi.cmd` / `phi.exe`. Only the 9 packages listed in `scripts/local-release.mjs` are packed from the working tree; `sigma-*`, the browser packages, `mom` and `pods` still resolve from the npm registry in that test. Verify both Node and Bun startup, model/account listing, interactive startup, and at least one real prompt with the intended default provider. The bare commands start interactive mode; run each in tmux, submit a prompt, and wait for the model reply before considering the interactive smoke test passed. Failures are release blockers unless the user explicitly accepts the risk.
 
 3. **Run the release script**:
    ```bash
-   PI_ALLOW_LOCKFILE_CHANGE=1 npm_config_min_release_age=0 npm run release:patch    # fixes + additions
-   PI_ALLOW_LOCKFILE_CHANGE=1 npm_config_min_release_age=0 npm run release:minor    # breaking changes
+   PI_ALLOW_LOCKFILE_CHANGE=1 npm_config_min_release_age=0 npm run release:patch    # bumps every workspace package by a patch on its own line
+   PI_ALLOW_LOCKFILE_CHANGE=1 npm_config_min_release_age=0 node scripts/release.mjs <x.y.z>   # sets only the CLI version
    ```
-   Use `npm_config_min_release_age=0` only for the release command. The repo's normal npm age gate can otherwise block the release lockfile refresh when the current workspace package version was published recently. Review any lockfile or shrinkwrap diffs the release creates before push.
+   Use `npm_config_min_release_age=0` only for the release command. The repo's normal npm age gate can otherwise block the release lockfile refresh when the current workspace package version was published recently. Review any lockfile or install-lock diffs the release creates before push.
 
-   The release script bumps all package versions, updates changelogs, regenerates release artifacts, runs `npm run check`, commits `Release vX.Y.Z`, tags `vX.Y.Z`, adds fresh `## [Unreleased]` changelog sections, commits `Add [Unreleased] section for next cycle`, then pushes `main` and the tag. Do not rerun the release script after a tag was pushed.
+   The release script refuses to start if the CLI tag already exists (the repository also carries upstream pi tags), bumps the versions, moves each package's `[Unreleased]` changelog section to that package's own version, regenerates the model catalog and the coding-agent install lock, runs `npm run check`, `build:offline`, `npm test` and a dry-run publish (which also flags already-published versions whose content changed), commits `Release vX.Y.Z`, tags `vX.Y.Z`, adds fresh `## [Unreleased]` sections, commits, then pushes `main` and the tag. It publishes nothing locally. Do not rerun the release script after a tag was pushed.
 
-4. **CI verifies and announces the npm release**: pushing the `vX.Y.Z` tag triggers `.github/workflows/build-binaries.yml`. The `publish-npm` job uses npm trusted publishing through GitHub Actions OIDC with environment `npm-publish`; no local `npm publish`, `npm whoami`, OTP, or WebAuthn flow is required. After publishing, `announce-pi-dev-release` verifies every public workspace package resolves at the exact release version and that its npm tarball is available, then writes the verified release marker to R2. `pi.dev/api/latest-version` reads that marker; it must never announce a release from npm before this job succeeds.
+4. **CI publishes**: pushing the `vX.Y.Z` tag triggers `.github/workflows/build-binaries.yml`: build the binaries from the source archive, stage a draft GitHub Release, then `publish-npm` publishes the npm packages with npm trusted publishing (GitHub Actions OIDC, environment `npm-publish`, provenance; no local `npm publish`, OTP or WebAuthn), and `publish-github-release` publishes the draft (the installers download `releases/latest`). The inherited `announce-pi-dev-release` job (pi's R2 marker) is disabled.
 
-5. **If CI publish or announcement fails**: inspect the failed job. The publish helper is idempotent and skips package versions already present on npm; the announcement job rechecks availability before updating the R2 marker. Rerun the failed job or workflow after fixing CI or transient npm issues. Do not rerun `npm run release:patch` or `npm run release:minor` for the same version.
+5. **If CI publish fails**: inspect the failed job. A failure before `publish-github-release` deletes the draft release. The publish helper is idempotent: it skips versions already on npm with identical content. Rerun the failed workflow (or `workflow_dispatch` with the tag) after fixing CI or transient npm issues. Do not rerun `npm run release:patch` for the same version.
 
 ## User Override
 

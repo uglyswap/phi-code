@@ -19,8 +19,10 @@ jobs:
           node-version: 22
           cache: 'npm'
 
+      # Lifecycle scripts are not needed to lint and typecheck (and would run the
+      # Camoufox downloader and the coding-agent postinstall on every PR).
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       # Lint + format + types gate every PR, including fork PRs that bypass the
       # local pre-commit hook. `biome ci` fails on any diff instead of writing.
@@ -67,8 +69,26 @@ jobs:
           sudo apt-get install -y fd-find ripgrep
           sudo ln -sf $(which fdfind) /usr/local/bin/fd
 
+      # build:offline compiles the committed model catalog. The plain `build`
+      # regenerates it live from provider APIs with --strict, so any provider
+      # outage failed CI; refreshing the catalog is refresh-models.yml's job.
       - name: Build
-        run: npm run build
+        run: npm run build:offline
+
+      # Full repo gate (lint, TS import style, install-lock, typecheck, browser
+      # bundle smoke, web-ui). Runs after the build because web-ui type-checks
+      # against the built workspace packages.
+      - name: Check
+        run: npm run check
+
+      # Bundled extensions have their own tsconfig (not covered by the root typecheck).
+      - name: Extensions typecheck
+        run: npm run check:ext --workspace packages/coding-agent
+
+      # The bundled extensions ship as source and are loaded by jiti against the
+      # built core: typechecking alone misses import-time failures.
+      - name: Extensions runtime smoke
+        run: npm run check:extensions-smoke
 
       - name: Test
         run: npm test
