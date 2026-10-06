@@ -265,6 +265,30 @@ const noOpUIContext: ExtensionUIContext = {
 	setToolsExpanded: () => {},
 };
 
+function isValidUserBashResult(value: unknown): value is UserBashEventResult {
+	if (typeof value !== "object" || value === null) return false;
+	const candidate = value as UserBashEventResult;
+	const hasOperations = typeof candidate.operations === "object" && candidate.operations !== null;
+	const hasResult =
+		typeof candidate.result === "object" &&
+		candidate.result !== null &&
+		typeof candidate.result.output === "string" &&
+		typeof candidate.result.cancelled === "boolean";
+	return hasOperations || hasResult;
+}
+
+/** Result reported when the command is NOT executed because an interceptor failed. */
+function blockedUserBashResult(extensionPath: string, reason: string): UserBashEventResult {
+	return {
+		result: {
+			output: `Command not executed: extension ${extensionPath} failed while handling it (${reason}).\n`,
+			exitCode: undefined,
+			cancelled: true,
+			truncated: false,
+		},
+	};
+}
+
 export class ExtensionRunner {
 	private extensions: Extension[];
 	private runtime: ExtensionRuntime;
@@ -962,9 +986,13 @@ export class ExtensionRunner {
 			for (const handler of handlers) {
 				try {
 					const handlerResult = await handler(event, ctx);
-					if (handlerResult) {
-						return handlerResult as UserBashEventResult;
+					if (handlerResult === undefined || handlerResult === null) continue;
+					if (isValidUserBashResult(handlerResult)) {
+						return handlerResult;
 					}
+					// A routing extension (SSH, sandbox...) returned something unusable:
+					// fail closed instead of silently running the command on this machine.
+					return blockedUserBashResult(ext.path, "returned an invalid user_bash result");
 				} catch (err) {
 					const message = err instanceof Error ? err.message : String(err);
 					const stack = err instanceof Error ? err.stack : undefined;
@@ -974,6 +1002,9 @@ export class ExtensionRunner {
 						error: message,
 						stack,
 					});
+					// Fail closed: an extension that intercepts `!cmd` (sandbox, remote host)
+					// crashed, so running the command locally could bypass its isolation.
+					return blockedUserBashResult(ext.path, message);
 				}
 			}
 		}

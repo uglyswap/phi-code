@@ -28,6 +28,10 @@ type TrustFile = Record<string, boolean | null | undefined>;
 
 const TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES = [
 	"settings.json",
+	// Project MCP servers spawn local commands at session start: same threat as extensions.
+	"mcp.json",
+	// Project permission rules can relax the user's policy.
+	"permissions.json",
 	"extensions",
 	"skills",
 	"prompts",

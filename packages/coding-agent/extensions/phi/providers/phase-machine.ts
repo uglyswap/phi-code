@@ -19,6 +19,7 @@ import {
 	isTransientError,
 	type PhaseVerdict,
 	parsePhaseVerdict,
+	providerErrorTexts,
 } from "./orchestrator-helpers.ts";
 
 export interface PhaseEndAnalysis {
@@ -60,15 +61,15 @@ export function analyzePhaseMessages(rawMessages: readonly unknown[]): PhaseEndA
 
 	const userAborted = messages.some((m) => m.role === "assistant" && m.stopReason === "aborted");
 
-	const hasAuthError = messages.some((m) => {
-		const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content || "");
-		return (
+	// Only a provider error ends the orchestration as an auth failure: a phase that
+	// merely prints "401 Unauthorized" (curl output, an API spec under work) is fine.
+	const hasAuthError = providerErrorTexts(rawMessages).some(
+		(content) =>
 			content.includes("401") &&
 			(content.includes("invalid access token") ||
 				content.includes("token expired") ||
-				content.includes("Unauthorized"))
-		);
-	});
+				content.includes("Unauthorized")),
+	);
 
 	const filesWritten: string[] = [];
 	const filesEdited: string[] = [];

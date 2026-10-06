@@ -365,6 +365,11 @@ export interface AgentToolResult<T> {
 	details: T;
 	/** Usage from the final tool execution itself, if available. Not used for main LLM context accounting. */
 	usage?: Usage;
+	/**
+	 * Report a failure without throwing. The model sees `content` as an error result, like a
+	 * thrown error, but `details` are kept for the UI.
+	 */
+	isError?: boolean;
 	/** Names of tools introduced by this result and available from this transcript point onward. */
 	addedToolNames?: string[];
 	/**

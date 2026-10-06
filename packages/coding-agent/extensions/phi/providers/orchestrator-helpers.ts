@@ -66,15 +66,30 @@ export function extractHandoff(content: string): string {
 }
 
 /**
+ * Text of the provider errors in a phase: only assistant turns that ENDED in an
+ * error count. The phase prompt (which itself mentions "timeout"), tool output
+ * (test runners print "timed out", curl prints "503"...) and normal replies are
+ * not provider failures; scanning them made every TEST/VERIFY phase retry.
+ */
+export function providerErrorTexts(messages: readonly unknown[]): string[] {
+	const texts: string[] = [];
+	for (const m of messages || []) {
+		const msg = (m ?? {}) as { role?: unknown; stopReason?: unknown; errorMessage?: unknown; content?: unknown };
+		if (msg.role !== "assistant" || msg.stopReason !== "error") continue;
+		const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content ?? "");
+		texts.push(`${typeof msg.errorMessage === "string" ? msg.errorMessage : ""}\n${content}`);
+	}
+	return texts;
+}
+
+/**
  * Detect a TRANSIENT provider/proxy failure in a phase's messages (timeout, 5xx,
  * 429, connection reset, broken JSON tool call) that warrants a one-shot retry on
  * a fallback model. A genuine 401 auth failure is NOT transient (handled as fatal
  * by the caller) and is explicitly excluded.
  */
 export function isTransientError(messages: readonly unknown[]): boolean {
-	for (const m of messages || []) {
-		const msg = (m ?? {}) as { content?: unknown };
-		const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content ?? "");
+	for (const content of providerErrorTexts(messages)) {
 		if (content.includes("401")) continue;
 		if (/\b(429|500|502|503|504)\b/.test(content)) return true;
 		if (

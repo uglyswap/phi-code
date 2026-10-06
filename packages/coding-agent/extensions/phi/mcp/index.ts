@@ -12,7 +12,7 @@
  * and <cwd>/.phi/mcp.json (phi configDir), and it ships bundled (no install).
  */
 
-import { exec } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -32,24 +32,36 @@ import { ToolBridge } from "./tool-bridge.ts";
 /**
  * Open a URL in the user's default browser.
  * Works on macOS, Linux, and Windows.
+ *
+ * Never goes through a shell: the authorization URL comes from server metadata,
+ * and WHATWG URL serialization keeps `$(...)` and `%VAR%` intact, which a shell
+ * (sh or cmd.exe) would expand. Only http(s) URLs are opened.
  */
 function openBrowser(url: string): void {
-	const cmd =
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		console.error(`[phi-mcp] Refusing to open invalid authorization URL`);
+		return;
+	}
+	if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+		console.error(`[phi-mcp] Refusing to open non-http(s) authorization URL (${parsed.protocol})`);
+		return;
+	}
+	const target = parsed.toString();
+	const [cmd, args]: [string, string[]] =
 		process.platform === "darwin"
-			? `open "${url}"`
+			? ["open", [target]]
 			: process.platform === "win32"
-				? `start "" "${url}"`
-				: `xdg-open "${url}"`;
+				? ["rundll32", ["url.dll,FileProtocolHandler", target]]
+				: ["xdg-open", [target]];
 
-	exec(cmd, (err, _stdout, stderr) => {
-		if (err) {
-			const errorMsg = `[pi-mcp] Failed to open browser: ${err.message}`;
-			console.error(errorMsg);
-			if (stderr) {
-				console.error(`[pi-mcp] Browser error output: ${stderr}`);
-			}
-		}
-	});
+	spawn(cmd, args, { stdio: "ignore", detached: true })
+		.on("error", (err) => {
+			console.error(`[phi-mcp] Failed to open browser: ${err.message}`);
+		})
+		.unref();
 }
 
 export default async function (pi: ExtensionAPI): Promise<void> {
@@ -60,7 +72,8 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	// whether any config exists at all.
 	let config: Awaited<ReturnType<typeof loadConfig>>;
 	try {
-		config = await loadConfig(process.cwd());
+		// Global config only: project trust is unknown until session_start.
+		config = await loadConfig(process.cwd(), { includeProject: false });
 	} catch (err) {
 		// Can't notify yet (no ctx), so log to stderr. The session_start handler
 		// will re-try with the real cwd and surface errors properly.
@@ -94,7 +107,8 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		// Reload config with the real session cwd (project config may differ)
 		let sessionConfig = config;
 		try {
-			sessionConfig = await loadConfig(ctx.cwd);
+			// <cwd>/.phi/mcp.json spawns local commands: read it only for trusted projects.
+			sessionConfig = await loadConfig(ctx.cwd, { includeProject: ctx.isProjectTrusted() });
 		} catch (err) {
 			const msg = err instanceof McpError ? err.userMessage : String(err);
 			ctx.ui.notify(`pi-mcp: Config error — ${msg}`, "error");
@@ -405,10 +419,15 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 				const callbackPromise = waitForCallback(oauthState);
 
 				// 4. Create auth provider and transport
-				const authProvider = new McpOAuthProvider(serverName, config.auth || { type: "oauth" }, (url: URL) => {
-					console.error(`[pi-mcp] Opening browser for ${serverName}...`);
-					openBrowser(url.toString());
-				});
+				const authProvider = new McpOAuthProvider(
+					serverName,
+					config.url,
+					config.auth || { type: "oauth" },
+					(url: URL) => {
+						console.error(`[pi-mcp] Opening browser for ${serverName}...`);
+						openBrowser(url.toString());
+					},
+				);
 
 				// CRITICAL FIX #1: Set the OAuth state on the provider before calling auth()
 				// This ensures the state parameter is included in the authorization URL

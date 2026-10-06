@@ -179,7 +179,11 @@ describe("/debug + /build integration", () => {
 		// A phase that ends on a 502-looking failure must be retried, not treated
 		// as a completed REPRODUCE.
 		await cap.events.get("agent_end")!(
-			{ messages: [{ role: "assistant", content: "upstream error 502 bad gateway", stopReason: "stop" }] },
+			{
+				messages: [
+					{ role: "assistant", content: [], stopReason: "error", errorMessage: "upstream error 502 bad gateway" },
+				],
+			},
 			makeCtx(cap, tempDir),
 		);
 		await sleep(700);

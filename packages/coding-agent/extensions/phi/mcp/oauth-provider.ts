@@ -4,7 +4,9 @@
  * Implements the full OAuth2 Authorization Code flow with PKCE and
  * Dynamic Client Registration (RFC 7591) as required by the MCP spec.
  *
- * Token and client state are persisted per-server under ~/.pi/agent/mcp-auth/
+ * Token and client state are persisted per server NAME + URL under <agentDir>/mcp-auth/
+ * (files 0600, directory 0700), so a config that reuses a server name with another
+ * URL never receives tokens issued for the original server.
  * so they survive pi restarts without requiring re-authorization.
  *
  * Usage: config adds `auth: { ... }` to a server config. This module
@@ -12,8 +14,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { chmod, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { OAuthClientProvider, OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth.js";
 import type {
@@ -21,6 +22,7 @@ import type {
 	OAuthClientMetadata,
 	OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
+import { getAgentDir } from "phi-code";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -87,17 +89,35 @@ interface StoredState {
 
 // ─── File helpers ─────────────────────────────────────────────────────────────
 
-const AUTH_DIR = join(homedir(), ".pi", "agent", "mcp-auth");
-
-function statePath(serverName: string): string {
-	// Hash the server name to avoid filesystem issues with special chars
-	const hash = createHash("sha256").update(serverName).digest("hex").slice(0, 16);
-	return join(AUTH_DIR, `${hash}.json`);
+function authDir(): string {
+	return join(getAgentDir(), "mcp-auth");
 }
 
-async function loadState(serverName: string): Promise<StoredState> {
+/** Normalize the server URL so trivial spelling differences map to the same credentials. */
+function normalizeServerUrl(serverUrl: string | undefined): string {
+	if (!serverUrl) return "";
 	try {
-		const raw = await readFile(statePath(serverName), "utf8");
+		return new URL(serverUrl).toString();
+	} catch {
+		return serverUrl;
+	}
+}
+
+/**
+ * Credentials are bound to (server name, server URL): redefining a server name
+ * with another URL starts from empty state instead of sending existing tokens.
+ */
+function statePath(serverName: string, serverUrl: string | undefined): string {
+	const hash = createHash("sha256")
+		.update(`${serverName}\n${normalizeServerUrl(serverUrl)}`)
+		.digest("hex")
+		.slice(0, 24);
+	return join(authDir(), `${hash}.json`);
+}
+
+async function loadState(serverName: string, serverUrl: string | undefined): Promise<StoredState> {
+	try {
+		const raw = await readFile(statePath(serverName, serverUrl), "utf8");
 		const parsed = JSON.parse(raw) as StoredState;
 		return {
 			clientInfo: parsed.clientInfo ?? undefined,
@@ -115,28 +135,38 @@ async function loadState(serverName: string): Promise<StoredState> {
 	}
 }
 
-async function saveState(serverName: string, state: StoredState): Promise<void> {
-	await mkdir(AUTH_DIR, { recursive: true });
+async function saveState(serverName: string, serverUrl: string | undefined, state: StoredState): Promise<void> {
+	await mkdir(authDir(), { recursive: true, mode: 0o700 });
 	// Only write defined fields
 	const toWrite: Record<string, unknown> = {};
 	if (state.clientInfo !== undefined) toWrite.clientInfo = state.clientInfo;
 	if (state.tokens !== undefined) toWrite.tokens = state.tokens;
 	if (state.codeVerifier !== undefined) toWrite.codeVerifier = state.codeVerifier;
 	if (state.discoveryState !== undefined) toWrite.discoveryState = state.discoveryState;
-	await writeFile(statePath(serverName), JSON.stringify(toWrite, null, 2), "utf8");
+	const path = statePath(serverName, serverUrl);
+	await writeFile(path, JSON.stringify(toWrite, null, 2), { encoding: "utf8", mode: 0o600 });
+	// writeFile's mode only applies on creation: tighten pre-existing files too (no-op on Windows).
+	await chmod(path, 0o600).catch(() => {});
 }
 
 // ─── OAuthClientProvider Implementation ────────────────────────────────────────
 
 export class McpOAuthProvider implements OAuthClientProvider {
 	private serverName: string;
+	private serverUrl: string | undefined;
 	private authConfig: AuthConfig;
 	private _redirectUrl: string | undefined;
 	private _onAuthRequired: ((url: URL) => void | Promise<void>) | undefined;
 	private _oauthState: string | undefined;
 
-	constructor(serverName: string, authConfig: AuthConfig, onAuthRequired?: (url: URL) => void | Promise<void>) {
+	constructor(
+		serverName: string,
+		serverUrl: string | undefined,
+		authConfig: AuthConfig,
+		onAuthRequired?: (url: URL) => void | Promise<void>,
+	) {
 		this.serverName = serverName;
+		this.serverUrl = serverUrl;
 		this.authConfig = authConfig;
 		this._redirectUrl = authConfig.redirectUrl;
 		this._onAuthRequired = onAuthRequired;
@@ -155,7 +185,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
 	get clientMetadata(): OAuthClientMetadata {
 		const redirectUrl = String(this.redirectUrl);
 		return {
-			client_name: `pi-mcp/${this.serverName}`,
+			client_name: `phi-mcp/${this.serverName}`,
 			redirect_uris: [redirectUrl],
 			grant_types: ["authorization_code", "refresh_token"],
 			response_types: ["code"],
@@ -174,7 +204,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
 			};
 		}
 		// Otherwise load from persisted DCR state
-		const state = await loadState(this.serverName);
+		const state = await loadState(this.serverName, this.serverUrl);
 		if (state.clientInfo) {
 			return {
 				client_id: state.clientInfo.client_id,
@@ -187,18 +217,18 @@ export class McpOAuthProvider implements OAuthClientProvider {
 	// --- saveClientInformation (DCR) ---
 
 	async saveClientInformation(clientInformation: OAuthClientInformationMixed): Promise<void> {
-		const state = await loadState(this.serverName);
+		const state = await loadState(this.serverName, this.serverUrl);
 		state.clientInfo = {
 			client_id: clientInformation.client_id,
 			client_secret: clientInformation.client_secret,
 		};
-		await saveState(this.serverName, state);
+		await saveState(this.serverName, this.serverUrl, state);
 	}
 
 	// --- tokens ---
 
 	async tokens(): Promise<OAuthTokens | undefined> {
-		const state = await loadState(this.serverName);
+		const state = await loadState(this.serverName, this.serverUrl);
 		if (!state.tokens) return undefined;
 
 		// Always return stored tokens — even if expired.
@@ -227,7 +257,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
 	// --- saveTokens ---
 
 	async saveTokens(tokens: OAuthTokens): Promise<void> {
-		const state = await loadState(this.serverName);
+		const state = await loadState(this.serverName, this.serverUrl);
 		state.tokens = {
 			access_token: tokens.access_token,
 			token_type: tokens.token_type,
@@ -236,7 +266,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
 			scope: tokens.scope,
 			saved_at: new Date().toISOString(),
 		};
-		await saveState(this.serverName, state);
+		await saveState(this.serverName, this.serverUrl, state);
 	}
 
 	// --- redirectToAuthorization ---
@@ -256,13 +286,13 @@ export class McpOAuthProvider implements OAuthClientProvider {
 	// --- PKCE code verifier ---
 
 	async saveCodeVerifier(codeVerifier: string): Promise<void> {
-		const state = await loadState(this.serverName);
+		const state = await loadState(this.serverName, this.serverUrl);
 		state.codeVerifier = codeVerifier;
-		await saveState(this.serverName, state);
+		await saveState(this.serverName, this.serverUrl, state);
 	}
 
 	async codeVerifier(): Promise<string> {
-		const state = await loadState(this.serverName);
+		const state = await loadState(this.serverName, this.serverUrl);
 		if (!state.codeVerifier) {
 			throw new Error(`[pi-mcp] No PKCE code verifier found for "${this.serverName}"`);
 		}
@@ -272,13 +302,13 @@ export class McpOAuthProvider implements OAuthClientProvider {
 	// --- Discovery state caching ---
 
 	async saveDiscoveryState(discState: OAuthDiscoveryState): Promise<void> {
-		const state = await loadState(this.serverName);
+		const state = await loadState(this.serverName, this.serverUrl);
 		state.discoveryState = discState;
-		await saveState(this.serverName, state);
+		await saveState(this.serverName, this.serverUrl, state);
 	}
 
 	async discoveryState(): Promise<OAuthDiscoveryState | undefined> {
-		const state = await loadState(this.serverName);
+		const state = await loadState(this.serverName, this.serverUrl);
 		return state.discoveryState;
 	}
 
@@ -304,7 +334,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
 	// --- Credential invalidation ---
 
 	async invalidateCredentials(scope: "all" | "client" | "tokens" | "verifier" | "discovery"): Promise<void> {
-		const state = await loadState(this.serverName);
+		const state = await loadState(this.serverName, this.serverUrl);
 		switch (scope) {
 			case "all":
 				state.clientInfo = undefined;
@@ -325,7 +355,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
 				state.discoveryState = undefined;
 				break;
 		}
-		await saveState(this.serverName, state);
+		await saveState(this.serverName, this.serverUrl, state);
 	}
 }
 
@@ -335,13 +365,16 @@ export class McpOAuthProvider implements OAuthClientProvider {
  * Get auth status info for a server — whether tokens exist, when they were saved, etc.
  * Returns null if no auth state file exists at all.
  */
-export async function getAuthStatus(serverName: string): Promise<{
+export async function getAuthStatus(
+	serverName: string,
+	serverUrl: string | undefined,
+): Promise<{
 	hasTokens: boolean;
 	hasClientInfo: boolean;
 	savedAt: string | undefined;
 	scope: string | undefined;
 } | null> {
-	const state = await loadState(serverName);
+	const state = await loadState(serverName, serverUrl);
 	if (
 		state.clientInfo === undefined &&
 		state.tokens === undefined &&
@@ -362,6 +395,6 @@ export async function getAuthStatus(serverName: string): Promise<{
  * Reset all OAuth state for a server (tokens, client info, PKCE verifier, discovery).
  * Used to force re-authorization on next connection.
  */
-export async function resetAuth(serverName: string): Promise<void> {
-	await unlink(statePath(serverName)).catch(() => {});
+export async function resetAuth(serverName: string, serverUrl: string | undefined): Promise<void> {
+	await unlink(statePath(serverName, serverUrl)).catch(() => {});
 }

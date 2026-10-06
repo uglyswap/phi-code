@@ -19,6 +19,7 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import * as net from "node:net";
 import * as path from "node:path";
@@ -30,6 +31,27 @@ const require = createRequire(import.meta.url);
 let serverProcess: ChildProcess | null = null;
 let serverPort: number | null = null;
 let bootPromise: Promise<{ baseUrl: string }> | null = null;
+
+/**
+ * Per-process secret for the local camofox-browser API. Without it the server
+ * accepts any loopback request in non-production mode, so any local process (or
+ * a web page via DNS rebinding) could drive the browser, run JavaScript in
+ * logged-in pages and import cookies.
+ */
+const ACCESS_KEY = randomBytes(32).toString("hex");
+
+/** Credentials and secrets the browser server has no reason to see. */
+const SECRET_ENV_PATTERN = /(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|COOKIE)/i;
+
+function serverEnvironment(): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = {};
+	for (const [name, value] of Object.entries(process.env)) {
+		// CAMOFOX_* settings (proxy credentials...) are meant for this server.
+		if (!name.startsWith("CAMOFOX_") && SECRET_ENV_PATTERN.test(name)) continue;
+		env[name] = value;
+	}
+	return env;
+}
 
 const DEFAULT_USER_ID = "phi-default";
 const DEFAULT_SESSION_KEY = "phi-default-session";
@@ -88,8 +110,14 @@ export async function ensureServer(): Promise<{ baseUrl: string }> {
 		const cwd = path.dirname(entry);
 
 		const env: NodeJS.ProcessEnv = {
-			...process.env,
+			// Filtered: provider API keys must not reach the server nor Firefox.
+			...serverEnvironment(),
 			PORT: String(port),
+			// Gate every route (and cookie import) behind the per-process key.
+			CAMOFOX_ACCESS_KEY: ACCESS_KEY,
+			CAMOFOX_API_KEY: ACCESS_KEY,
+			// Never let an inherited NODE_ENV=production turn the local server into 503s.
+			NODE_ENV: "development",
 			// Disable telemetry by default (PHI-VENDOR contract).
 			CAMOFOX_CRASH_REPORT_URL: process.env.CAMOFOX_CRASH_REPORT_URL || "",
 			// Tighten resource caps; phi-code is interactive, so 2 sessions
@@ -239,6 +267,7 @@ async function request<T = unknown>(pathname: string, options: RequestOptions = 
 	const headers: Record<string, string> = {
 		"Content-Type": "application/json",
 		...(options.headers ?? {}),
+		Authorization: `Bearer ${ACCESS_KEY}`,
 	};
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 60_000);

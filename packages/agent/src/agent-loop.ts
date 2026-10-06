@@ -697,7 +697,9 @@ async function executePreparedToolCall(
 		);
 		acceptingUpdates = false;
 		await Promise.all(updateEvents);
-		return { result, isError: false };
+		// Tools may report a failure without throwing (permission denials, extension
+		// validation errors...): keep that flag instead of turning it into a success.
+		return { result, isError: result.isError === true };
 	} catch (error) {
 		acceptingUpdates = false;
 		await Promise.all(updateEvents);

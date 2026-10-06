@@ -10,19 +10,28 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext } from "phi-code";
+import { type ExtensionAPI, type ExtensionCommandContext, getAgentDir } from "phi-code";
 
-const USER_CONFIG = join(homedir(), ".phi", "agent", "permissions.json");
+/** Resolved per call so PHI_CODING_AGENT_DIR is honored. */
+function userConfigPath(): string {
+	return join(getAgentDir(), "permissions.json");
+}
 const TIERS = ["read", "write", "exec"] as const;
 const DECISIONS = ["allow", "deny", "prompt"] as const;
 
-function loadUserConfig(): Record<string, unknown> {
+/** Returns undefined when the file exists but cannot be parsed (never silently treat it as empty). */
+function loadUserConfig(): Record<string, unknown> | undefined {
+	const path = userConfigPath();
+	if (!existsSync(path)) return {};
 	try {
-		if (existsSync(USER_CONFIG)) return JSON.parse(readFileSync(USER_CONFIG, "utf8"));
-	} catch {}
-	return {};
+		const parsed = JSON.parse(readFileSync(path, "utf8").replace(/^\uFEFF/, "")) as unknown;
+		return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+			? (parsed as Record<string, unknown>)
+			: undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 export default function (pi: ExtensionAPI) {
@@ -38,13 +47,15 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				const config = loadUserConfig();
+				if (!config) {
+					// Rewriting would drop the user's existing rules.
+					ctx.ui.notify(`${userConfigPath()} is not valid JSON; fix it before changing tiers.`, "error");
+					return;
+				}
 				config[tier] = decision;
-				mkdirSync(join(homedir(), ".phi", "agent"), { recursive: true });
-				writeFileSync(USER_CONFIG, JSON.stringify(config, null, 2));
-				ctx.ui.notify(
-					`Permission tier "${tier}" set to "${decision}" (user config). New sessions pick it up.`,
-					"info",
-				);
+				mkdirSync(getAgentDir(), { recursive: true });
+				writeFileSync(userConfigPath(), JSON.stringify(config, null, 2));
+				ctx.ui.notify(`Permission tier "${tier}" set to "${decision}" (user config). Applies immediately.`, "info");
 				return;
 			}
 
@@ -54,12 +65,18 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const user = loadUserConfig();
+			if (!user) {
+				ctx.ui.notify(`${userConfigPath()} is not valid JSON.`, "error");
+				return;
+			}
+			const projectFile = existsSync(join(ctx.cwd, ".phi", "permissions.json"));
 			const summary = [
-				existsSync(USER_CONFIG) || existsSync(join(ctx.cwd, ".phi", "permissions.json"))
+				existsSync(userConfigPath()) || (projectFile && ctx.isProjectTrusted())
 					? "Custom policy active"
 					: "Legacy allow-everything mode (no permissions.json found)",
 				`tiers: ${TIERS.map((t) => `${t}=${(user[t] as string) ?? "prompt"}`).join(" ")}`,
 				`user rules: ${Array.isArray(user.rules) ? user.rules.length : 0}`,
+				...(projectFile && !ctx.isProjectTrusted() ? ["project permissions.json ignored (untrusted project)"] : []),
 				"toggle: /permissions <read|write|exec> <allow|deny|prompt>",
 			].join(" | ");
 			ctx.ui.notify(summary, "info");

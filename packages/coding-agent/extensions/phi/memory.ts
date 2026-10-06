@@ -882,10 +882,10 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		if (userPrompt.length === 0) {
 			return {};
 		}
-		const truncated = userPrompt.length > 200 ? `${userPrompt.slice(0, 200)}...` : userPrompt;
-		// Neutralize angle brackets so user content cannot close the
-		// <system-reminder> block early and inject trusted instructions.
-		const safe = truncated.replace(/[<>]/g, (c) => (c === "<" ? "&lt;" : "&gt;")).replace(/"/g, '\\"');
+		// The reminder must stay byte-identical across turns: it is prepended to the
+		// system prompt, so any per-turn text (such as echoing the user's message, which
+		// the model already sees) would invalidate the provider's prompt cache on every
+		// message. Only the manifest changes, and only when notes are written.
 
 		// Deterministic recall index: a one-line-per-file manifest of memory
 		// notes so the model ALWAYS sees which facts exist without having to
@@ -896,8 +896,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			: "";
 
 		const reminder = `<system-reminder>
-You are about to respond to a new user message:
-"${safe}"
+Before responding to each user message, apply the memory rules below.
 ${manifestBlock}
 REMINDER (project rule, applies every turn):
 1. Call \`memory_search\` FIRST with keywords from the user's intent. Recent

@@ -1605,3 +1605,42 @@ describe("agentLoopContinue with AgentMessage", () => {
 		expect(messages[0].role).toBe("assistant");
 	});
 });
+
+describe("tool results reported as errors without throwing", () => {
+	it("keeps isError: true from a tool that returns instead of throwing", async () => {
+		const tool: AgentTool<ReturnType<typeof Type.Object>, undefined> = {
+			name: "denied",
+			label: "Denied",
+			description: "Always reports a failure",
+			parameters: Type.Object({}),
+			async execute() {
+				return { content: [{ type: "text", text: "Permission denied" }], details: undefined, isError: true };
+			},
+		};
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [tool] };
+		let callIndex = 0;
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			queueMicrotask(() => {
+				const message =
+					callIndex === 0
+						? createAssistantMessage(
+								[{ type: "toolCall", id: "tool-1", name: "denied", arguments: {} }],
+								"toolUse",
+							)
+						: createAssistantMessage([{ type: "text", text: "ok" }]);
+				stream.push({ type: "done", reason: callIndex === 0 ? "toolUse" : "stop", message });
+				callIndex++;
+			});
+			return stream;
+		};
+		const config: AgentLoopConfig = { model: createModel(), convertToLlm: identityConverter };
+		const events: AgentEvent[] = [];
+		const stream = agentLoop([createUserMessage("go")], context, config, undefined, streamFn);
+		for await (const event of stream) events.push(event);
+		const toolEnd = events.find((e) => e.type === "tool_execution_end");
+		expect(toolEnd?.type === "tool_execution_end" ? toolEnd.isError : undefined).toBe(true);
+		const toolResult = (await stream.result()).find((m) => m.role === "toolResult");
+		expect(toolResult?.role === "toolResult" ? toolResult.isError : undefined).toBe(true);
+	});
+});

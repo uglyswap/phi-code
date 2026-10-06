@@ -1592,9 +1592,13 @@ export class AgentSession {
 	/**
 	 * Set model directly.
 	 * Validates that auth is configured, saves to session and settings.
+	 * @param options.persist - Also save as the global default model (default true). Extensions
+	 *   (smart-router, /plan phases) switch models for the current session only; persisting
+	 *   those switches silently rewrote the user's default model in settings.json.
 	 * @throws Error if no auth is configured for the model
 	 */
-	async setModel(model: Model<any>): Promise<void> {
+	async setModel(model: Model<any>, options: { persist?: boolean } = {}): Promise<void> {
+		const persist = options.persist ?? true;
 		if (!(await this._modelRuntime.checkAuth(model.provider))) {
 			throw new Error(`No API key for ${model.provider}/${model.id}`);
 		}
@@ -1603,10 +1607,12 @@ export class AgentSession {
 		const thinkingLevel = this._getThinkingLevelForModelSwitch();
 		this.agent.state.model = model;
 		this.sessionManager.appendModelChange(model.provider, model.id);
-		this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
+		if (persist) {
+			this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
+		}
 
 		// Re-clamp thinking level for new model's capabilities
-		this.setThinkingLevel(thinkingLevel);
+		this.setThinkingLevel(thinkingLevel, { persist });
 
 		await this._emitModelSelect(model, previousModel, "set");
 
@@ -1697,7 +1703,8 @@ export class AgentSession {
 	 * Clamps to model capabilities based on available thinking levels.
 	 * Saves to session and settings only if the level actually changes.
 	 */
-	setThinkingLevel(level: ThinkingLevel): void {
+	setThinkingLevel(level: ThinkingLevel, options: { persist?: boolean } = {}): void {
+		const persist = options.persist ?? true;
 		const availableLevels = this.getAvailableThinkingLevels();
 		const effectiveLevel = availableLevels.includes(level) ? level : this._clampThinkingLevel(level, availableLevels);
 
@@ -1709,7 +1716,7 @@ export class AgentSession {
 
 		if (isChanging) {
 			this.sessionManager.appendThinkingLevelChange(effectiveLevel);
-			if (this.supportsThinking() || effectiveLevel !== "off") {
+			if (persist && (this.supportsThinking() || effectiveLevel !== "off")) {
 				this.settingsManager.setDefaultThinkingLevel(effectiveLevel);
 			}
 			this._emit({ type: "thinking_level_changed", level: effectiveLevel });
@@ -2426,11 +2433,12 @@ export class AgentSession {
 				getCommands,
 				setModel: async (model) => {
 					if (!this._modelRuntime.hasConfiguredAuth(model.provider)) return false;
-					await this.setModel(model);
+					// Session-scoped: an extension switching models must not change the user's default.
+					await this.setModel(model, { persist: false });
 					return true;
 				},
 				getThinkingLevel: () => this.thinkingLevel,
-				setThinkingLevel: (level) => this.setThinkingLevel(level),
+				setThinkingLevel: (level) => this.setThinkingLevel(level, { persist: false }),
 			},
 			{
 				getModel: () => this.model,

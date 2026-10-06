@@ -10,7 +10,9 @@ export default mergeConfig(
 			environment: "node",
 			testTimeout: 30000,
 			// Tests run offline by default; opt in with allowNetwork() from test/test-network-env.ts.
-			env: { PI_OFFLINE: "1" },
+			// PHI_SKIP_POSTINSTALL: tests that run main() must not re-sync bundled assets
+			// (see src/core/bundled-assets.ts), which would spawn the postinstall script.
+			env: { PI_OFFLINE: "1", PHI_SKIP_POSTINSTALL: "1" },
 			unstubEnvs: true,
 			reporters: process.env.GITHUB_ACTIONS ? ["dot", "github-actions"] : ["dot"],
 			silent: "passed-only",

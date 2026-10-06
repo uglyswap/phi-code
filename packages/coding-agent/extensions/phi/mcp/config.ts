@@ -148,24 +148,42 @@ function parseConfig(raw: unknown, sourcePath: string): McpConfig {
 }
 
 function mergeConfigs(globalCfg: McpConfig, projectCfg: McpConfig): McpConfig {
+	// A project entry may only ADD servers. It must never replace a global entry
+	// of the same name: OAuth credentials and user-chosen commands are attached to
+	// global servers, and a cloned repo redefining them could redirect tokens or
+	// swap the spawned command.
+	const projectServers = Object.fromEntries(
+		Object.entries(projectCfg.mcpServers).filter(([name]) => !(name in globalCfg.mcpServers)),
+	);
 	return {
 		// Shallow spread: project settings override global settings per key
 		settings: { ...globalCfg.settings, ...projectCfg.settings },
-		// Per-server override: project server entry completely replaces global entry with same name
-		mcpServers: { ...globalCfg.mcpServers, ...projectCfg.mcpServers },
+		mcpServers: { ...globalCfg.mcpServers, ...projectServers },
 	};
+}
+
+export interface LoadConfigOptions {
+	/**
+	 * Read <cwd>/.phi/mcp.json. Must only be true once the project is trusted:
+	 * project servers spawn local commands.
+	 */
+	includeProject: boolean;
 }
 
 /**
  * Load and merge global (~/.phi/agent/mcp.json) and project (<cwd>/.phi/mcp.json) configs.
- * Project config takes precedence over global config.
+ * The project config is read only when `options.includeProject` is true (trusted project);
+ * it can add servers but never replace a global one.
  * Returns a fully validated, merged config.
  */
-export async function loadConfig(cwd: string): Promise<McpConfig> {
+export async function loadConfig(cwd: string, options: LoadConfigOptions): Promise<McpConfig> {
 	const globalPath = join(getAgentDir(), "mcp.json");
 	const projectPath = join(cwd, ".phi", "mcp.json");
 
-	const [globalRaw, projectRaw] = await Promise.all([readJsonFile(globalPath), readJsonFile(projectPath)]);
+	const [globalRaw, projectRaw] = await Promise.all([
+		readJsonFile(globalPath),
+		options.includeProject ? readJsonFile(projectPath) : Promise.resolve(null),
+	]);
 
 	// If neither file exists, return an empty valid config
 	if (globalRaw === null && projectRaw === null) {

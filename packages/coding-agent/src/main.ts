@@ -42,6 +42,7 @@ import {
 } from "./core/agent-session-services.ts";
 import { formatNoModelsAvailableMessage } from "./core/auth-guidance.ts";
 import { AuthStorage, ReadOnlyAuthStorage } from "./core/auth-storage.ts";
+import { syncBundledAssetsIfStale } from "./core/bundled-assets.ts";
 import { readBrandedEnv, setBrandedEnv } from "./core/env-vars.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
 import type { InlineExtension } from "./core/extensions/types.ts";
@@ -660,6 +661,10 @@ export async function main(args: string[], options?: MainOptions) {
 	// Run migrations (pass cwd for project-local migrations)
 	const { migratedAuthProviders: migratedProviders, deprecationWarnings } = runMigrations(cwd);
 	time("runMigrations");
+
+	// Refresh bundled extensions/agents/skills after an update installed with --ignore-scripts.
+	syncBundledAssetsIfStale();
+	time("syncBundledAssets");
 
 	const startupSettingsManager = SettingsManager.create(cwd, agentDir);
 	reportDiagnostics(collectSettingsDiagnostics(startupSettingsManager, "startup session lookup"));

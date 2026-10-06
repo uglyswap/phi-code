@@ -1,8 +1,9 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { randomBytes, timingSafeEqual } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname, join, resolve } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "phi-code";
+import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "phi-code";
 import { Type } from "typebox";
 
 /**
@@ -368,6 +369,43 @@ function isLocalProcessRequest(request: IncomingMessage): boolean {
 	return !request.headers.origin && !request.headers["sec-fetch-site"];
 }
 
+// Shared secret between phi sessions for the owner's /command endpoint. Without it,
+// any local process (including a prompt-injected `curl` from the agent's bash tool)
+// could drive the user's logged-in Chrome without /chrome authorize.
+const BRIDGE_TOKEN_HEADER = "x-phi-chrome-token";
+
+function bridgeTokenPath(): string {
+	return join(getAgentDir(), "chrome-bridge.token");
+}
+
+function createBridgeToken(): string {
+	const token = randomBytes(32).toString("hex");
+	mkdirSync(getAgentDir(), { recursive: true });
+	writeFileSync(bridgeTokenPath(), token, { encoding: "utf8", mode: 0o600 });
+	try {
+		chmodSync(bridgeTokenPath(), 0o600);
+	} catch {
+		// Best effort (no-op on Windows).
+	}
+	return token;
+}
+
+function readBridgeToken(): string | undefined {
+	try {
+		return readFileSync(bridgeTokenPath(), "utf8").trim() || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function hasValidBridgeToken(request: IncomingMessage, expected: string | undefined): boolean {
+	const provided = request.headers[BRIDGE_TOKEN_HEADER];
+	if (!expected || typeof provided !== "string") return false;
+	const a = Buffer.from(provided);
+	const b = Buffer.from(expected);
+	return a.length === b.length && timingSafeEqual(a, b);
+}
+
 function sendJson(
 	response: ServerResponse,
 	status: number,
@@ -390,6 +428,8 @@ class ChromeProfileBridge {
 	private lastSeenAt: number | undefined;
 	private clientName: string | undefined;
 	private mode: "server" | "client" | undefined;
+	/** Secret required on /command; set while this process owns the bridge port. */
+	private commandToken: string | undefined;
 
 	// Explicit fields rather than constructor parameter properties: the root tsconfig
 	// enables `erasableSyntaxOnly` (extensions run through a type-stripping loader).
@@ -447,6 +487,7 @@ class ChromeProfileBridge {
 			});
 			this.server = server;
 			this.mode = "server";
+			this.commandToken = createBridgeToken();
 		} catch (error) {
 			server.close();
 			if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
@@ -572,7 +613,7 @@ class ChromeProfileBridge {
 		try {
 			const response = await fetch(`${this.url}/command`, {
 				method: "POST",
-				headers: { "content-type": "application/json" },
+				headers: { "content-type": "application/json", [BRIDGE_TOKEN_HEADER]: readBridgeToken() ?? "" },
 				body: JSON.stringify({ action, params, timeoutMs }),
 				signal: controller.signal,
 			});
@@ -648,6 +689,12 @@ class ChromeProfileBridge {
 		if (request.method === "POST" && url.pathname === "/command") {
 			if (!isLocalProcessRequest(request)) {
 				sendJson(response, 403, { ok: false, error: "Chrome commands are accepted only from local Pi processes" });
+				return;
+			}
+			// Each forwarding phi session has already checked its own /chrome authorization;
+			// the token proves the request comes from a phi session, not an arbitrary process.
+			if (!hasValidBridgeToken(request, this.commandToken)) {
+				sendJson(response, 403, { ok: false, error: "Missing or invalid phi Chrome bridge token" });
 				return;
 			}
 			const body = JSON.parse(await readRequestBody(request)) as {
@@ -775,6 +822,9 @@ const CHROME_TOOL_NAMES = [
 	"chrome_tap",
 	"chrome_scroll",
 	"chrome_upload_file",
+	// Must list every registered chrome_* tool, or /chrome revoke leaves it active.
+	"chrome_find",
+	"chrome_inspect",
 ] as const;
 const CHROME_TOOL_NAME_SET = new Set<string>(CHROME_TOOL_NAMES);
 

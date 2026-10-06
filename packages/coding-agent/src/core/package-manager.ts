@@ -28,7 +28,7 @@ import { globSync } from "glob";
 import ignore from "ignore";
 import { minimatch } from "minimatch";
 import { maxSatisfying, rcompare, satisfies, valid, validRange } from "semver";
-import { CONFIG_DIR_NAME } from "../config.ts";
+import { CONFIG_DIR_NAME, getPackageDir } from "../config.ts";
 import { spawnProcess, spawnProcessSync } from "../utils/child-process.ts";
 import { type GitSource, parseGitUrl } from "../utils/git.ts";
 import { canonicalizePath, isLocalPath, markPathIgnoredByCloudSync, resolvePath } from "../utils/paths.ts";
@@ -53,6 +53,39 @@ function isExactNpmVersion(version: string | undefined): boolean {
 
 function getNpmVersionRange(version: string | undefined): string | undefined {
 	return version ? (validRange(version) ?? undefined) : undefined;
+}
+
+/** Names of the extensions phi ships in `extensions/phi` (copied into <agentDir>/extensions). */
+function bundledExtensionNames(): Set<string> {
+	try {
+		return new Set(readdirSync(join(getPackageDir(), "extensions", "phi")));
+	} catch {
+		return new Set();
+	}
+}
+
+/**
+ * Apply the documented kill switches on the REAL extension load path
+ * (they used to be read only by discoverAndLoadExtensions, which the CLI never calls):
+ * - PHI_DISABLE_PROJECT_EXTENSIONS=1 drops every project-scoped extension;
+ * - PHI_DISABLE_BUNDLED_EXTENSIONS=1 drops the bundled phi extensions copied into
+ *   <agentDir>/extensions (user extensions with other names still load).
+ */
+export function filterExtensionsByOptOut(extensions: ResolvedResource[], agentDir: string): ResolvedResource[] {
+	const disableProject = readBrandedEnv("DISABLE_PROJECT_EXTENSIONS") === "1";
+	const disableBundled = readBrandedEnv("DISABLE_BUNDLED_EXTENSIONS") === "1";
+	if (!disableProject && !disableBundled) return extensions;
+	const bundled = disableBundled ? bundledExtensionNames() : new Set<string>();
+	const userExtensionsDir = resolve(agentDir, "extensions");
+	return extensions.filter((resource) => {
+		if (disableProject && resource.metadata.scope === "project") return false;
+		if (disableBundled && resource.metadata.scope === "user") {
+			const rel = relative(userExtensionsDir, resolve(resource.path));
+			const topLevel = rel.split(/[\\/]/)[0];
+			if (rel && !rel.startsWith("..") && bundled.has(topLevel)) return false;
+		}
+		return true;
+	});
 }
 
 export interface PathMetadata {
@@ -939,7 +972,9 @@ export class DefaultPackageManager implements PackageManager {
 
 		this.addAutoDiscoveredResources(accumulator, globalSettings, projectSettings, globalBaseDir, projectBaseDir);
 
-		return this.toResolvedPaths(accumulator);
+		const resolved = this.toResolvedPaths(accumulator);
+		resolved.extensions = filterExtensionsByOptOut(resolved.extensions, this.agentDir);
+		return resolved;
 	}
 
 	async resolveExtensionSources(

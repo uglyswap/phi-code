@@ -77,6 +77,7 @@ function createTransport(
 	if (config.auth && config.transport !== "stdio") {
 		authProvider = new McpOAuthProvider(
 			serverName,
+			config.url,
 			config.auth,
 			authCallbacks ? (url: URL) => authCallbacks.onAuthRequired(serverName, url) : undefined,
 		);
@@ -177,7 +178,7 @@ export class ServerManager {
 
 	/** Reset OAuth credentials for a server, forcing re-authorization on next connect. */
 	async resetServerAuth(name: string): Promise<void> {
-		await resetAuth(name);
+		await resetAuth(name, this.getServerUrl(name));
 	}
 
 	/** Get auth status for a server. */
@@ -187,7 +188,12 @@ export class ServerManager {
 		savedAt: string | undefined;
 		scope: string | undefined;
 	} | null> {
-		return getAuthStatus(name);
+		return getAuthStatus(name, this.getServerUrl(name));
+	}
+
+	/** URL of a configured server (OAuth credentials are bound to name + URL). */
+	private getServerUrl(name: string): string | undefined {
+		return this.servers.get(name)?.config.url;
 	}
 
 	/** Get recent stderr output for a server. */

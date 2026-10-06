@@ -7,7 +7,9 @@ const { existsSync, lstatSync, mkdirSync, cpSync, readdirSync, realpathSync, rmS
 const { join, dirname } = require("path");
 const { homedir } = require("os");
 
-const agentDir = join(homedir(), ".phi", "agent");
+// Honor PHI_CODING_AGENT_DIR like the CLI does (getAgentDir in src/config.ts).
+const agentDir = process.env.PHI_CODING_AGENT_DIR || join(homedir(), ".phi", "agent");
+const settingsExistedBefore = existsSync(join(agentDir, "settings.json"));
 const packageDir = __dirname.replace(/[\\/]scripts$/, "");
 
 // Opt-out / CI guard: skip the home-directory scaffolding under CI or sandbox
@@ -98,9 +100,11 @@ for (const dir of [memoryDir, memoryNotesDir, memoryOntologyDir]) {
   }
 }
 
-// 4. Ensure settings.json has quietStartup: true
+// 4. Default quietStartup: true on FIRST install only. This script also re-runs
+// at startup after an update (see src/core/bundled-assets.ts); it must not
+// override a user who turned quietStartup off.
 const settingsPath = join(agentDir, "settings.json");
-try {
+if (!settingsExistedBefore) try {
   let settings = {};
   if (existsSync(settingsPath)) {
     try {
@@ -113,6 +117,13 @@ try {
     console.log(`  Φ Set quietStartup: true in settings.json`);
   }
 } catch { /* skip */ }
+
+// 5. Record which package version the copies come from, so the CLI can detect
+// an update that skipped this script (phi update, npm -g --ignore-scripts).
+try {
+  const version = JSON.parse(require("fs").readFileSync(join(packageDir, "package.json"), "utf-8")).version;
+  if (version) require("fs").writeFileSync(join(agentDir, ".bundled-assets-version"), String(version), "utf-8");
+} catch { /* next start retries */ }
 
 /**
  * Clear whatever occupies `dest`, INCLUDING a link whose target no longer exists.

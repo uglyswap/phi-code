@@ -102,7 +102,8 @@ describe("extractBlockingFindings / extractHandoff", () => {
 });
 
 describe("isTransientError", () => {
-	const msg = (content: string) => ({ content });
+	// Only an assistant turn that ended in a provider error is a transient failure.
+	const msg = (content: string) => ({ role: "assistant", stopReason: "error", errorMessage: content, content: [] });
 	test("flags timeouts, 5xx, 429 and broken JSON", () => {
 		expect(isTransientError([msg("Error: request timed out after 300s")])).toBe(true);
 		expect(isTransientError([msg("HTTP 503 Service Unavailable")])).toBe(true);
@@ -117,5 +118,18 @@ describe("isTransientError", () => {
 	test("does NOT flag normal successful output", () => {
 		expect(isTransientError([msg("Successfully wrote 1200 bytes to src/index.ts")])).toBe(false);
 		expect(isTransientError([])).toBe(false);
+	});
+	test("does NOT flag the phase prompt or tool output that mention timeouts or 5xx", () => {
+		const phasePrompt = { role: "user", content: "If a test hangs, use `timeout` to prevent deadlock" };
+		const toolOutput = {
+			role: "toolResult",
+			content: [{ type: "text", text: "Test timed out after 5000ms; curl: 503" }],
+		};
+		const reply = {
+			role: "assistant",
+			stopReason: "stop",
+			content: [{ type: "text", text: "A TIMEOUT counts as FAIL" }],
+		};
+		expect(isTransientError([phasePrompt, toolOutput, reply])).toBe(false);
 	});
 });

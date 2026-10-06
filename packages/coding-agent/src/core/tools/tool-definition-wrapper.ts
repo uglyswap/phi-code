@@ -27,7 +27,10 @@ export function wrapToolDefinition<TDetails = unknown>(
 			const context = ctx ?? ctxFactory?.();
 			// Permission gate: default (no config anywhere) is allow-everything,
 			// preserving pre-permissions behavior.
-			const policy = loadPolicy(context?.cwd ?? process.cwd());
+			// The project's .phi/permissions.json only counts for trusted projects.
+			const policy = loadPolicy(context?.cwd ?? process.cwd(), {
+				projectTrusted: context?.isProjectTrusted?.() ?? false,
+			});
 			if (!policy.legacyAllowAll) {
 				const { decision, tier, matchedRule } = decide(policy, definition.name, params, definition.permissionTier);
 				if (decision === "deny") {

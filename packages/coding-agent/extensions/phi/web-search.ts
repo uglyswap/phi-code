@@ -556,14 +556,53 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 			return false;
 		}
 		if (family === 6) {
-			const a = ip.toLowerCase();
-			if (a === "::1" || a === "::") return true; // loopback / unspecified
-			if (a.startsWith("::ffff:")) return isBlockedIp(a.slice(7)); // IPv4-mapped
-			if (a.startsWith("fc") || a.startsWith("fd")) return true; // fc00::/7 ULA
-			if (a.startsWith("fe80") || a.startsWith("fe9") || a.startsWith("fea") || a.startsWith("feb")) return true; // link-local
+			const bytes = parseIpv6(ip);
+			if (!bytes) return true; // unparsable: fail closed
+			const zeroPrefix = (n: number) => bytes.slice(0, n).every((x) => x === 0);
+			const embeddedV4 = () => `${bytes[12]}.${bytes[13]}.${bytes[14]}.${bytes[15]}`;
+			// IPv4-mapped ::ffff:a.b.c.d. WHATWG serializes it in hex ([::ffff:7f00:1]),
+			// so the embedded address must be decoded from the bytes, not the text.
+			if (zeroPrefix(10) && bytes[10] === 0xff && bytes[11] === 0xff) return isBlockedIp(embeddedV4());
+			// ::/96 covers :: (unspecified), ::1 (loopback) and IPv4-compatible ::a.b.c.d.
+			if (zeroPrefix(12)) return true;
+			// NAT64 64:ff9b::/96 reaches the embedded IPv4 through a translator.
+			if (
+				bytes[0] === 0x00 &&
+				bytes[1] === 0x64 &&
+				bytes[2] === 0xff &&
+				bytes[3] === 0x9b &&
+				bytes.slice(4, 12).every((x) => x === 0)
+			)
+				return isBlockedIp(embeddedV4());
+			if ((bytes[0] & 0xfe) === 0xfc) return true; // fc00::/7 ULA
+			if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return true; // fe80::/10 link-local
+			if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0xc0) return true; // fec0::/10 site-local (deprecated)
+			if (bytes[0] === 0xff) return true; // multicast
 			return false;
 		}
 		return false;
+	}
+
+	/** Parse an IPv6 literal (with optional zone and embedded dotted IPv4) into 16 bytes. */
+	function parseIpv6(input: string): number[] | undefined {
+		let text = input.toLowerCase().replace(/%.*$/, "");
+		const groups: number[] = [];
+		const dotted = text.match(/(\d+\.\d+\.\d+\.\d+)$/);
+		if (dotted) {
+			const octets = dotted[1].split(".").map(Number);
+			if (octets.some((o) => o > 255)) return undefined;
+			text = `${text.slice(0, -dotted[1].length)}${((octets[0] << 8) | octets[1]).toString(16)}:${((octets[2] << 8) | octets[3]).toString(16)}`;
+		}
+		const halves = text.split("::");
+		if (halves.length > 2) return undefined;
+		const parse = (part: string) => (part === "" ? [] : part.split(":").map((h) => Number.parseInt(h, 16)));
+		const head = parse(halves[0]);
+		const tail = halves.length === 2 ? parse(halves[1]) : [];
+		const missing = 8 - head.length - tail.length;
+		if (halves.length === 1 ? head.length !== 8 : missing < 0) return undefined;
+		groups.push(...head, ...new Array(halves.length === 2 ? missing : 0).fill(0), ...tail);
+		if (groups.some((g) => Number.isNaN(g) || g < 0 || g > 0xffff)) return undefined;
+		return groups.flatMap((g) => [g >> 8, g & 0xff]);
 	}
 
 	async function assertPublicUrl(rawUrl: string): Promise<void> {

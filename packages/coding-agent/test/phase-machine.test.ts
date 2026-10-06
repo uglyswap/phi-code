@@ -71,8 +71,15 @@ describe("analyzePhaseMessages", () => {
 	});
 
 	it("detects a genuine 401 auth error but not a bare 401 in prose", () => {
-		expect(analyzePhaseMessages([assistant("HTTP 401: invalid access token")]).hasAuthError).toBe(true);
+		expect(
+			analyzePhaseMessages([assistant("", { stopReason: "error", errorMessage: "HTTP 401: invalid access token" })])
+				.hasAuthError,
+		).toBe(true);
 		expect(analyzePhaseMessages([assistant("the endpoint returned 401 rows")]).hasAuthError).toBe(false);
+		// A phase working on an API that answers "401 Unauthorized" is not an auth failure of phi itself.
+		expect(analyzePhaseMessages([assistant("curl -> 401 Unauthorized: invalid access token")]).hasAuthError).toBe(
+			false,
+		);
 	});
 
 	it("flags missing mandatory memory tools", () => {
