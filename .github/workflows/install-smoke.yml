@@ -100,6 +100,7 @@ jobs:
           if (variant === "close-wait") { vs.close(); await new Promise((r) => setTimeout(r, 200)); }
           if (variant !== "natural") process.exit(0);
           EOS
+          set +e
           for v in exit dispose close close-wait natural; do
             node "$RUNNER_TEMP/onnx-exit.mjs" "$RUNNER_TEMP/phi-install-smoke/run/agent" $v; echo "variant $v -> exit $?"
           done

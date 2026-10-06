@@ -38,7 +38,11 @@ const child = fifo
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 const input = fifo ? createWriteStream(fifo) : child.stdin;
+// The pty side can go away first (early exit): report it below, do not crash on EPIPE.
 let raw = "";
+input.on("error", (error) => {
+	raw += `\n[stdin error] ${error.message}\n`;
+});
 let exited = null;
 const answered = new Set();
 const answerOnce = (key, pattern, keys) => {

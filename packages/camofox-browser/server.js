@@ -37,6 +37,7 @@ import {
 import { actionFromReq, classifyError } from './lib/request-utils.js';
 import { cleanupOrphanedTempFiles, cleanupStaleFirefoxProfiles } from './lib/tmp-cleanup.js';
 import { coalesceInflight } from './lib/inflight.js';
+import { startVirtualDisplay } from './lib/virtual-display.js';
 import { createReporter, createTabHealthTracker, collectResourceSnapshot, classifyProxyError } from './lib/reporter.js';
 import { mountDocs } from './lib/openapi.js';
 import { prepareExternalCamoufoxExecutable } from './lib/camoufox-executable.js';
@@ -992,15 +993,13 @@ async function launchBrowserInstance() {
     let vdDisplay = undefined;
     let candidateBrowser = null;
 
-    try {
-      if (os.platform() === 'linux') {
-        localVirtualDisplay = pluginCtx.createVirtualDisplay();
-        vdDisplay = localVirtualDisplay.get();
-        log('info', 'xvfb virtual display started', { display: vdDisplay, attempt });
-      }
-    } catch (err) {
-      log('warn', 'xvfb not available, falling back to headless', { error: err.message, attempt });
-      localVirtualDisplay = null;
+    if (os.platform() === 'linux') {
+      // PHI-VENDOR: get() is async; see lib/virtual-display.js.
+      ({ virtualDisplay: localVirtualDisplay, display: vdDisplay } = await startVirtualDisplay(
+        () => pluginCtx.createVirtualDisplay(),
+        log,
+        attempt,
+      ));
     }
 
     const useVirtualDisplay = !!vdDisplay;
