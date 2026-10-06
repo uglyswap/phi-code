@@ -189,6 +189,9 @@ for (const pkg of packageStates) {
 		continue;
 	}
 
-	run(["publish", "--access", "public", "--provenance", "--ignore-scripts"], { cwd: pkg.directory });
+	// Provenance attestations need the GitHub Actions OIDC token: from a local
+	// terminal npm refuses to publish with --provenance, so only CI adds it.
+	const provenance = process.env.GITHUB_ACTIONS === "true" ? ["--provenance"] : [];
+	run(["publish", "--access", "public", ...provenance, "--ignore-scripts"], { cwd: pkg.directory });
 	console.log();
 }
