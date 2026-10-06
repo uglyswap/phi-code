@@ -92,14 +92,25 @@ jobs:
           import { createRequire } from "node:module";
           import { join } from "node:path";
           import { pathToFileURL } from "node:url";
-          const dir = process.argv[2];
-          const req = createRequire(join(dir, "x.cjs"));
-          const t = await import(pathToFileURL(req.resolve("@huggingface/transformers")).href);
-          const ort = req(join(dir, "node_modules", "onnxruntime-node", "package.json"));
-          const extractor = await t.pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", { dtype: "q8", cache_dir: join(dir, "models") });
-          const out = await extractor("hello world", { pooling: "mean", normalize: true });
-          console.log(`transformers ok, onnxruntime-node ${ort.version}, dims=${out.dims}`);
-          process.exit(0);
+          import { Worker, isMainThread, parentPort, workerData } from "node:worker_threads";
+          const [dir, mode] = isMainThread ? process.argv.slice(2) : workerData;
+          async function embed() {
+            const req = createRequire(join(dir, "x.cjs"));
+            const t = await import(pathToFileURL(req.resolve("@huggingface/transformers")).href);
+            const pipeline = t.pipeline ?? t.default.pipeline;
+            const ort = req(join(dir, "node_modules", "onnxruntime-node", "package.json"));
+            const extractor = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", { dtype: "q8", cache_dir: join(dir, "models") });
+            const out = await extractor("hello world", { pooling: "mean", normalize: true });
+            return `transformers ok (${mode}), onnxruntime-node ${ort.version}, dims=${out.dims}`;
+          }
+          if (!isMainThread) parentPort.postMessage(await embed());
+          else if (mode === "worker") {
+            const w = new Worker(new URL(import.meta.url), { workerData: [dir, mode] });
+            w.once("message", (m) => { console.log(m); process.exit(0); });
+          } else {
+            console.log(await embed());
+            process.exit(0);
+          }
           EOS
           for spec in "3.8.1|" "3.8.1|1.24.3" "3.8.1|1.30.0" "4.3.1|"; do
             tv=${spec%%|*}; ov=${spec##*|}; P="$D/t$tv-o$ov"; mkdir -p "$P"
@@ -109,7 +120,8 @@ jobs:
               printf '{"private":true,"dependencies":{"@huggingface/transformers":"%s"}}' "$tv" > "$P/package.json"
             fi
             (cd "$P" && npm install --no-audit --no-fund --loglevel=error > install.log 2>&1) || { echo "install failed for $spec"; tail -5 "$P/install.log"; }
-            node "$D/probe.mjs" "$P"; echo "transformers $tv onnxruntime-node ${ov:-default} -> exit $?"
+            node "$D/probe.mjs" "$P" main; echo "transformers $tv onnxruntime-node ${ov:-default} main thread -> exit $?"
+            node "$D/probe.mjs" "$P" worker; echo "transformers $tv onnxruntime-node ${ov:-default} worker thread -> exit $?"
           done
 
       - name: Upload logs
