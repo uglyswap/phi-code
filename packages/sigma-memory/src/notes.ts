@@ -85,6 +85,18 @@ export class NotesManager {
 	}
 
 	/**
+	 * Indique si la note existe sur disque. Un nom invalide (path traversal)
+	 * ne peut désigner aucune note : false plutôt qu'une exception.
+	 */
+	exists(filename: string): boolean {
+		try {
+			return existsSync(this.resolveNotePath(filename));
+		} catch {
+			return false;
+		}
+	}
+
+	/**
 	 * Liste tous les fichiers .md avec leur taille et date
 	 */
 	list(): Array<{ name: string; size: number; date: string }> {

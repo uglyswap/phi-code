@@ -45,10 +45,56 @@ export async function addDefaultAddons(
 	const addons: Record<string, string> = {};
 	for (const [name, url] of Object.entries(DefaultAddons)) {
 		if (!excludeList.includes(name as keyof typeof DefaultAddons)) {
+			// PHI-VENDOR: default addons are optional. After a failed download
+			// (typically offline) skip it for a while instead of delaying every
+			// launch with retries; `camoufox fetch` still downloads unconditionally.
+			if (!isExtractedAddon(getAddonPath(name)) && isDownloadBackedOff(name)) continue;
 			addons[name] = url;
 		}
 	}
 	await maybeDownloadAddons(addons, addonsList);
+	// Downloads skipped on purpose are not failures.
+	if (getAsBooleanFromENV("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", false)) return;
+	for (const name of Object.keys(addons)) {
+		recordDownloadOutcome(name, addonsList.includes(getAddonPath(name)));
+	}
+}
+
+/** PHI-VENDOR: how long a failed default-addon download is not retried at launch. */
+export const ADDON_DOWNLOAD_BACKOFF_MS = 6 * 60 * 60 * 1000;
+
+/** PHI-VENDOR: marker file whose mtime records the last failed download of an addon. */
+function backoffMarkerPath(addonName: string): string {
+	return getPath(join("addons", `.${addonName}.download-failed`));
+}
+
+function isDownloadBackedOff(addonName: string): boolean {
+	try {
+		const age = Date.now() - fs.statSync(backoffMarkerPath(addonName)).mtimeMs;
+		// abs(): file mtimes can be a few ms ahead of Date.now(), while a marker far in
+		// the future (clock set back) must not block the download forever.
+		return Math.abs(age) < ADDON_DOWNLOAD_BACKOFF_MS;
+	} catch {
+		return false;
+	}
+}
+
+function recordDownloadOutcome(addonName: string, succeeded: boolean): void {
+	const marker = backoffMarkerPath(addonName);
+	try {
+		if (succeeded) {
+			fs.rmSync(marker, { force: true });
+		} else {
+			fs.mkdirSync(join(marker, ".."), { recursive: true });
+			fs.writeFileSync(marker, new Date().toISOString());
+			console.error(
+				`Skipping ${addonName} download attempts for ${ADDON_DOWNLOAD_BACKOFF_MS / 3_600_000} h; launching without it.`,
+			);
+		}
+	} catch (e) {
+		// The backoff is an optimisation: a read-only cache must not break the launch.
+		console.error(`Could not update the ${addonName} download backoff marker: ${e}`);
+	}
 }
 
 /**
@@ -64,7 +110,9 @@ export async function downloadAndExtract(
 	extractPath: string,
 	name: string,
 ): Promise<void> {
-	const buffer = await webdl(url, `Downloading addon (${name})`, false);
+	// PHI-VENDOR: a single attempt; addons are optional and a failure must not
+	// stall the launch (5 retries spaced 5 s apart cost ~25 s offline).
+	const buffer = await webdl(url, `Downloading addon (${name})`, false, null, { retries: 1 });
 	// PHI-VENDOR: create the target only once the download succeeded, so an
 	// offline first launch does not leave an empty addon dir behind.
 	fs.mkdirSync(extractPath, { recursive: true });

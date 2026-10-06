@@ -51,7 +51,8 @@ describe("SigmaMemory", () => {
 
 		// Check that required directories were created
 		assert(existsSync(tempDir));
-		assert(existsSync(join(tempDir, "project")));
+		// The project memory dir is created lazily on first write, never by init.
+		assert(!existsSync(join(tempDir, "project")));
 
 		// Check that vector store is initialized
 		const stats = await sigmaMemory.status();

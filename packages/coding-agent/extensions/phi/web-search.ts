@@ -206,6 +206,44 @@ export async function condenseForContext(
 	};
 }
 
+/** Byte cap for any HTTP response body read by this extension. */
+export const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Read a response body as text, streaming, and stop after `maxBytes`.
+ * `response.text()` buffers the whole body, so a multi-hundred-MB page (or an
+ * endless stream) would exhaust memory before any length limit applies.
+ */
+export async function readBodyCapped(
+	response: Response,
+	maxBytes: number = MAX_RESPONSE_BYTES,
+): Promise<{ text: string; truncated: boolean }> {
+	if (!response.body) return { text: "", truncated: false };
+	const reader = response.body.getReader();
+	const decoder = new TextDecoder();
+	let received = 0;
+	let text = "";
+	let truncated = false;
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			const room = maxBytes - received;
+			if (value.byteLength > room) {
+				text += decoder.decode(value.subarray(0, room), { stream: true });
+				truncated = true;
+				break;
+			}
+			received += value.byteLength;
+			text += decoder.decode(value, { stream: true });
+		}
+	} finally {
+		if (truncated) await reader.cancel().catch(() => {});
+		else reader.releaseLock();
+	}
+	return { text: text + decoder.decode(), truncated };
+}
+
 export default function webSearchExtension(pi: ExtensionAPI) {
 	const BRAVE_API_KEY = process.env.BRAVE_API_KEY;
 	const BRAVE_API_URL = "https://api.search.brave.com/res/v1/web/search";
@@ -257,7 +295,7 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 
 		if (!response.ok) throw new Error(`Google HTTP ${response.status}`);
 
-		const html = await response.text();
+		const { text: html } = await readBodyCapped(response);
 
 		if (html.includes("detected unusual traffic") || html.includes("sorry/index") || html.includes("g-recaptcha")) {
 			throw new Error("Google CAPTCHA detected");
@@ -356,7 +394,7 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 
 		if (!response.ok) throw new Error(`DuckDuckGo HTTP ${response.status}`);
 
-		const html = await response.text();
+		const { text: html } = await readBodyCapped(response);
 
 		if (html.includes("complete the following challenge") || html.includes("bots use DuckDuckGo")) {
 			throw new Error("DuckDuckGo CAPTCHA detected");
@@ -436,7 +474,9 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 
 		if (!response.ok) throw new Error(`Brave API HTTP ${response.status}`);
 
-		const data = (await response.json()) as any;
+		const { text: json, truncated: jsonTruncated } = await readBodyCapped(response);
+		if (jsonTruncated) throw new Error(`Brave API response exceeds ${MAX_RESPONSE_BYTES} bytes`);
+		const data = JSON.parse(json) as any;
 		if (!data.web?.results) return [];
 
 		return data.web.results.map(
@@ -613,7 +653,11 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 		}
 	}
 
-	async function fetchUrl(url: string, maxLength: number = 8000, signal?: AbortSignal): Promise<string> {
+	async function fetchUrl(
+		url: string,
+		maxLength: number = 8000,
+		signal?: AbortSignal,
+	): Promise<{ content: string; bodyTruncated: boolean }> {
 		// Valide l'URL initiale ET chaque saut de redirection (redirect manuel),
 		// sinon une redirection 30x vers une cible interne contournerait la garde.
 		let currentUrl = url;
@@ -630,6 +674,8 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 			});
 			const location = response.status >= 300 && response.status < 400 ? response.headers.get("location") : null;
 			if (!location) break;
+			// Discard the redirect body unread (it may be arbitrarily large).
+			await response.body?.cancel().catch(() => {});
 			currentUrl = new URL(location, currentUrl).toString();
 		}
 
@@ -637,11 +683,11 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 		if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
 
 		const contentType = response.headers.get("content-type") || "";
-		const text = await response.text();
+		const { text, truncated: bodyTruncated } = await readBodyCapped(response);
 
 		// Plain text / JSON — return as-is
 		if (contentType.includes("text/plain") || contentType.includes("application/json")) {
-			return text.substring(0, maxLength);
+			return { content: text.substring(0, maxLength), bodyTruncated };
 		}
 
 		// Try Readability + JSDOM (best quality extraction)
@@ -652,7 +698,7 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 				const reader = new _Readability(dom.window.document);
 				const article = reader.parse();
 				if (article?.textContent) {
-					return article.textContent.substring(0, maxLength);
+					return { content: article.textContent.substring(0, maxLength), bodyTruncated };
 				}
 			} catch {
 				// Fall through to basic extraction
@@ -675,7 +721,7 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 			.replace(/\n{3,}/g, "\n\n")
 			.trim();
 
-		return decodeEntities(readable).substring(0, maxLength);
+		return { content: decodeEntities(readable).substring(0, maxLength), bodyTruncated };
 	}
 
 	// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -774,7 +820,7 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 			const { url, max_length = 8000 } = params as { url: string; max_length?: number };
 
 			try {
-				const content = await fetchUrl(url, max_length, signal);
+				const { content, bodyTruncated } = await fetchUrl(url, max_length, signal);
 
 				if (!content || content.length < 10) {
 					return {
@@ -791,7 +837,11 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 				// deterministic truncation. The reduced text stays wrapped in the
 				// external-untrusted boundary below.
 				const condensed = await condenseForContext(content, ctx, signal);
-				const fetchNote = truncated ? "\n\n*(truncated by max_length)*" : "";
+				const fetchNote =
+					(truncated ? "\n\n*(truncated by max_length)*" : "") +
+					(bodyTruncated
+						? `\n\n*(page body exceeded ${MAX_RESPONSE_BYTES} bytes: only the beginning was read)*`
+						: "");
 				const body = wrapUntrusted(`${condensed.text}${condensed.note}${fetchNote}`, "web");
 				return {
 					content: [{ type: "text", text: `**Content from ${url}:**\n\n${body}` }],
@@ -800,6 +850,7 @@ export default function webSearchExtension(pi: ExtensionAPI) {
 						url,
 						length: content.length,
 						truncated,
+						bodyTruncated,
 						contextMode: condensed.mode,
 						returnedLength: condensed.text.length,
 					},

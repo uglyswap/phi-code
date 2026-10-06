@@ -481,10 +481,17 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 	// Resolved once per cwd and cached (resolveSandbox probes the Docker daemon).
 	// This is what turns "the agent says it ran the test" into "a real container
 	// ran the test and here is its exit code".
-	let sessionSandbox: { cwd: string; sandbox: Sandbox } | null = null;
-	function getSessionSandbox(cwd: string): Sandbox {
-		if (!sessionSandbox || sessionSandbox.cwd !== cwd) {
-			sessionSandbox = { cwd, sandbox: resolveSandbox({ cwd }) };
+	// Project trust gates the project-scope shellPath setting (same rule as the bash tool).
+	let sessionSandbox: { cwd: string; trusted: boolean; sandbox: Sandbox } | null = null;
+	function getSessionSandbox(cwd: string, ctx?: { isProjectTrusted?: () => boolean }): Sandbox {
+		let trusted = false;
+		try {
+			trusted = ctx?.isProjectTrusted?.() === true;
+		} catch {
+			trusted = false;
+		}
+		if (!sessionSandbox || sessionSandbox.cwd !== cwd || sessionSandbox.trusted !== trusted) {
+			sessionSandbox = { cwd, trusted, sandbox: resolveSandbox({ cwd, projectTrusted: trusted }) };
 		}
 		return sessionSandbox.sandbox;
 	}
@@ -539,7 +546,7 @@ export default function orchestratorExtension(pi: ExtensionAPI) {
 					details: { verdict: "BUDGET_EXHAUSTED", budgetMs: SANDBOX_BUDGET_MS, usedMs: sandboxExecMs },
 				};
 			}
-			const sandbox = getSessionSandbox(cwd);
+			const sandbox = getSessionSandbox(cwd, ctx);
 			const blockedReason = hostGuardReason(p.command, sandbox, cwd);
 			if (blockedReason) {
 				return {
@@ -1463,7 +1470,7 @@ Tag the note with relevant keywords for vector search.
 		if (orchestrationMode !== "fix" || !fixContext || fixContext.oracleRan) return false;
 		fixContext.oracleRan = true;
 		const cwd = ctx.cwd || process.cwd();
-		const sandbox = getSessionSandbox(cwd);
+		const sandbox = getSessionSandbox(cwd, ctx);
 		let reproCmd =
 			fixContext.state.failingTest?.trim() || fixContext.state.reproCommand?.trim() || fixContext.reproFromShot;
 		// Conventional fallback: the shot is instructed to write `repro_issue.py`.
@@ -1584,7 +1591,7 @@ Tag the note with relevant keywords for vector search.
 		candidateContext.arbitrated = true;
 		const cc = candidateContext;
 		const cwd = ctx.cwd || process.cwd();
-		const sandbox = getSessionSandbox(cwd);
+		const sandbox = getSessionSandbox(cwd, ctx);
 		const suiteCmd = sandbox.recipe.test?.trim();
 		const nonEmpty = cc.list.filter((c) => c.patch.trim());
 		// The arbitration reproduction comes from a phase handoff (REPRO-CMD):
@@ -2768,7 +2775,7 @@ It reports SUCCESS only when a real run meets the acceptance criteria — otherw
 			const cwd = ctx.cwd || process.cwd();
 			const raw = args.trim();
 			const [sub, ...rest] = raw.split(/\s+/);
-			const sandbox = getSessionSandbox(cwd);
+			const sandbox = getSessionSandbox(cwd, ctx);
 
 			if (!sub || sub === "status") {
 				const r = sandbox.recipe;

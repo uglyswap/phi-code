@@ -11,6 +11,27 @@ import type { VectorSearchResult } from "./types.ts";
  */
 const esmImport = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<any>;
 
+/**
+ * Load the `pipeline` factory of @huggingface/transformers. A missing or
+ * broken install fails with an explicit message (instead of a bare
+ * ERR_MODULE_NOT_FOUND) so callers can report that only vector search is
+ * unavailable; notes and ontology search keep working without it.
+ */
+async function loadTransformersPipeline(): Promise<(...args: any[]) => Promise<any>> {
+	let mod: { pipeline?: unknown };
+	try {
+		mod = await esmImport("@huggingface/transformers");
+	} catch (error) {
+		throw new Error(
+			`Vector search unavailable: cannot load @huggingface/transformers (${error instanceof Error ? error.message : String(error)}). Reinstall phi-code to restore it; full-text note search still works.`,
+		);
+	}
+	if (typeof mod.pipeline !== "function") {
+		throw new Error("Vector search unavailable: @huggingface/transformers does not export pipeline().");
+	}
+	return mod.pipeline as (...args: any[]) => Promise<any>;
+}
+
 // The vector store initializes and loads its embedding model in the background
 // while the TUI is up. Writing to stdout/stderr directly corrupts the input
 // line, so these diagnostics are opt-in (set PHI_MEMORY_VERBOSE=1 or PHI_DEBUG=1).
@@ -219,8 +240,11 @@ export class VectorStore {
 				`[VectorStore] First run may download the model (~${dtype === "q8" ? "22" : dtype === "fp16" ? "45" : "90"}MB).`,
 			);
 
-			// Dynamic ESM import for @huggingface/transformers (ESM-only package)
-			const { pipeline: createPipeline } = await esmImport("@huggingface/transformers");
+			// Dynamic ESM import for @huggingface/transformers. The bare specifier
+			// resolves from this module's own (real) location, not from the cwd,
+			// in Node, Bun and the compiled Bun binary (verified through jiti and
+			// the ~/.phi/agent/extensions/node_modules link).
+			const createPipeline = await loadTransformersPipeline();
 
 			this.pipeline = await createPipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2", { dtype });
 
@@ -484,6 +508,35 @@ export class VectorStore {
 		this.mutate((db) => {
 			db.run("DELETE FROM documents WHERE file = ?", [file]);
 		});
+	}
+
+	/** Distinct file names that have chunks in the given DB. */
+	private static indexedFiles(db: Database): string[] {
+		const result = db.exec("SELECT DISTINCT file FROM documents");
+		return result.length > 0 ? result[0].values.map((row) => String(row[0])) : [];
+	}
+
+	/**
+	 * Remove every document whose source no longer exists (exists(file) is
+	 * false), e.g. a note deleted from disk: otherwise search keeps returning
+	 * hits pointing at files that are gone. The predicate is re-evaluated when
+	 * the mutation is replayed under the file lock on a reloaded image, so a
+	 * file re-created meanwhile by another process is not dropped. Nothing is
+	 * written when nothing is stale. Resolves to the number of files removed.
+	 */
+	async removeMissing(exists: (file: string) => boolean): Promise<number> {
+		if (!this.db) throw new Error("VectorStore not initialized. Call init() first.");
+
+		this.refreshFromDisk();
+		const stale = VectorStore.indexedFiles(this.db).filter((file) => !exists(file));
+		if (stale.length === 0) return 0;
+
+		this.mutate((db) => {
+			for (const file of VectorStore.indexedFiles(db)) {
+				if (!exists(file)) db.run("DELETE FROM documents WHERE file = ?", [file]);
+			}
+		});
+		return stale.length;
 	}
 
 	/**

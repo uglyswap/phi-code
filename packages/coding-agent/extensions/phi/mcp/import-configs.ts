@@ -3,7 +3,7 @@
  *
  * Sources (omp-style discovery):
  *   - <cwd>/.mcp.json            (Claude Code project)
- *   - ~/.claude.json             (Claude Code user)
+ *   - ~/.claude.json             (Claude Code user, then projects[<cwd>].mcpServers)
  *   - ~/.codex/config.toml       (Codex, [mcp_servers.NAME] tables)
  *   - ~/.gemini/settings.json    (Gemini CLI)
  *   - <cwd>/.cursor/mcp.json     (Cursor)
@@ -14,12 +14,13 @@
  * reason instead of making the whole phi config invalid.
  *
  * Existing entries in the phi config are NEVER overwritten: same-name imports
- * are skipped and reported.
+ * are skipped and reported. Within one import the first source wins, and a later
+ * source defining the same name is reported as a conflict.
  */
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { getAgentDir } from "phi-code";
 import { validateServerConfig } from "./config.ts";
 import { parseToml } from "./toml.ts";
@@ -214,10 +215,44 @@ function addJsonCandidate(
 	}
 }
 
+/**
+ * Comparable form of a project path as Claude Code stores it in ~/.claude.json
+ * `projects` keys. On Windows the comparison ignores case and `\` vs `/`.
+ */
+export function normalizeProjectPath(path: string, platform: NodeJS.Platform = process.platform): string {
+	if (platform === "win32") {
+		// "C:\Users\x\" and "c:/users/x" are the same project; a drive root keeps its "/".
+		const normalized = path.replace(/\\/g, "/").toLowerCase();
+		return /^[a-z]:\/$/.test(normalized) ? normalized : normalized.replace(/\/+$/, "");
+	}
+	return path.length > 1 ? path.replace(/\/+$/, "") : path;
+}
+
+/** Claude Code per-project servers (local scope): projects[<cwd>].mcpServers of ~/.claude.json. */
+function addClaudeProjectCandidate(candidates: Candidate[], claudeJson: Record<string, unknown>, cwd: string): void {
+	const projects = claudeJson.projects;
+	if (!isRecord(projects)) return;
+	const target = normalizeProjectPath(resolve(cwd));
+	for (const [projectPath, project] of Object.entries(projects)) {
+		if (normalizeProjectPath(projectPath) !== target || !isRecord(project)) continue;
+		if (isRecord(project.mcpServers)) {
+			candidates.push({
+				label: `~/.claude.json (project ${projectPath})`,
+				kind: "claude",
+				servers: project.mcpServers,
+			});
+		}
+	}
+}
+
 function collectCandidates(cwd: string, errors: string[]): Candidate[] {
 	const candidates: Candidate[] = [];
 	addJsonCandidate(candidates, errors, join(cwd, ".mcp.json"), ".mcp.json", "claude", ["mcpServers"]);
-	addJsonCandidate(candidates, errors, join(homedir(), ".claude.json"), "~/.claude.json", "claude", ["mcpServers"]);
+	const claudeJsonPath = join(homedir(), ".claude.json");
+	addJsonCandidate(candidates, errors, claudeJsonPath, "~/.claude.json", "claude", ["mcpServers"]);
+	// Global servers first: a project server with the same name is reported, not imported.
+	const claudeJson = readJson(claudeJsonPath);
+	if (claudeJson.ok && claudeJson.value) addClaudeProjectCandidate(candidates, claudeJson.value, cwd);
 
 	const codexPath = join(homedir(), ".codex", "config.toml");
 	if (existsSync(codexPath)) {
@@ -252,12 +287,22 @@ export function importExternalMcpConfigs(cwd: string, targetPath = join(getAgent
 	}
 	const existing = target.value ?? { mcpServers: {} };
 	const servers: Record<string, unknown> = isRecord(existing.mcpServers) ? existing.mcpServers : {};
+	/** Source of each entry imported by this run, to report same-name conflicts between sources. */
+	const importedFrom = new Map<string, string>();
 
 	for (const { label, kind, servers: incoming } of collectCandidates(cwd, result.errors)) {
 		let used = false;
 		for (const [name, raw] of Object.entries(incoming)) {
 			if (FORBIDDEN_NAMES.has(name)) {
 				result.errors.push(`${name} (${label}): invalid server name`);
+				continue;
+			}
+			const earlier = importedFrom.get(name);
+			if (earlier !== undefined) {
+				result.skipped.push(`${name} (${label}: conflicts with ${name} from ${earlier}, which was kept)`);
+				result.warnings.push(
+					`${name}: defined in both ${earlier} and ${label}; imported the one from ${earlier}. Rename one to import both.`,
+				);
 				continue;
 			}
 			if (Object.hasOwn(servers, name)) {
@@ -270,6 +315,7 @@ export function importExternalMcpConfigs(cwd: string, targetPath = join(getAgent
 				continue;
 			}
 			servers[name] = converted.entry;
+			importedFrom.set(name, label);
 			result.imported.push(`${name} (${label})`);
 			for (const warning of converted.warnings) result.warnings.push(`${name} (${label}): ${warning}`);
 			used = true;

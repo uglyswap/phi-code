@@ -13,7 +13,7 @@
  * constructs an OAuthClientProvider and the transport factory wires it in.
  */
 
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { OAuthClientProvider, OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth.js";
@@ -351,10 +351,13 @@ export class McpOAuthProvider implements OAuthClientProvider {
 	/**
 	 * Returns the OAuth state parameter for CSRF protection.
 	 * This is called by the SDK's auth() function when building the authorization URL.
-	 * Returns empty string if no state has been set (no CSRF protection).
+	 * Without a state set by setState(), a random one is generated (and kept for this
+	 * provider): an empty state would make the SDK omit it from the authorization URL.
+	 * The callback server only accepts a state registered with waitForCallback().
 	 */
 	async state(): Promise<string> {
-		return this._oauthState || "";
+		this._oauthState ||= randomBytes(32).toString("hex");
+		return this._oauthState;
 	}
 
 	// --- Credential invalidation ---

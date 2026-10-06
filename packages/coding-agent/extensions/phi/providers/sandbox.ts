@@ -13,7 +13,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { getShellConfig } from "phi-code";
+import { getAgentDir, getShellConfig, SettingsManager } from "phi-code";
 import {
 	type CommandResult,
 	type CommandShell,
@@ -81,32 +81,59 @@ export interface SandboxDeps {
 	readConfig?: (cwd: string) => SandboxConfig | undefined;
 	/** Force docker availability in tests; otherwise probed via `docker version`. */
 	dockerAvailable?: boolean;
-	/** Shell for the local backend; defaults to phi's bash tool shell (see defaultLocalShell). */
+	/** Shell for the local backend; defaults to phi's bash tool shell, honouring settings shellPath. */
 	resolveShell?: () => CommandShell | undefined;
 }
 
-let cachedLocalShell: { value: CommandShell | undefined } | undefined;
+const cachedLocalShells = new Map<string, CommandShell | undefined>();
 
 /**
  * The local backend runs commands with the SAME shell as phi's bash tool
  * (Git Bash on Windows, bash on POSIX): the phase prompts announce bash, and
- * `shell:true` would hand them to cmd.exe on Windows. Resolved once. If no bash
- * can be found (the bash tool is unusable too), fall back to the platform shell.
+ * `shell:true` would hand them to cmd.exe on Windows. `shellPath` is the
+ * settings.json override the bash tool honours (see readShellPathSetting).
+ * Resolved once per shellPath. A configured path that does not exist falls
+ * back to the default bash lookup; if no bash can be found (the bash tool is
+ * unusable too), fall back to the platform shell.
  */
-export function defaultLocalShell(): CommandShell | undefined {
-	if (!cachedLocalShell) {
+export function defaultLocalShell(shellPath?: string): CommandShell | undefined {
+	const key = shellPath ?? "";
+	if (!cachedLocalShells.has(key)) {
+		let value: CommandShell | undefined;
 		try {
-			cachedLocalShell = { value: getShellConfig() };
+			value = getShellConfig(shellPath);
 		} catch {
-			cachedLocalShell = { value: undefined };
+			try {
+				value = shellPath ? getShellConfig() : undefined;
+			} catch {
+				value = undefined;
+			}
 		}
+		cachedLocalShells.set(key, value);
 	}
-	return cachedLocalShell.value;
+	return cachedLocalShells.get(key);
+}
+
+/**
+ * The `shellPath` setting, read through the core's SettingsManager (global
+ * settings.json merged with the project's .phi/settings.json, ~ expanded),
+ * exactly as the bash tool gets it. Project settings only count when the
+ * project is trusted: an untrusted repo must not pick the host executable.
+ * No settings API is exposed to extensions, hence the read-only manager.
+ */
+export function readShellPathSetting(cwd: string, projectTrusted: boolean): string | undefined {
+	try {
+		return SettingsManager.create(cwd, getAgentDir(), { projectTrusted }).getShellPath();
+	} catch {
+		return undefined;
+	}
 }
 
 export interface ResolveOptions {
 	cwd: string;
 	requested?: "docker" | "local" | "auto";
+	/** Whether project-scope settings (shellPath) may apply; default false. */
+	projectTrusted?: boolean;
 	deps?: SandboxDeps;
 }
 
@@ -208,7 +235,16 @@ export function resolveSandbox(opts: ResolveOptions): Sandbox {
 	}
 
 	if (decision.backend === "local") {
-		const shell = () => (deps.resolveShell ?? defaultLocalShell)();
+		let resolvedShell: { value: CommandShell | undefined } | undefined;
+		const shell = () => {
+			if (!resolvedShell) {
+				const resolve =
+					deps.resolveShell ??
+					(() => defaultLocalShell(readShellPathSetting(opts.cwd, opts.projectTrusted ?? false)));
+				resolvedShell = { value: resolve() };
+			}
+			return resolvedShell.value;
+		};
 		return {
 			...base,
 			describe: () => `local host (${opts.cwd})`,

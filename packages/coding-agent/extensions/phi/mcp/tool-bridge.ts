@@ -370,7 +370,7 @@ export async function listAllTools(client: Client, requestTimeoutMs: number): Pr
  * Tools are registered once and activated/deactivated as servers connect/disconnect.
  */
 export class ToolBridge {
-	private readonly settings: Settings;
+	private settings: Settings;
 	private readonly pi: PiExtensionAPI;
 	/** Tracks which Pi tool names belong to which MCP server. */
 	private readonly serverToolNames = new Map<string, Set<string>>();
@@ -379,6 +379,11 @@ export class ToolBridge {
 	 * Used to give colliding names a hash suffix instead of overwriting another tool.
 	 */
 	private readonly toolOwners = new Map<string, string>();
+	/**
+	 * Servers whose connection is lost (failed health check), with the message their
+	 * tools return until the server is back. Cleared by refreshTools/activateServer.
+	 */
+	private readonly unavailable = new Map<string, string>();
 
 	constructor(settings: Settings, pi: PiExtensionAPI) {
 		this.settings = settings;
@@ -393,6 +398,7 @@ export class ToolBridge {
 	 * Note: Pi's registerTool() overwrites by name (Map.set), so re-registration is safe.
 	 */
 	async refreshTools(serverName: string, client: Client): Promise<void> {
+		this.unavailable.delete(serverName);
 		const timeoutMs = this.settings.requestTimeoutMs;
 
 		let tools: McpToolDefinition[];
@@ -464,7 +470,30 @@ export class ToolBridge {
 
 	/** Re-activate all Pi tools belonging to a server (called on reconnect). */
 	activateServer(serverName: string): void {
+		this.unavailable.delete(serverName);
 		this._activateServerTools(serverName);
+	}
+
+	/**
+	 * The server's connection was lost: deactivate its tools and make any call that
+	 * still reaches them (e.g. later in the current turn) fail with `message`
+	 * instead of an opaque transport error. refreshTools() restores them on reconnect.
+	 */
+	markServerUnavailable(serverName: string, message: string): void {
+		this.unavailable.set(serverName, message);
+		this._deactivateServerTools(serverName);
+	}
+
+	/**
+	 * Apply settings from a reloaded config. Tool names embed `toolPrefix`: when it
+	 * changes, every server's tools are deactivated and forgotten so the next
+	 * refreshTools() registers them under the new prefix (old names stay inactive).
+	 */
+	updateSettings(settings: Settings): void {
+		const prefixChanged = settings.toolPrefix !== this.settings.toolPrefix;
+		this.settings = settings;
+		if (!prefixChanged) return;
+		for (const serverName of Array.from(this.serverToolNames.keys())) this.removeServer(serverName);
 	}
 
 	// ─── Internal ───────────────────────────────────────────────────────────────
@@ -484,6 +513,7 @@ export class ToolBridge {
 
 		const schema = convertJsonSchemaToTypebox(tool.inputSchema);
 		const timeoutMs = this.settings.requestTimeoutMs;
+		const unavailable = this.unavailable;
 
 		this.pi.registerTool({
 			name: piName,
@@ -496,6 +526,8 @@ export class ToolBridge {
 				if (signal?.aborted) {
 					return { content: [{ type: "text", text: "Cancelled" }], details: {} };
 				}
+				const downMessage = unavailable.get(serverName);
+				if (downMessage !== undefined) throw new McpError(downMessage, serverName, "connection");
 
 				try {
 					const result = await client.request(

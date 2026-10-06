@@ -1079,6 +1079,10 @@ async function dispatch(action, params) {
     }
     case "page.screenshot":
       return takeScreenshot(params);
+    case "capture.clear":
+      // Sent by /chrome revoke (and authorization expiry): stop early capture on every tab.
+      await clearCaptureTabs();
+      return { cleared: true };
     default:
       throw new Error(`Unknown action: ${action}`);
   }
@@ -1417,6 +1421,8 @@ async function loadCaptureTabs() {
   } catch {
     // storage.session unavailable: fall back to the in-memory set only
   }
+  // A concurrent clearCaptureTabs() (revocation) wins over the stale stored list.
+  if (captureTabsCache) return captureTabsCache;
   captureTabsCache = new Set(ids.filter((id) => typeof id === "number"));
   return captureTabsCache;
 }
@@ -1426,6 +1432,15 @@ async function saveCaptureTabs(tabs) {
     await chrome.storage.session.set({ [CAPTURE_TABS_STORAGE_KEY]: Array.from(tabs) });
   } catch {
     // best-effort persistence
+  }
+}
+
+async function clearCaptureTabs() {
+  captureTabsCache = new Set();
+  try {
+    await chrome.storage.session.remove(CAPTURE_TABS_STORAGE_KEY);
+  } catch {
+    // storage.session unavailable: the in-memory set is already empty
   }
 }
 

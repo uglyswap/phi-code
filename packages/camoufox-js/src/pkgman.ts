@@ -631,7 +631,8 @@ export async function webdl(
 			if (response.ok) break;
 		} catch (e) {
 			console.error(e, `retrying (${attempts + 1}/${retries})...`);
-			await setTimeout(5e3);
+			// PHI-VENDOR: no pointless 5 s wait after the final attempt.
+			if (attempts + 1 < retries) await setTimeout(5e3);
 		}
 		attempts++;
 	}

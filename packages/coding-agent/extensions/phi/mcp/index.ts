@@ -189,6 +189,11 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	manager.setToolRefreshCallback(async (serverName, client) => {
 		await bridge.refreshTools(serverName, client);
 	});
+	// Lost connection (failed health check): tools answer with an explicit message
+	// until the reconnect refreshes them.
+	manager.setServerUnavailableCallback((serverName, message) => {
+		bridge.markServerUnavailable(serverName, message);
+	});
 
 	/**
 	 * Bumped on every session start/shutdown: background connections started for an
@@ -223,6 +228,10 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 			await manager.shutdownAll();
 			// Rebuild server entries from new config
 			manager.rebuildServers(sessionConfig);
+			// Tool names embed settings.toolPrefix: the bridge must use the new settings.
+			bridge.updateSettings(sessionConfig.settings);
+			// Compare the next session against what is actually running now.
+			config = sessionConfig;
 		}
 
 		const eagerServers = Object.entries(sessionConfig.mcpServers).filter(([, cfg]) => cfg.lifecycle === "eager");

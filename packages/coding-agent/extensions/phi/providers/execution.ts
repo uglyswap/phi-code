@@ -8,7 +8,7 @@
  * itself is exercised with trivial real commands.
  */
 
-import { spawn, spawnSync } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 
 const DEFAULT_MAX_BUFFER = 32 * 1024 * 1024;
@@ -37,6 +37,45 @@ function killTree(pid: number | undefined): void {
 		}
 	} catch {
 		/* best effort */
+	}
+}
+
+/**
+ * Stop a phi sub-process (fan-out explorer / candidate) and everything it
+ * started. The child must have been spawned with `detached: true` on POSIX.
+ *  - Windows: taskkill /T /F while the root is alive (it walks the live tree;
+ *    killing the root first would orphan descendants outside its job object).
+ *  - POSIX: SIGTERM first, so the sub-phi's shutdown handler kills its bash
+ *    children (spawned detached = their own process groups, which a group kill
+ *    of the sub-phi cannot reach); then SIGKILL the sub-phi's group to sweep
+ *    what remains in it, on exit or after `graceMs` if SIGTERM is ignored.
+ */
+export function terminateTree(child: ChildProcess, graceMs = 5000): void {
+	const pid = child.pid;
+	if (!pid) return;
+	if (process.platform === "win32") {
+		killTree(pid);
+		return;
+	}
+	let swept = false;
+	const sweep = () => {
+		if (swept) return;
+		swept = true;
+		clearTimeout(timer);
+		try {
+			process.kill(-pid, "SIGKILL");
+		} catch {
+			/* group already gone */
+		}
+		if (child.exitCode === null && child.signalCode === null) killTree(pid);
+	};
+	const timer = setTimeout(sweep, graceMs);
+	timer.unref?.();
+	child.once("exit", sweep);
+	try {
+		child.kill("SIGTERM");
+	} catch {
+		sweep();
 	}
 }
 

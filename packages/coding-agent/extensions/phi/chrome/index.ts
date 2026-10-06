@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -46,7 +47,11 @@ type BridgeResult = {
 	error?: string;
 };
 
-const PI_CHROME_PKG_PATH = resolve(__dirname, "..", "..", "package.json");
+// The companion extension shipped next to this file is the source of truth: the bridge
+// advertises its version so an older loaded service worker reloads itself from disk.
+// (The previous ../../package.json lookup pointed to a file phi does not ship, so it
+// always returned 0.0.0-dev and the auto-reload never fired.)
+const PI_CHROME_PKG_PATH = resolve(__dirname, "browser-extension", "manifest.json");
 function readPiChromeVersion(): string {
 	try {
 		const pkg = JSON.parse(readFileSync(PI_CHROME_PKG_PATH, "utf8")) as { version?: string };
@@ -745,7 +750,7 @@ class ChromeProfileBridge {
 				const entry = this.pending.get(command.id);
 				if (entry) entry.deliveredAt = Date.now();
 			}
-			// Re-read version on every /next so bumping package.json takes effect without pi restart.
+			// Re-read version on every /next so bumping manifest.json takes effect without pi restart.
 			const currentVersion = readPiChromeVersion();
 			sendJson(
 				response,
@@ -837,6 +842,35 @@ function StringEnum<T extends readonly [string, ...string[]]>(values: T) {
 	);
 }
 
+/**
+ * Copy `text` to the macOS clipboard. pbcopy reads it from stdin and no shell is involved,
+ * so a path containing `$(...)`, backticks or quotes is copied verbatim, never executed.
+ * Best-effort: resolves (never rejects) once pbcopy exits, fails or times out.
+ */
+export function copyToMacClipboard(text: string, timeoutMs = 5_000, spawnFn: typeof spawn = spawn): Promise<void> {
+	return new Promise((resolveCopy) => {
+		let child: ReturnType<typeof spawn>;
+		try {
+			child = spawnFn("pbcopy", [], { stdio: ["pipe", "ignore", "ignore"], shell: false });
+		} catch {
+			resolveCopy();
+			return;
+		}
+		const timer = setTimeout(() => {
+			child.kill();
+			resolveCopy();
+		}, timeoutMs);
+		const finish = () => {
+			clearTimeout(timer);
+			resolveCopy();
+		};
+		child.once("error", finish);
+		child.once("close", finish);
+		child.stdin?.once("error", () => undefined);
+		child.stdin?.end(text);
+	});
+}
+
 export default function (pi: ExtensionAPI): void {
 	const instanceToken = Symbol("pi-chrome-instance");
 	const currentRoot = extensionRoot();
@@ -895,11 +929,16 @@ export default function (pi: ExtensionAPI): void {
 		pi.setActiveTools(activeToolNamesWithoutChrome());
 	};
 
-	const lockChromeControl = (): void => {
+	const lockChromeControl = (forceCaptureClear = false): void => {
+		const wasAuthorized = chromeAuthorizedUntil !== undefined;
 		clearAuthExpiryTimer();
 		chromeAuthorizedUntil = undefined;
 		persistAuth();
 		deactivateChromeTools();
+		// The service worker keeps the tabs it instruments for early console/network capture in
+		// chrome.storage.session; locking must stop that capture too. Best-effort and not
+		// awaited: the extension may be offline, or an older build without capture.clear.
+		if (wasAuthorized || forceCaptureClear) void bridge.send("capture.clear", {}, 5_000).catch(() => undefined);
 	};
 
 	const authSummary = (): string => {
@@ -1189,7 +1228,7 @@ Usage rules:
 	};
 
 	const revokeHandler = (ctx: ExtensionContext) => {
-		lockChromeControl();
+		lockChromeControl(true);
 		ctx.ui.notify("Chrome control locked. Run /chrome authorize to allow chrome_* tools again.", "info");
 		updateChromeStatus(ctx);
 	};
@@ -1217,12 +1256,7 @@ Usage rules:
 			await pi
 				.exec("open", ["-R", extensionPath], { cwd: workspaceCwd(ctx), timeout: 5_000 })
 				.catch(() => undefined);
-			await pi
-				.exec("sh", ["-lc", `printf %s ${JSON.stringify(extensionPath)} | pbcopy`], {
-					cwd: workspaceCwd(ctx),
-					timeout: 5_000,
-				})
-				.catch(() => undefined);
+			await copyToMacClipboard(extensionPath);
 		}
 		ctx.ui.notify(
 			automated

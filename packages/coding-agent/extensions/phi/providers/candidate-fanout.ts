@@ -13,7 +13,7 @@ import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runCommand } from "./execution.ts";
+import { runCommand, terminateTree } from "./execution.ts";
 import { getPiInvocation, isRateLimited } from "./explore-fanout.ts";
 
 export interface CandidateSpec {
@@ -102,18 +102,24 @@ export function runOneCandidate(
 		let proc: ReturnType<typeof spawn>;
 		try {
 			const inv = getPiInvocation(args);
-			proc = spawn(inv.command, inv.args, { cwd: wtPath, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+			// POSIX: own process group so terminateTree can sweep the sub-phi's children
+			// (Windows: taskkill /T walks the tree; detached would open a console).
+			proc = spawn(inv.command, inv.args, {
+				cwd: wtPath,
+				shell: false,
+				stdio: ["ignore", "pipe", "pipe"],
+				windowsHide: true,
+				detached: process.platform !== "win32",
+			});
 		} catch (e) {
 			resolve({ source: spec.model, patch: "", ok: false, error: String(e) });
 			return;
 		}
 		let blob = "";
 		const timer = setTimeout(() => {
-			try {
-				proc.kill();
-			} catch {
-				/* best effort */
-			}
+			// proc.kill() only hits the direct child: the sub-phi's own children
+			// (bash, tests...) could be orphaned. Stop the whole tree.
+			terminateTree(proc);
 		}, timeoutMs);
 		proc.stdout?.on("data", (d) => {
 			blob += d.toString();

@@ -74,6 +74,13 @@ export type ConnectOutcome = "ready" | "failed" | "auth-required" | "cancelled";
 /** Called after tool list is refreshed for a server (e.g. on list_changed notification). */
 export type ToolRefreshCallback = (serverName: string, client: Client) => Promise<void>;
 
+/**
+ * Called when a ready server loses its connection (failed health check) and again if
+ * reconnecting gives up. `message` is meant for the model: the server's tools should
+ * return it until the server is back (the tool refresh callback runs on reconnect).
+ */
+export type ServerUnavailableCallback = (serverName: string, message: string) => void;
+
 export interface TransportAuthCallbacks {
 	/**
 	 * Called when an automatic connection finds that OAuth authorization is required.
@@ -139,6 +146,7 @@ export class ServerManager {
 	private readonly servers = new Map<string, ManagedServer>();
 	private settings: Settings;
 	private onToolRefresh: ToolRefreshCallback | null = null;
+	private onServerUnavailable: ServerUnavailableCallback | null = null;
 
 	private authCallbacks: TransportAuthCallbacks | undefined;
 
@@ -166,6 +174,11 @@ export class ServerManager {
 	/** Register callback invoked after tool list changes for a server. */
 	setToolRefreshCallback(cb: ToolRefreshCallback): void {
 		this.onToolRefresh = cb;
+	}
+
+	/** Register callback invoked when a ready server's connection is lost. */
+	setServerUnavailableCallback(cb: ServerUnavailableCallback): void {
+		this.onServerUnavailable = cb;
 	}
 
 	getServer(name: string): ManagedServer | undefined {
@@ -439,12 +452,34 @@ export class ServerManager {
 				server.client = null;
 				server.childPid = null;
 				server.state = "starting";
+				server.lastError = new Error("Health check failed");
+				// Before any await: tools must stop using the dead client right away.
+				this.onServerUnavailable?.(
+					server.name,
+					`MCP server "${server.name}" is disconnected (health check failed), reconnecting. Retry later or use another tool.`,
+				);
 				await client.close().catch(() => {});
 				const generation = server.generation;
+				const gaveUp = (): void => {
+					if (server.generation !== generation) return; // stopped or restarted meanwhile
+					this.onServerUnavailable?.(
+						server.name,
+						`MCP server "${server.name}" is disconnected and reconnecting failed. The user can run /mcp:start ${server.name}.`,
+					);
+				};
 				if (await this._waitForRetry(server, generation)) {
-					void this._connect(server, cwd);
+					void this._connect(server, cwd).then(
+						(outcome) => {
+							if (outcome === "failed" || outcome === "auth-required") gaveUp();
+						},
+						(err: unknown) => {
+							console.error(`[pi-mcp] Reconnecting ${server.name} failed:`, err);
+							gaveUp();
+						},
+					);
 				} else if (server.generation === generation) {
 					server.state = "stopped";
+					gaveUp();
 				}
 			}
 		}, server.config.healthCheckIntervalMs);

@@ -1851,7 +1851,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 				const npm = m.provider?.npm;
 				let api: Api;
 				let baseUrl: string;
-				let compat: OpenAICompletionsCompat | OpenAIResponsesCompat | undefined;
+				let compat: OpenAICompletionsCompat | OpenAIResponsesCompat | AnthropicMessagesCompat | undefined;
 
 				if (npm === "@ai-sdk/openai") {
 					api = "openai-responses";
@@ -1902,6 +1902,13 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 						// Qwen/DashScope uses enable_thinking at the top level.
 						compat = { ...(compat ?? {}), thinkingFormat: "qwen" };
 					}
+				}
+
+				// OpenCode Qwen 3.8 Flash emits and accepts thinking blocks with empty
+				// signatures (pi c1449660c, #10047). Mirrors the runtime default in
+				// anthropic-messages.ts (defaultAllowEmptySignature).
+				if (api === "anthropic-messages" && modelId === "qwen3.8-flash") {
+					compat = { ...(compat ?? {}), allowEmptySignature: true };
 				}
 
 				if (api === "openai-completions") {

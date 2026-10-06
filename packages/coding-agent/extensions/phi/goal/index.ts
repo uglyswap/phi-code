@@ -762,11 +762,24 @@ function currentTokenTotal(ctx: StatusContext): number {
 	let total = 0;
 	for (const entry of branch) {
 		if (entry.type !== "message" || entry.message?.role !== "assistant") continue;
-		const usage = entry.message.usage as { input?: number; output?: number } | undefined;
-		total += usage?.input ?? 0;
-		total += usage?.output ?? 0;
+		total += consumedTokens(entry.message.usage);
 	}
 	return total;
+}
+
+/**
+ * Tokens one assistant turn really consumed, i.e. what the --tokens budget
+ * measures: output + input the provider processed fresh (`input` + `cacheWrite`).
+ * Cache reads are excluded: re-sent context served from the prompt cache must
+ * not be counted again every turn. phi-code-ai's Usage already reports `input`
+ * net of cache reads AND cache writes on every provider, and Anthropic bills the
+ * new turn delta as `cacheWrite`, so dropping cacheWrite under-counted it.
+ */
+export function consumedTokens(usage: unknown): number {
+	if (!usage || typeof usage !== "object") return 0;
+	const u = usage as { input?: unknown; output?: unknown; cacheWrite?: unknown };
+	const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
+	return n(u.input) + n(u.cacheWrite) + n(u.output);
 }
 
 function persistGoal(goal: ActiveGoal) {

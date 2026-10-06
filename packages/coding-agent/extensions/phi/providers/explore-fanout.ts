@@ -20,6 +20,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
+import { terminateTree } from "./execution.ts";
 
 export interface ExplorerSpec {
 	focus: string;
@@ -127,7 +128,15 @@ export function runExplorer(spec: ExplorerSpec, opts: FanoutOptions): Promise<Ex
 		let proc: ReturnType<typeof spawn>;
 		try {
 			const inv = getPiInvocation(args);
-			proc = spawn(inv.command, inv.args, { cwd: opts.cwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+			// POSIX: own process group so terminateTree can sweep the sub-phi's children
+			// (Windows: taskkill /T walks the tree; detached would open a console).
+			proc = spawn(inv.command, inv.args, {
+				cwd: opts.cwd,
+				shell: false,
+				stdio: ["ignore", "pipe", "pipe"],
+				windowsHide: true,
+				detached: process.platform !== "win32",
+			});
 		} catch (e) {
 			resolve({ focus: spec.focus, text: "", ok: false, rateLimited: false, error: String(e) });
 			return;
@@ -138,13 +147,13 @@ export function runExplorer(spec: ExplorerSpec, opts: FanoutOptions): Promise<Ex
 		let stderr = "";
 		let errorMessage = "";
 		let settled = false;
+		let timedOut = false;
 
 		const timer = setTimeout(() => {
-			try {
-				proc.kill();
-			} catch {
-				/* best effort */
-			}
+			timedOut = true;
+			// proc.kill() only hits the direct child: the sub-phi's own children
+			// (bash, tests...) could be orphaned. Stop the whole tree.
+			terminateTree(proc);
 		}, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
 		const processLine = (line: string) => {
@@ -198,7 +207,7 @@ export function runExplorer(spec: ExplorerSpec, opts: FanoutOptions): Promise<Ex
 			clearTimeout(timer);
 			resolve({ focus: spec.focus, text: "", ok: false, rateLimited: false, error: String(e) });
 		});
-		proc.on("close", () => finish(false));
+		proc.on("close", () => finish(timedOut));
 	});
 }
 

@@ -120,9 +120,9 @@ export class SigmaMemory {
 			mkdirSync(this.config.memoryDir, { recursive: true });
 		}
 
-		if (!existsSync(this.config.projectMemoryDir)) {
-			mkdirSync(this.config.projectMemoryDir, { recursive: true });
-		}
+		// projectMemoryDir is NOT created here: init() runs in every folder phi
+		// is opened in, and creating it eagerly left an empty .phi/memory in
+		// every repository. Writers call ensureProjectMemoryDir() instead.
 
 		// Initialize vector store (DB setup only — fast)
 		await this.vectors.init();
@@ -141,6 +141,16 @@ export class SigmaMemory {
 		const notesList = this.notes.list();
 
 		await this.vectors.batch(async () => {
+			// Drop documents of notes deleted from disk; written in the same
+			// locked disk write as the additions below.
+			try {
+				await this.vectors.removeMissing((file) => this.notes.exists(file));
+			} catch (error) {
+				vlog(
+					`[SigmaMemory] pruning deleted notes failed: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+
 			for (const note of notesList) {
 				try {
 					const content = this.notes.read(note.name);
@@ -153,6 +163,18 @@ export class SigmaMemory {
 				}
 			}
 		});
+	}
+
+	/**
+	 * Create the project memory directory on demand and return its path. Call
+	 * this right before the first actual write there; reads and searches must
+	 * never create it.
+	 */
+	ensureProjectMemoryDir(): string {
+		if (!existsSync(this.config.projectMemoryDir)) {
+			mkdirSync(this.config.projectMemoryDir, { recursive: true });
+		}
+		return this.config.projectMemoryDir;
 	}
 
 	/**

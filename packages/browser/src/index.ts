@@ -12,7 +12,7 @@
  *     `uglyswap/phi-code` GitHub Release into a versioned cache. The only
  *     runtime download is the uBlock Origin add-on (addons.mozilla.org) on
  *     the first browser launch; offline, the launch proceeds without it and
- *     the download is retried next time.
+ *     the download is retried at a later launch (after a 6 h backoff).
  *   - The Express server is an implementation detail; consumers only see
  *     ES module exports. The server can still be launched independently
  *     via `npx @phi-code-admin/camofox-browser` for users who want REST.
@@ -79,9 +79,10 @@ async function findAvailablePort(): Promise<number> {
 	});
 }
 
-async function waitForHealth(baseUrl: string): Promise<void> {
+async function waitForHealth(baseUrl: string, stop?: AbortSignal): Promise<void> {
 	const deadline = Date.now() + HEALTH_TIMEOUT_MS;
 	while (Date.now() < deadline) {
+		if (stop?.aborted) return;
 		try {
 			const res = await fetch(`${baseUrl}/health`);
 			if (res.ok) return;
@@ -201,10 +202,35 @@ export async function ensureServer(): Promise<{ baseUrl: string }> {
 			stderrTail.push(text);
 			while (stderrTail.length > 200) stderrTail.shift();
 		});
-		child.on("exit", (code) => {
+		// Settles as soon as the child dies (or cannot be spawned) before it is
+		// healthy, so a boot crash fails fast instead of waiting HEALTH_TIMEOUT_MS.
+		let failBoot: (err: Error) => void = () => {};
+		const bootFailure = new Promise<never>((_, reject) => {
+			failBoot = reject;
+		});
+		bootFailure.catch(() => {});
+		child.on("error", (err) => {
+			if (!healthy) failBoot(new Error(`camofox-browser server failed to start (${nodeExecutable}): ${err.message}`));
+		});
+		child.on("exit", (code, signal) => {
 			serverProcess = null;
 			serverPort = null;
 			bootPromise = null;
+			if (!healthy) {
+				const reason = signal ? `signal ${signal}` : `code ${code}`;
+				const fail = () => failBoot(new Error(`camofox-browser server exited during startup (${reason})`));
+				// Give the stderr pipe a moment to drain so the error carries the crash reason.
+				const stderr = child.stderr;
+				if (!stderr || stderr.readableEnded) {
+					fail();
+				} else {
+					const timer = setTimeout(fail, 250);
+					stderr.once("end", () => {
+						clearTimeout(timer);
+						fail();
+					});
+				}
+			}
 			if (!healthy || process.env.PHI_BROWSER_VERBOSE) {
 				process.stderr.write(`[camofox] server exited with code ${code}\n`);
 			}
@@ -220,10 +246,20 @@ export async function ensureServer(): Promise<{ baseUrl: string }> {
 		serverPort = port;
 
 		const baseUrl = `http://127.0.0.1:${port}`;
+		const stopPolling = new AbortController();
 		try {
-			await waitForHealth(baseUrl);
+			await Promise.race([waitForHealth(baseUrl, stopPolling.signal), bootFailure]);
 			(child as { __markHealthy?: () => void }).__markHealthy?.();
 		} catch (err) {
+			stopPolling.abort();
+			// A server that never became healthy is useless: do not leave it running.
+			if (child.exitCode === null && child.signalCode === null) {
+				try {
+					child.kill();
+				} catch {
+					/* already gone */
+				}
+			}
 			// Augment the health-check error with whatever the child wrote to
 			// stderr so the consumer has at least one breadcrumb to follow.
 			const tail = ((child as { __stderrTail?: string[] }).__stderrTail ?? [])
@@ -231,7 +267,10 @@ export async function ensureServer(): Promise<{ baseUrl: string }> {
 				.split(/\r?\n/)
 				.filter(Boolean)
 				.slice(-20)
-				.join("\n");
+				.join("\n")
+				// Never echo the per-process API key, should the server log it.
+				.split(ACCESS_KEY)
+				.join("<redacted>");
 			const original = err instanceof Error ? err.message : String(err);
 			const augmented = new Error(
 				tail
