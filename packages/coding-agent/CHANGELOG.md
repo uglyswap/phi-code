@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.99.5] - 2026-10-07
+
+### Fixed
+
+- `skill_manage` now declares a single root-object parameter schema instead of a top-level union. Endpoints that reject a root-level `anyOf`/`oneOf` — notably the OpenCode Go (Zen) API — returned HTTP 400 with an empty body for every request that advertised this tool; requests now succeed.
+
+### Changed
+
+- Renamed the OpenCode Go provider display name to "Opencode GO".
+
 ## [0.99.4] - 2026-10-07
 
 ### Added

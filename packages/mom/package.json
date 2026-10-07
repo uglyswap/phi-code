@@ -21,7 +21,7 @@
 	},
 	"dependencies": {
 		"@anthropic-ai/sandbox-runtime": "^0.0.16",
-		"@phi-code-admin/phi-code": "^0.99.2",
+		"@phi-code-admin/phi-code": "^0.99.5",
 		"@sinclair/typebox": "^0.34.0",
 		"@slack/socket-mode": "^2.0.0",
 		"@slack/web-api": "^7.0.0",
