@@ -52,7 +52,7 @@ export function getProviderCatalog(): ProviderCatalogEntry[] {
 		},
 		{
 			id: "opencode-go",
-			displayName: "OpenCode Go (zen)",
+			displayName: "Opencode GO (zen)",
 			// The built-in opencode-go provider reads OPENCODE_API_KEY; the
 			// historical OPENCODE_GO_API_KEY is still accepted as an alias.
 			envVar: "OPENCODE_API_KEY",

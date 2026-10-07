@@ -134,8 +134,14 @@ const DeleteOp = Type.Object(
 
 const OpSchema = Type.Union([CreateOp, PatchTargetedOp, PatchRewriteOp, WriteFileOp, RemoveFileOp, DeleteOp]);
 
-const FlatParams = Type.Object({
-	action: Type.String(),
+// Keep a single root `type: "object"`. Some OpenAI-compatible endpoints — notably
+// the OpenCode Go (Zen) API — reject an entire request with HTTP 400 and an empty
+// body when a tool's parameter schema has a root-level `anyOf`/`oneOf` instead of a
+// top-level object. Nested unions (the OpSchema array items) are accepted.
+// normalizeParams() still accepts either `operations` (batch) or a flat `action` op.
+export const SKILL_MANAGE_PARAMETERS = Type.Object({
+	operations: Type.Optional(Type.Array(OpSchema, { minItems: 1, maxItems: 20 })),
+	action: Type.Optional(Type.String()),
 	name: Type.Optional(Type.String()),
 	content: Type.Optional(Type.String()),
 	old_string: Type.Optional(Type.String()),
@@ -146,11 +152,6 @@ const FlatParams = Type.Object({
 	category: Type.Optional(Type.String()),
 	absorbed_into: Type.Optional(Type.String()),
 });
-
-export const SKILL_MANAGE_PARAMETERS = Type.Union([
-	Type.Object({ operations: Type.Array(OpSchema, { minItems: 1, maxItems: 20 }) }),
-	FlatParams,
-]);
 
 export const SKILL_MANAGE_DESCRIPTION =
 	"Créer, mettre à jour ou supprimer des skills — ta mémoire procédurale pour les types de tâches récurrentes. " +

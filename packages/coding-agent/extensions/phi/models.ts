@@ -46,8 +46,8 @@ import {
 
 const PROVIDER_DISPLAY: Record<string, string> = {
 	opencode: "OpenCode Zen",
-	"opencode-go": "OpenCode Go",
-	"opencode-go-anthropic": "OpenCode Go (Anthropic-compat)",
+	"opencode-go": "Opencode GO",
+	"opencode-go-anthropic": "Opencode GO (Anthropic-compat)",
 	"alibaba-codingplan": "Alibaba Coding Plan (OpenAI-compat)",
 	"alibaba-codingplan-anthropic": "Alibaba Coding Plan (Anthropic-compat)",
 	openai: "OpenAI",

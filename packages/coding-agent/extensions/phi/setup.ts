@@ -285,13 +285,13 @@ async function configureOpenCodeGo(
 	store: ApiKeyStore,
 ): Promise<{ providerId: string; modelCount: number } | undefined> {
 	ui.notify(
-		`**OpenCode Go (zen)** - subscribe at ${OPENCODE_GO_AUTH_URL} ($5 first month, $10/month).\n` +
+		`**Opencode GO (zen)** - subscribe at ${OPENCODE_GO_AUTH_URL} ($5 first month, $10/month).\n` +
 			`After subscribing, paste your API key below.`,
 		"info",
 	);
 
 	ui.notify("WARNING: the key you type will be visible on screen during input.", "warning");
-	const apiKey = await ui.input("Paste your OpenCode Go API key", "...");
+	const apiKey = await ui.input("Paste your Opencode GO API key", "...");
 	if (!apiKey || apiKey.trim().length === 0) {
 		ui.notify("No key provided. Skipped.", "warning");
 		return undefined;
@@ -304,25 +304,25 @@ async function configureOpenCodeGo(
 		if (!proceed) return undefined;
 	}
 
-	ui.setStatus("setup-ping", "Pinging OpenCode Go...");
+	ui.setStatus("setup-ping", "Pinging Opencode GO...");
 	const pingResult = await pingOpenCodeGo(trimmed);
 	ui.setStatus("setup-ping", undefined);
 
 	if (!pingResult.ok) {
 		const proceed = await ui.confirm(
 			"Ping failed",
-			`OpenCode Go ping failed: ${pingResult.error ?? "unknown"}. Save key anyway?`,
+			`Opencode GO ping failed: ${pingResult.error ?? "unknown"}. Save key anyway?`,
 		);
 		if (!proceed) return undefined;
 	} else {
-		ui.notify("OpenCode Go ping OK (200).", "info");
+		ui.notify("Opencode GO ping OK (200).", "info");
 	}
 
-	ui.setStatus("setup-fetch", "Fetching live OpenCode Go model list...");
+	ui.setStatus("setup-fetch", "Fetching live Opencode GO model list...");
 	const { models, source } = await getOpenCodeGoModels({ apiKey: trimmed, forceRefresh: true });
 	ui.setStatus("setup-fetch", undefined);
 
-	ui.notify(`Fetched ${models.length} OpenCode Go models (source: ${source}).`, "info");
+	ui.notify(`Fetched ${models.length} Opencode GO models (source: ${source}).`, "info");
 
 	// Only models no upstream catalog describes are persisted: a models.json entry
 	// replaces the upstream definition (context window, costs, compat) for that id.
@@ -352,7 +352,7 @@ async function configureOpenCodeGo(
 	}
 
 	ui.notify(
-		`OpenCode Go configured: \`${maskKeyForDisplay(trimmed)}\` ` +
+		`Opencode GO configured: \`${maskKeyForDisplay(trimmed)}\` ` +
 			`(${openAiCompat.length} OpenAI-compat + ${anthropicCompat.length} Anthropic-compat models persisted).\n` +
 			`The other models keep the context windows the built-in and pi.dev catalogs publish.`,
 		"info",
