@@ -1,6 +1,6 @@
 # Phi Code Extensions
 
-11 TypeScript extensions automatically loaded at startup.
+12 TypeScript extensions automatically loaded at startup.
 
 ## Extensions
 
@@ -11,6 +11,7 @@
 | **Smart Router** | `smart-router.ts` | — | `/routing` | `input` (model suggestion), `session_start` |
 | **Orchestrator** | `orchestrator.ts` | `orchestrate` | `/plan`, `/plans` | — |
 | **Skill Loader** | `skill-loader.ts` | — | `/skills` | `input` (skill matching), `session_start` |
+| **Skill System** | `skill-system/` | `skill_manage` | `/skill-system`, `/learn` | `session_start`, `agent_settled`, `tool_call`, `tool_result`, `input`, `before_agent_start`, `session_shutdown` |
 | **Web Search** | `web-search.ts` | `web_search` | `/search` | `session_start` (key detection) |
 | **Agents** | `agents.ts` | — | `/agents` | `session_start` (agent count) |
 | **Init** | `init.ts` | — | `/phi-init` | — |
