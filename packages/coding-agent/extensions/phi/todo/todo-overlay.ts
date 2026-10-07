@@ -15,6 +15,7 @@ import { type TUI, truncateToWidth } from "phi-code-tui";
 import { formatStatusLabel, t } from "./state/i18n-bridge.ts";
 import { selectHasActive, selectOverlayLayout, selectShowTaskIds, selectTodoCounts } from "./state/selectors.ts";
 import { getState } from "./state/store.ts";
+import type { Task } from "./tool/types.ts";
 import { formatOverlayTaskLine } from "./view/format.ts";
 
 const WIDGET_KEY = "rpiv-todos";
@@ -58,6 +59,12 @@ export class TodoOverlay {
 			return;
 		}
 
+		// Bookkeeping for freshly-completed tasks happens HERE, not in the render
+		// path: the host may call render(width) any number of times for one state
+		// (resize, extra panes), so a side effect inside render makes "newly
+		// displayed" a function of render count rather than of a user event.
+		this.markCompletedAsPendingHide(visible);
+
 		if (!this.widgetRegistered) {
 			this.uiCtx.setWidget(
 				WIDGET_KEY,
@@ -76,6 +83,17 @@ export class TodoOverlay {
 			this.widgetRegistered = true;
 		} else {
 			this.tui?.requestRender();
+		}
+	}
+
+	/** Mark visible completed tasks as pending-hide; they disappear on the next
+	 *  `agent_start`. Idempotent, and now called once per state change instead of
+	 *  once per render. */
+	private markCompletedAsPendingHide(tasks: readonly Task[]): void {
+		for (const task of tasks) {
+			if (task.status !== "completed") continue;
+			if (this.hiddenCompletedTaskIds.has(task.id)) continue;
+			this.completedTaskIdsPendingHide.add(task.id);
 		}
 	}
 
@@ -140,18 +158,6 @@ export class TodoOverlay {
 		const layout = selectOverlayLayout(overlayState, MAX_WIDGET_LINES - 1);
 		for (const task of layout.visible) {
 			lines.push(truncate(`${theme.fg("dim", "├─")} ${formatOverlayTaskLine(task, theme, showIds)}`));
-		}
-
-		const newlyDisplayedCompletedTaskIds = overlayTasks
-			.filter(
-				(task) =>
-					task.status === "completed" &&
-					!this.completedTaskIdsPendingHide.has(task.id) &&
-					!this.hiddenCompletedTaskIds.has(task.id),
-			)
-			.map((task) => task.id);
-		for (const taskId of newlyDisplayedCompletedTaskIds) {
-			this.completedTaskIdsPendingHide.add(taskId);
 		}
 
 		if (layout.hiddenCompleted === 0 && layout.truncatedTail === 0) {

@@ -33,6 +33,13 @@ export interface Task {
 	description?: string;
 	activeForm?: string;
 	status: TaskStatus;
+	/**
+	 * ISO timestamp of the transition INTO `in_progress`; cleared on any exit.
+	 * Optional so sessions written before this field existed replay unchanged.
+	 * It is the only durable evidence of how long a task has been running —
+	 * without it a stale in_progress is indistinguishable from a fresh one.
+	 */
+	inProgressSince?: string;
 	blockedBy?: number[];
 	owner?: string;
 	metadata?: Record<string, unknown>;

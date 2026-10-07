@@ -1,6 +1,7 @@
 import type { Theme } from "phi-code";
 import { Text } from "phi-code-tui";
 import { formatStatusLabel } from "../state/i18n-bridge.ts";
+import { formatAge, inProgressAgeMs, STALE_IN_PROGRESS_MS } from "../state/invariants.ts";
 import { selectTaskSubjectById } from "../state/selectors.ts";
 import type { TaskState } from "../state/state.ts";
 import type { Task, TaskAction, TaskDetails, TaskMutationParams, TaskStatus } from "../tool/types.ts";
@@ -68,7 +69,7 @@ export function overlayStatusGlyph(status: TaskStatus, theme: Theme): string {
  * Format a single task for the overlay (with theme + glyph + dep suffix).
  * Used by `TodoOverlay.formatTaskLine` post-refactor; behavior is unchanged.
  */
-export function formatOverlayTaskLine(t: Task, theme: Theme, showId: boolean): string {
+export function formatOverlayTaskLine(t: Task, theme: Theme, showId: boolean, now: number = Date.now()): string {
 	const glyph = overlayStatusGlyph(t.status, theme);
 	const subjectColor = t.status === "completed" || t.status === "deleted" ? "dim" : "text";
 	let subject = theme.fg(subjectColor, t.subject);
@@ -80,6 +81,17 @@ export function formatOverlayTaskLine(t: Task, theme: Theme, showId: boolean): s
 	line += ` ${subject}`;
 	if (t.status === "in_progress" && t.activeForm) {
 		line += ` ${theme.fg("dim", `(${t.activeForm})`)}`;
+	}
+	// Age marker: without it `◐` looks identical whether the task started three
+	// seconds or twenty minutes ago — the exact ambiguity that let a stale task
+	// ride across two turns unnoticed.
+	if (t.status === "in_progress") {
+		const age = inProgressAgeMs(t, now);
+		if (age === undefined || age >= STALE_IN_PROGRESS_MS) {
+			line += ` ${theme.fg("warning", "⚠")}`;
+		} else if (age >= 60_000) {
+			line += ` ${theme.fg("dim", `⏳${formatAge(age)}`)}`;
+		}
 	}
 	if (t.blockedBy && t.blockedBy.length > 0) {
 		line += ` ${theme.fg("dim", `⛓ ${t.blockedBy.map((id) => `#${id}`).join(",")}`)}`;
