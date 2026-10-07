@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.99.4] - 2026-10-07
+
+### Added
+
+- Skill system extension: skill authoring, provenance tracking, review, curator and safety checks (see the skill-system user guide in `docs/`).
+
+### Fixed
+
+- `todo`: the single in-progress invariant is enforced and the display state no longer drifts from the actual todo state.
+
 ## [0.99.3] - 2026-10-06
 
 ### Fixed
