@@ -1,17 +1,33 @@
+import {
+	countInProgress,
+	formatAge,
+	inProgressAgeMs,
+	MAX_IN_PROGRESS,
+	STALE_IN_PROGRESS_MS,
+} from "../state/invariants.ts";
 import type { TaskState } from "../state/state.ts";
 import type { Op } from "../state/state-reducer.ts";
 import { deriveBlocks } from "../state/task-graph.ts";
 import type { Task, TaskAction, TaskDetails, TaskMutationParams } from "./types.ts";
 
 /**
- * Format a single task as a `[status] #id subject [(activeForm)] [⛓ #dep,…]`
+ * Format a single task as a `[status] #id subject [(activeForm)] [age] [⛓ #dep,…]`
  * line. Used by the `list` content branch only — the overlay and `/todos`
  * formatting paths use `view/format.ts` for richer presentations.
+ *
+ * `now` is passed explicitly (never defaulted here) because this function is
+ * handed to `Array.prototype.map`, which would pass the INDEX as the second
+ * argument.
  */
-function formatListLine(t: Task): string {
+function formatListLine(t: Task, now: number): string {
 	const block = t.blockedBy?.length ? ` ⛓ ${t.blockedBy.map((id) => `#${id}`).join(",")}` : "";
 	const form = t.status === "in_progress" && t.activeForm ? ` (${t.activeForm})` : "";
-	return `[${t.status}] #${t.id} ${t.subject}${form}${block}`;
+	let ageTag = "";
+	if (t.status === "in_progress") {
+		const age = inProgressAgeMs(t, now);
+		ageTag = age === undefined || age >= STALE_IN_PROGRESS_MS ? " ⚠ stale" : ` ⏳ ${formatAge(age)}`;
+	}
+	return `[${t.status}] #${t.id} ${t.subject}${form}${ageTag}${block}`;
 }
 
 /**
@@ -40,7 +56,7 @@ function formatGetLines(task: Task, state: TaskState): string {
  * The strings on each branch are byte-equivalent to pre-refactor `todo.ts`
  * reducer output.
  */
-export function formatContent(op: Op, state: TaskState): string {
+export function formatContent(op: Op, state: TaskState, now: number = Date.now()): string {
 	switch (op.kind) {
 		case "create": {
 			const t = state.tasks.find((x) => x.id === op.taskId);
@@ -50,7 +66,10 @@ export function formatContent(op: Op, state: TaskState): string {
 		}
 		case "update": {
 			const transition = op.fromStatus !== op.toStatus ? ` (${op.fromStatus} → ${op.toStatus})` : "";
-			return `Updated #${op.id}${transition}`;
+			const demoted = op.demoted.length
+				? `; ${op.demoted.map((id) => `#${id}`).join(", ")} moved back to pending — only one task runs at a time`
+				: "";
+			return `Updated #${op.id}${transition}${demoted}`;
 		}
 		case "delete":
 			return `Deleted #${op.id}: ${op.subject}`;
@@ -60,7 +79,19 @@ export function formatContent(op: Op, state: TaskState): string {
 			let view = state.tasks;
 			if (!op.includeDeleted) view = view.filter((t) => t.status !== "deleted");
 			if (op.statusFilter) view = view.filter((t) => t.status === op.statusFilter);
-			return view.length === 0 ? "No tasks" : view.map(formatListLine).join("\n");
+			if (view.length === 0) return "No tasks";
+			const lines = view.map((t) => formatListLine(t, now));
+			// Defensive: the reducer keeps this at ≤ MAX_IN_PROGRESS, but a replayed
+			// legacy session or a foreign writer can still hand us a violating state.
+			// Silence here is how a stale task survived 18 minutes unnoticed.
+			const inProgress = countInProgress(state.tasks);
+			if (inProgress > MAX_IN_PROGRESS) {
+				lines.unshift(
+					`WARNING: ${inProgress} tasks are in_progress; exactly ${MAX_IN_PROGRESS} is allowed. ` +
+						`Close all but one with action="update", status="completed".`,
+				);
+			}
+			return lines.join("\n");
 		}
 		case "get":
 			return formatGetLines(op.task, state);

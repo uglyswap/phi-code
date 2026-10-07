@@ -1,7 +1,18 @@
 import type { Task, TaskAction, TaskMutationParams, TaskStatus } from "../tool/types.ts";
-import { isTransitionValid } from "./invariants.ts";
+import { findOtherInProgress, isTransitionValid } from "./invariants.ts";
 import type { TaskState } from "./state.ts";
 import { detectCycle } from "./task-graph.ts";
+
+/**
+ * Injectable clock. Production reads `Date.now`; tests freeze it so every
+ * `inProgressSince` stamp and age computation is deterministic.
+ */
+let clock: () => number = Date.now;
+
+/** Test seam: freeze the reducer's clock. */
+export function __setClock(fn: () => number): void {
+	clock = fn;
+}
 
 /**
  * Reducer outcome. Closed tagged union — adding a new action requires extending
@@ -14,7 +25,7 @@ import { detectCycle } from "./task-graph.ts";
  */
 export type Op =
 	| { kind: "create"; taskId: number }
-	| { kind: "update"; id: number; fromStatus: TaskStatus; toStatus: TaskStatus }
+	| { kind: "update"; id: number; fromStatus: TaskStatus; toStatus: TaskStatus; demoted: readonly number[] }
 	| { kind: "delete"; id: number; subject: string }
 	| { kind: "list"; statusFilter?: TaskStatus; includeDeleted: boolean }
 	| { kind: "get"; task: Task }
@@ -97,6 +108,27 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 				newStatus = params.status;
 			}
 
+			// --- Cross-task invariant: at most ONE in_progress ----------------------
+			// Enforced here because the transition table is per-task. We DEMOTE rather
+			// than refuse: an agent that starts a new task before closing the previous
+			// one made a bookkeeping slip, not a request that must fail — but the slip
+			// must be VISIBLE, so the demoted ids ride back on the Op and land in the
+			// tool result the model reads.
+			const demoted: number[] = [];
+			let tasks: Task[] = state.tasks;
+			if (newStatus === "in_progress" && current.status !== "in_progress") {
+				const others = findOtherInProgress(state.tasks, current.id);
+				if (others.length > 0) {
+					const ids = new Set(others.map((t) => t.id));
+					tasks = state.tasks.map((t) => {
+						if (!ids.has(t.id)) return t;
+						demoted.push(t.id);
+						const { inProgressSince: _drop, ...rest } = t;
+						return { ...rest, status: "pending" as TaskStatus };
+					});
+				}
+			}
+
 			let newBlockedBy = current.blockedBy ? [...current.blockedBy] : [];
 			if (params.removeBlockedBy?.length) {
 				const toRemove = new Set(params.removeBlockedBy);
@@ -125,7 +157,7 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 				newMetadata = Object.keys(merged).length ? merged : undefined;
 			}
 
-			const updated: Task = { ...current, status: newStatus };
+			const updated: Task = { ...tasks[idx], status: newStatus };
 			if (params.subject !== undefined) updated.subject = params.subject;
 			if (params.description !== undefined) updated.description = params.description;
 			if (params.activeForm !== undefined) updated.activeForm = params.activeForm;
@@ -135,11 +167,20 @@ export function applyTaskMutation(state: TaskState, action: TaskAction, params: 
 			if (newMetadata === undefined) delete updated.metadata;
 			else updated.metadata = newMetadata;
 
-			const newTasks = [...state.tasks];
+			// Execution clock. Refreshing `activeForm` must NOT re-stamp it: a task
+			// that relabels itself is exactly the stale task we are trying to detect,
+			// and resetting the clock here would let it hide forever.
+			if (newStatus === "in_progress") {
+				updated.inProgressSince = tasks[idx].inProgressSince ?? new Date(clock()).toISOString();
+			} else {
+				delete updated.inProgressSince;
+			}
+
+			const newTasks = [...tasks];
 			newTasks[idx] = updated;
 			return {
 				state: { tasks: newTasks, nextId: state.nextId },
-				op: { kind: "update", id: updated.id, fromStatus: current.status, toStatus: newStatus },
+				op: { kind: "update", id: updated.id, fromStatus: current.status, toStatus: newStatus, demoted },
 			};
 		}
 

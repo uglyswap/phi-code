@@ -21,8 +21,15 @@
 
 import type { ExtensionAPI } from "phi-code";
 import { I18N_NAMESPACE } from "./state/i18n-bridge.ts";
+import {
+	countInProgress,
+	findStaleInProgress,
+	formatAge,
+	inProgressAgeMs,
+	MAX_IN_PROGRESS,
+} from "./state/invariants.ts";
 import { replayFromBranch } from "./state/replay.ts";
-import { replaceState } from "./state/store.ts";
+import { getState, replaceState } from "./state/store.ts";
 import { registerTodosCommand, registerTodoTool, TOOL_NAME } from "./todo.ts";
 import { TodoOverlay } from "./todo-overlay.ts";
 
@@ -109,5 +116,46 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("agent_start", async () => {
 		todoOverlay?.hideCompletedTasksFromPreviousTurn();
+	});
+
+	// ---- Turn-end staleness reminder -----------------------------------------
+	// The invariant is enforced in the reducer, but nothing there can see a task
+	// that is merely LEFT open across a turn boundary — which is the failure that
+	// actually happened. This is the net that catches the omission.
+	let pendingStaleReminder: string | undefined;
+
+	// agent_settled, NOT agent_end: agent_end can be followed by an automatic
+	// retry or by queued follow-up messages, and acting there would advance the
+	// chain while the retried turn is still to come.
+	pi.on("agent_settled", async () => {
+		const state = getState();
+		const n = countInProgress(state.tasks);
+		const stale = findStaleInProgress(state.tasks);
+		if (n <= MAX_IN_PROGRESS && stale.length === 0) {
+			pendingStaleReminder = undefined;
+			return;
+		}
+		const parts: string[] = [];
+		if (n > MAX_IN_PROGRESS) parts.push(`${n} tasks are in_progress; exactly one is allowed`);
+		for (const t of stale) {
+			const age = inProgressAgeMs(t);
+			parts.push(
+				`#${t.id} "${t.subject}" has been in_progress for ` +
+					(age === undefined ? "an unknown time" : formatAge(age)),
+			);
+		}
+		pendingStaleReminder =
+			`[todo] ${parts.join("; ")}. Before starting new work, close it ` +
+			`(status="completed") or park it (status="pending") with the todo tool.`;
+	});
+
+	// One-shot: consumed by the first turn that follows, then cleared. Never
+	// triggers a turn itself (no sendUserMessage/sendMessage), so an idle session
+	// is never nagged and never costs a model call.
+	pi.on("before_agent_start", async (event) => {
+		if (!pendingStaleReminder) return;
+		const note = pendingStaleReminder;
+		pendingStaleReminder = undefined;
+		return { systemPrompt: `${event.systemPrompt}\n\n${note}` };
 	});
 }
