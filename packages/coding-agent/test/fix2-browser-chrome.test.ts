@@ -33,6 +33,8 @@ describe("fix2-browser: /chrome revoke clears early-capture tabs", () => {
 	const commands = new Map<string, { handler: Handler }>();
 	let port = 0;
 	const ctx = {
+		// Interactive session: without a UI the bridge does not start (PHI_CHROME_BRIDGE unset).
+		hasUI: true,
 		ui: { notify: vi.fn(), setStatus: vi.fn(), theme: { fg: (_c: string, t: string) => t } },
 		sessionManager: {},
 		cwd: agentDir,

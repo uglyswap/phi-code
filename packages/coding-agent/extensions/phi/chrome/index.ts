@@ -525,6 +525,9 @@ class ChromeProfileBridge {
 		this.queue = [];
 		for (const waiter of this.waiters) waiter(undefined);
 		this.waiters = [];
+		// close() alone keeps open connections: a companion extension long-polling /next
+		// over keep-alive would keep this process alive after the session ended.
+		this.server?.closeAllConnections();
 		this.server?.close();
 		this.server = undefined;
 		this.mode = undefined;
@@ -1035,6 +1038,10 @@ export default function (pi: ExtensionAPI): void {
 
 	pi.on("session_start", async (_event, ctx) => {
 		sessionCtx = ctx;
+		// chrome_* tools need an interactive `/chrome authorize`: without a UI the bridge
+		// can never serve them, and owning the machine-wide port only exposes it to the
+		// user's real Chrome. PHI_CHROME_BRIDGE=1 starts it anyway.
+		if (!ctx.hasUI && process.env.PHI_CHROME_BRIDGE !== "1") return;
 		await bridge.start();
 		// Reestablish in-memory state after a /reload restored chromeAuthorizedUntil from globalThis.
 		if (chromeControlAuthorized()) {
