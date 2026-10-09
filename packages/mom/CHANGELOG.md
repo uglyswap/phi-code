@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.57.1] - 2026-10-10
+
+### Changed
+
+- Depends on `@phi-code-admin/phi-code` `^0.100.0`.
+
 ## [0.57.0] - 2026-10-06
 
 ### Breaking Changes

@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.100.0] - 2026-10-10
+
+### Added
+
+- `PHI_MCP_CONFIG=<path>`: MCP servers supplied by the program that launches phi, in a file with the `mcp.json` format. It is merged after the global config and can only add servers; a missing or invalid file is reported on stderr and ignored.
+- `PHI_MCP_STARTUP_WAIT_MS` (default `15000`): without a UI, how long phi waits for the `eager` MCP servers before sending the first prompt.
+- `PHI_CHROME_BRIDGE=1` and `PHI_MODELS_REFRESH=1` re-enable, without a UI, the Chrome bridge and the startup refresh of the provider model catalogs.
+
+### Changed
+
+- Without a UI (print or json mode): the `eager` MCP servers are awaited before the first prompt, so their tools are part of the first request, and their start failures are printed on stderr; the Chrome bridge does not start; the `models` extension neither calls provider APIs nor rewrites `models.json` at startup.
+- The bundled extensions are re-synced into the agent dir when a link in `extensions/node_modules` no longer resolves, and also under `CI` (only `PHI_SKIP_POSTINSTALL` disables the sync); concurrent processes run the sync once.
+
+### Fixed
+
+- The camofox-browser server stdout is drained: unread, it filled up and stalled the browser tools (on Windows after about 350 requests).
+- Stopping the Chrome bridge closes its open connections: a companion extension long-polling `/next` kept a finished process alive.
+- A model catalog refresh no longer writes a resolved OpenCode Go API key into `models.json`; a key taken from the environment is referenced as `$OPENCODE_API_KEY`.
+- `goal_complete` without an active `/goal` reports an error instead of ending the run without an answer.
+- The memory tools retry a failed vector store initialization (e.g. `vectors.db` locked by another phi process) instead of leaving the run without vector search.
+- Requires `sigma-memory` 0.2.11 (exclusive note creation, retryable vector store init) and `@phi-code-admin/browser` 1.0.8 (drained server stdout; `@phi-code-admin/camoufox-js` 1.0.7 checks the Camoufox launcher before skipping its download).
+
 ## [0.99.5] - 2026-10-07
 
 ### Fixed
