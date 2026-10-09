@@ -193,6 +193,26 @@ interface ProviderSyncResult {
 	reconciled: number;
 }
 
+/** Environment variables phi-code-ai reads the OpenCode Go key from (packages/ai/src/env-api-keys.ts). */
+const OPENCODE_GO_KEY_ENV_VARS = ["OPENCODE_API_KEY", "OPENCODE_GO_API_KEY"] as const;
+
+/**
+ * The apiKey to persist for an OpenCode Go entry: the stored value, never a resolved
+ * key (models.json would keep a plain-text copy that outlives a rotated or revoked
+ * key). A key that comes from the environment is referenced as "$NAME"; otherwise
+ * (auth.json credential) nothing is persisted and writeProviderModels writes its
+ * "local" sentinel, which the stored credential overrides.
+ */
+function persistableOpenCodeGoKey(
+	stored: ReturnType<ApiKeyStore["getProvider"]>,
+	resolvedKey: string | undefined,
+): string | undefined {
+	if (stored?.apiKey) return stored.apiKey;
+	if (!resolvedKey) return undefined;
+	const envVar = OPENCODE_GO_KEY_ENV_VARS.find((name) => process.env[name]?.trim() === resolvedKey);
+	return envVar ? `$${envVar}` : undefined;
+}
+
 /**
  * Refresh the OpenCode Go provider pair from the shared catalog.
  * "opencode-go" persists the OpenAI-compat models; "opencode-go-anthropic"
@@ -228,7 +248,7 @@ async function refreshOpenCodeGo(
 			writeProviderModels(store, watcher, providerId, {
 				baseUrl: stored.baseUrl ?? config.baseUrl,
 				api: stored.api ?? config.api,
-				apiKey: stored.apiKey ?? apiKey,
+				apiKey: persistableOpenCodeGoKey(stored, apiKey),
 				models: [],
 			});
 		}
@@ -238,7 +258,7 @@ async function refreshOpenCodeGo(
 	writeProviderModels(store, watcher, providerId, {
 		baseUrl: stored?.baseUrl ?? config.baseUrl,
 		api: stored?.api ?? config.api,
-		apiKey: stored?.apiKey ?? apiKey,
+		apiKey: persistableOpenCodeGoKey(stored, apiKey),
 		models: persisted,
 	});
 
@@ -595,6 +615,9 @@ export default function modelsExtension(pi: ExtensionAPI) {
 	// user typing `/models refresh`. Failures are silent — startup must never be
 	// blocked by upstream API hiccups.
 	pi.on("session_start", async (_event, ctx) => {
+		// Headless runs (print / json mode) must not call provider APIs nor rewrite
+		// models.json behind the caller's back. PHI_MODELS_REFRESH=1 re-enables it.
+		if (!ctx.hasUI && process.env.PHI_MODELS_REFRESH !== "1") return;
 		try {
 			store.load();
 		} catch {
