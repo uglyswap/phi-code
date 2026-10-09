@@ -255,6 +255,14 @@ async function bootServer(): Promise<{ baseUrl: string }> {
 			detached: false,
 		});
 
+		// The server logs one JSON line per request on stdout. Drain it: an unread
+		// pipe fills up and stalls the server (on Windows, where pipe writes are
+		// synchronous, it stops answering after a few hundred requests). Never
+		// forward it to process.stdout: in --mode json phi's stdout is pure JSONL.
+		child.stdout?.on("data", (chunk: Buffer) => {
+			if (process.env.PHI_BROWSER_VERBOSE) process.stderr.write(`[camofox] ${chunk.toString()}`);
+		});
+
 		// Surface child stderr so the user can see crash reasons. Once the
 		// server has become healthy we go quiet again unless
 		// PHI_BROWSER_VERBOSE=1 is set. Boot-time crashes ALWAYS print —
