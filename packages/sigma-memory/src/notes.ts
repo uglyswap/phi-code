@@ -53,24 +53,28 @@ export class NotesManager {
 		// candidate-name probing on disk.
 		this.resolveNotePath(file);
 
-		let finalName = file;
-		if (!overwrite && existsSync(this.resolveNotePath(file))) {
-			// Find a unique "-N" suffixed name so we never clobber existing data.
-			const dotIndex = file.lastIndexOf(".");
-			const stem = dotIndex > 0 ? file.slice(0, dotIndex) : file;
-			const ext = dotIndex > 0 ? file.slice(dotIndex) : "";
-			let counter = 2;
-			let candidate = `${stem}-${counter}${ext}`;
-			while (existsSync(this.resolveNotePath(candidate))) {
-				counter += 1;
-				candidate = `${stem}-${counter}${ext}`;
-			}
-			finalName = candidate;
+		if (overwrite) {
+			writeFileSync(this.resolveNotePath(file), content, "utf8");
+			return file;
 		}
 
-		const filePath = this.resolveNotePath(finalName);
-		writeFileSync(filePath, content, "utf8");
-		return finalName;
+		// Exclusive create ("wx"): when another process creates the same name between
+		// our check and our write, the write fails with EEXIST instead of overwriting
+		// that note, and the next "-N" suffix is tried.
+		const dotIndex = file.lastIndexOf(".");
+		const stem = dotIndex > 0 ? file.slice(0, dotIndex) : file;
+		const ext = dotIndex > 0 ? file.slice(dotIndex) : "";
+		for (let counter = 1; ; counter += 1) {
+			const candidate = counter === 1 ? file : `${stem}-${counter}${ext}`;
+			const candidatePath = this.resolveNotePath(candidate);
+			if (existsSync(candidatePath)) continue;
+			try {
+				writeFileSync(candidatePath, content, { encoding: "utf8", flag: "wx" });
+				return candidate;
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			}
+		}
 	}
 
 	/**

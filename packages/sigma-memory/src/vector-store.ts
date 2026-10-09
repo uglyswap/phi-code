@@ -131,7 +131,12 @@ export class VectorStore {
 		if (this.initialized) return;
 		if (this.initPromise) return this.initPromise;
 
-		this.initPromise = this._init();
+		this.initPromise = this._init().catch((error: unknown) => {
+			// Forget the failed attempt (e.g. vectors.db locked by another process longer
+			// than the lock wait): the next call retries instead of failing for good.
+			this.initPromise = null;
+			throw error;
+		});
 		await this.initPromise;
 	}
 
