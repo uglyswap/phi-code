@@ -697,6 +697,10 @@ phi --thinking high "Solve this complex problem"
 | `PHI_CODING_AGENT_SESSION_DIR` | Override session storage directory (overridden by `--session-dir`) |
 | `PHI_DISABLE_BUNDLED_EXTENSIONS` | Set to `1` to skip the bundled phi extensions (the ones the package copies into `~/.phi/agent/extensions`); other extensions you installed there still load. `PI_DISABLE_BUNDLED_EXTENSIONS` is accepted too |
 | `PHI_DISABLE_PROJECT_EXTENSIONS` | Set to `1` to skip every project-scoped extension (`.phi/extensions` and project packages), e.g. when opening an untrusted repo; global and bundled extensions still load. `PI_DISABLE_PROJECT_EXTENSIONS` is accepted too |
+| `PHI_MCP_CONFIG` | Path of an extra MCP config file (same format as `mcp.json`) supplied by the program that launches phi. It is merged after the global config and can only add servers; a missing or invalid file is reported on stderr and ignored |
+| `PHI_MCP_STARTUP_WAIT_MS` | Without a UI (print or json mode), how long phi waits for the `eager` MCP servers before sending the first prompt. Default `15000`; `0` disables the wait |
+| `PHI_CHROME_BRIDGE` | Set to `1` to start the Chrome bridge without a UI (print or json mode), where it is off by default |
+| `PHI_MODELS_REFRESH` | Set to `1` to refresh the provider model catalogs at startup without a UI (print or json mode), where it is off by default |
 | `PI_PACKAGE_DIR` | Override package directory (useful for Nix/Guix where store paths tokenize poorly) |
 | `PI_OFFLINE` | Disable startup network operations, including update checks and package update checks |
 | `PI_SKIP_VERSION_CHECK` | Skip the phi-code version update check at startup. This prevents the npm registry latest-version request |

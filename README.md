@@ -440,6 +440,8 @@ Connect phi to any [MCP](https://modelcontextprotocol.io) server (Supabase, Play
 
 Each server's tools are registered as `<prefix>_<server>_<tool>` and become callable by the agent. `lifecycle: "eager"` starts the server at session start; `"lazy"` waits for `/mcp:start`.
 
+**Without a UI** (`phi -p`, `--mode json`): phi waits for the `eager` servers before the first prompt (at most `PHI_MCP_STARTUP_WAIT_MS`, default 15000 ms, `0` disables the wait), so their tools are part of the first request, and start failures are printed on stderr. A program that launches phi can pass its own servers in a file named by `PHI_MCP_CONFIG` (same format; it can add servers but not override the global ones; a missing or invalid file is reported on stderr and ignored).
+
 **Commands:** `/mcp` (server status), `/mcp <name>` (detail + stderr log), `/mcp:start <name>`, `/mcp:stop <name>`, `/mcp:auth <name>` (OAuth).
 
 Vendored from the MIT-licensed [`pi-mcp-extension`](https://github.com/irahardianto/pi-mcp-extension) by irahardianto, adapted for phi (native `.phi` config, shipped bundled).
