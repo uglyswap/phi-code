@@ -84,10 +84,20 @@ function expectedDir() {
 	return join(cacheRoot(), platformKey());
 }
 
+/** The launcher inside the extracted tree: same names as LAUNCH_FILE and getPath() in src/pkgman.ts. */
+function launcherPath(binDir) {
+	if (process.platform === "win32") return join(binDir, "camoufox.exe");
+	if (process.platform === "darwin") return join(binDir, "Camoufox.app", "Contents", "MacOS", "camoufox");
+	return join(binDir, "camoufox-bin");
+}
+
 function isAlreadyInstalled() {
 	const dir = expectedDir();
 	const versionFile = join(dir, "camoufox-bin", "version.json");
 	if (!existsSync(versionFile)) return false;
+	// version.json alone is not enough: a launcher removed afterwards (antivirus
+	// quarantine, partial cleanup) would make every browser launch fail.
+	if (!existsSync(launcherPath(join(dir, "camoufox-bin")))) return false;
 	try {
 		const parsed = JSON.parse(readFileSync(versionFile, "utf-8"));
 		return parsed?.version === UPSTREAM_VERSION && parsed?.release === UPSTREAM_RELEASE;
