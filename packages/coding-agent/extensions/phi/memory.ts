@@ -249,6 +249,19 @@ export default function memoryExtension(pi: ExtensionAPI) {
 	});
 
 	/**
+	 * Awaits the startup init, then makes sure the vector store is usable: VectorStore.init()
+	 * returns at once when it is ready and, after a failed startup attempt (e.g. vectors.db
+	 * locked by another phi process longer than the lock wait), tries again instead of
+	 * leaving the whole run without vectors.
+	 */
+	const ensureMemoryReady = async (): Promise<void> => {
+		await memoryReady;
+		await sigmaMemory.vectors.init().catch(() => {
+			// Still unavailable: the calling tool reports it (search falls back to notes).
+		});
+	};
+
+	/**
 	 * Memory search tool - Unified search across notes, ontology, and QMD
 	 */
 	pi.registerTool({
@@ -274,7 +287,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			const { query } = params as { query: string };
 
 			try {
-				await memoryReady;
+				await ensureMemoryReady();
 				const results = await sigmaMemory.search(query);
 				type MemoryHit = (typeof results)[number];
 
@@ -435,7 +448,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				let vectorIndexed = true;
 				let vectorError: string | undefined;
 				try {
-					await memoryReady;
+					await ensureMemoryReady();
 					await sigmaMemory.vectors.addDocument(filename, finalContent);
 				} catch (error) {
 					vectorIndexed = false;
@@ -904,7 +917,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
 		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
 			try {
-				await memoryReady;
+				await ensureMemoryReady();
 				const status = await sigmaMemory.status();
 
 				let statusText = "# Memory Status\n\n";
