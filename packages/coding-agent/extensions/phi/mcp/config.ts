@@ -10,7 +10,7 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { getAgentDir } from "phi-code";
 import { z } from "zod";
 import { McpError } from "./errors.ts";
@@ -191,29 +191,70 @@ export interface LoadConfigOptions {
 }
 
 /**
- * Load and merge global (~/.phi/agent/mcp.json) and project (<cwd>/.phi/mcp.json) configs.
- * The project config is read only when `options.includeProject` is true (trusted project);
- * it can add servers but never replace a global one.
+ * Names an MCP config file supplied by the program that launched phi (e.g. an
+ * orchestrator handing each run its own connector tokens). Same format as mcp.json.
+ */
+export const CALLER_CONFIG_ENV = "PHI_MCP_CONFIG";
+
+/** Caller config problems already printed: loadConfig runs at load time and again at session_start. */
+const reportedCallerConfigErrors = new Set<string>();
+
+function reportCallerConfigError(message: string): void {
+	if (reportedCallerConfigErrors.has(message)) return;
+	reportedCallerConfigErrors.add(message);
+	console.error(`[pi-mcp] ${message}`);
+}
+
+/**
+ * The config named by PHI_MCP_CONFIG, or null when the variable is unset. A missing,
+ * unreadable or invalid file is reported on stderr and ignored: phi still starts with
+ * the global (and project) servers.
+ */
+async function loadCallerConfig(): Promise<McpConfig | null> {
+	const value = process.env[CALLER_CONFIG_ENV]?.trim();
+	if (!value) return null;
+	const path = resolve(value);
+	try {
+		const raw = await readJsonFile(path);
+		if (raw === null) {
+			reportCallerConfigError(`${CALLER_CONFIG_ENV}: ${path} does not exist; its MCP servers are ignored.`);
+			return null;
+		}
+		return parseConfig(raw, path);
+	} catch (err) {
+		const reason = err instanceof Error ? err.message : String(err);
+		reportCallerConfigError(`${CALLER_CONFIG_ENV}: cannot use ${path} (${reason}); its MCP servers are ignored.`);
+		return null;
+	}
+}
+
+/**
+ * Load and merge global (~/.phi/agent/mcp.json), caller ($PHI_MCP_CONFIG) and project
+ * (<cwd>/.phi/mcp.json) configs, in that order. The project config is read only when
+ * `options.includeProject` is true (trusted project). The caller and project configs
+ * can add servers but never replace one defined before them.
  * Returns a fully validated, merged config.
  */
 export async function loadConfig(cwd: string, options: LoadConfigOptions): Promise<McpConfig> {
 	const globalPath = join(getAgentDir(), "mcp.json");
 	const projectPath = join(cwd, ".phi", "mcp.json");
 
-	const [globalRaw, projectRaw] = await Promise.all([
+	const [globalRaw, projectRaw, callerCfg] = await Promise.all([
 		readJsonFile(globalPath),
 		options.includeProject ? readJsonFile(projectPath) : Promise.resolve(null),
+		loadCallerConfig(),
 	]);
 
-	// If neither file exists, return an empty valid config
-	if (globalRaw === null && projectRaw === null) {
+	// If no file exists, return an empty valid config
+	if (globalRaw === null && projectRaw === null && callerCfg === null) {
 		return McpConfigSchema.parse({});
 	}
 
 	const globalCfg = globalRaw !== null ? parseConfig(globalRaw, globalPath) : McpConfigSchema.parse({});
+	const baseCfg = callerCfg !== null ? mergeConfigs(globalCfg, callerCfg) : globalCfg;
 
-	if (projectRaw === null) return globalCfg;
+	if (projectRaw === null) return baseCfg;
 
 	const projectCfg = parseConfig(projectRaw, projectPath);
-	return mergeConfigs(globalCfg, projectCfg);
+	return mergeConfigs(baseCfg, projectCfg);
 }
