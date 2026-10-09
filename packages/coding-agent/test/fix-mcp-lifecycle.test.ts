@@ -127,7 +127,7 @@ describe("fix-mcp: extension wiring", () => {
 		expect(notify).toHaveBeenCalledWith(expect.stringContaining("config error"), "error");
 	});
 
-	it("session_start does not wait for eager servers to connect", async () => {
+	it("with a UI, session_start does not wait for eager servers to connect", async () => {
 		mkdirSync(agentDir, { recursive: true });
 		writeFileSync(
 			join(agentDir, "mcp.json"),
@@ -138,7 +138,8 @@ describe("fix-mcp: extension wiring", () => {
 		);
 		const { events, commands } = await loadExtension();
 		const notify = vi.fn();
-		const ctx = fakeCtx(notify);
+		// Interactive session: the headless wait for eager servers (PHI_MCP_STARTUP_WAIT_MS) does not apply.
+		const ctx = { ...fakeCtx(notify), hasUI: true };
 		const started = Date.now();
 		await events.get("session_start")?.({}, ctx);
 		expect(Date.now() - started).toBeLessThan(1000);

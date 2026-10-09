@@ -73,6 +73,30 @@ function errorMessage(err: unknown): string {
 	return err instanceof McpError ? err.userMessage : err instanceof Error ? err.message : String(err);
 }
 
+/** Default bound of the headless wait for eager servers; PHI_MCP_STARTUP_WAIT_MS overrides it. */
+const DEFAULT_MCP_STARTUP_WAIT_MS = 15_000;
+
+/** PHI_MCP_STARTUP_WAIT_MS in ms (0 disables the wait); the default when unset or invalid. */
+export function mcpStartupWaitMs(env: NodeJS.ProcessEnv = process.env): number {
+	const raw = env.PHI_MCP_STARTUP_WAIT_MS?.trim();
+	if (!raw) return DEFAULT_MCP_STARTUP_WAIT_MS;
+	const value = Number(raw);
+	return Number.isFinite(value) && value >= 0 ? value : DEFAULT_MCP_STARTUP_WAIT_MS;
+}
+
+/** Resolves when `promise` settles or after `ms`, whichever comes first. */
+async function waitAtMost(promise: Promise<unknown>, ms: number): Promise<void> {
+	let timer: NodeJS.Timeout | undefined;
+	const timeout = new Promise<void>((resolve) => {
+		timer = setTimeout(resolve, ms);
+	});
+	try {
+		await Promise.race([promise, timeout]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 /** Ask for a stdio or remote server entry; undefined when the user cancels. */
 async function promptServerEntry(ctx: ExtensionCommandContext): Promise<Record<string, unknown> | undefined> {
 	const transport = await ctx.ui.select("Transport", ["stdio (local command)", "http (remote URL)"]);
@@ -237,16 +261,18 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		const eagerServers = Object.entries(sessionConfig.mcpServers).filter(([, cfg]) => cfg.lifecycle === "eager");
 
 		// Connect eager servers in the background: retries can take ~50 s per server
-		// and must not block session startup. Failures are reported when they settle.
+		// and must not block an interactive session. Failures are reported when they settle.
 		const notify = (message: string): void => {
 			if (generation !== sessionGeneration) return;
+			// Without a UI (print / json mode) ctx.ui.notify is a no-op: stderr is the only channel.
+			if (!ctx.hasUI) console.error(message.replace(/^pi-mcp: /, "[pi-mcp] "));
 			try {
 				ctx.ui.notify(message, "error");
 			} catch (err) {
 				console.error(`[pi-mcp] ${message} (${err instanceof Error ? err.message : String(err)})`);
 			}
 		};
-		void Promise.allSettled(
+		const connecting = Promise.allSettled(
 			eagerServers.map(async ([name]) => {
 				try {
 					await manager.startServer(name, ctx.cwd);
@@ -255,6 +281,11 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 				}
 			}),
 		);
+		// Without a UI the first prompt is sent as soon as session_start returns: wait
+		// (bounded) so the eager servers' tools are part of the very first request.
+		if (!ctx.hasUI && eagerServers.length > 0) {
+			await waitAtMost(connecting, mcpStartupWaitMs());
+		}
 	});
 
 	pi.on("session_shutdown", async (_event, _ctx: ExtensionContext) => {
