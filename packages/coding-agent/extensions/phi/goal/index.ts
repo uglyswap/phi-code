@@ -103,16 +103,25 @@ const goalCompleteTool = defineTool({
 	}),
 	async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 		const completedGoal = activeGoal;
-		if (completedGoal) {
-			activeGoal = transitionGoal(completedGoal, "complete");
-			updateGoalUsage(activeGoal, ctx);
-			persistGoal(activeGoal);
-		}
-
-		const goal = completedGoal?.text ?? "unknown goal";
 		const summary = params.summary.trim();
+		if (!completedGoal) {
+			// Nothing to complete: a tool error lets the model go on and give its final
+			// answer, where terminate: true used to end the run without one.
+			return {
+				content: [
+					{ type: "text", text: "No /goal is active: there is nothing to complete. Finish your answer normally." },
+				],
+				details: { goal: "none", summary } satisfies GoalCompleteDetails,
+				isError: true,
+			};
+		}
+		activeGoal = transitionGoal(completedGoal, "complete");
+		updateGoalUsage(activeGoal, ctx);
+		persistGoal(activeGoal);
 
-		ctx.ui.setStatus(STATUS_KEY, completedGoal ? formatStatus(activeGoal) : undefined);
+		const goal = completedGoal.text;
+
+		ctx.ui.setStatus(STATUS_KEY, formatStatus(activeGoal));
 		clearActiveGoal(ctx);
 		showCompletionStatus(ctx);
 		ctx.ui.notify(`Goal complete: ${goal}`, "info");
